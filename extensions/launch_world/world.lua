@@ -1151,7 +1151,8 @@ last_mark_ink = 0
 -- between "-Z at the viewer" and "the middle of the UV map at the
 -- viewer", measured on Sphere.mdl (see the turn below). One table,
 -- since this chunk is at Lua's limit of 200 locals.
-local ONE_BIT = {AT = 0.5, FACE_YAW = 270, INK = 0.16, T_LO = 0.02,
+local ONE_BIT = {AT = 0.5, INK = 0.16, T_LO = 0.02,
+		FACE_YAW = tonumber(env("BUILDAT_LAUNCH_FACE_YAW")) or 270,
 		T_HI = 0.60, T_STEP = 0.01,
 		-- **What survives under the mark on a glowing orb**
 		-- ([GLOW_MARK], picked off the sheet 2026-09-24), stated as the
@@ -2564,7 +2565,7 @@ function handle_probe_update()
 		s:QueueUpdate()
 	end
 end
-magic.SubscribeToEvent("Update", "handle_probe_update")
+magic.SubscribeToEvent("Update", function(t, d) handle_probe_update(t, d) end)
 
 -- **What a change of screen mode takes with it** ([BOX_PLAYTEST_3] (1),
 -- the same fault the Luanti client had). F11, and anything else that
@@ -2582,7 +2583,7 @@ magic.SubscribeToEvent("Update", "handle_probe_update")
 function handle_device_update()
 	atlas_reg:update()
 end
-magic.SubscribeToEvent("Update", "handle_device_update")
+magic.SubscribeToEvent("Update", function(t, d) handle_device_update(t, d) end)
 
 -- The probe has no image to put back -- it is a render target, and what
 -- was in it is gone -- so it is drawn again, by the same two bakes the
@@ -2957,7 +2958,7 @@ function handle_camera_update(event_type, event_data)
 		pointed_orb = -1
 	end
 end
-magic.SubscribeToEvent("Update", "handle_camera_update")
+magic.SubscribeToEvent("Update", function(t, d) handle_camera_update(t, d) end)
 
 -- **What the room's own frames cost** (2026-09-26): the first half
 -- minute after a start reads badly and nothing in the room said so.
@@ -3023,7 +3024,7 @@ function handle_frame_watch(event_type, event_data)
 	end
 	frame_watch.worst = 0
 end
-magic.SubscribeToEvent("Update", "handle_frame_watch")
+magic.SubscribeToEvent("Update", function(t, d) handle_frame_watch(t, d) end)
 
 -- **One mode** ([LAUNCH_WORLD] stage 2, section 11): point-and-click
 -- with the keyboard, the mouse always free. The proof's FPS body -- the
@@ -3154,7 +3155,7 @@ function handle_room_update(event_type, event_data)
 	-- handler below reads the answer it left.
 	hand_over_if_needed()
 end
-magic.SubscribeToEvent("Update", "handle_room_update")
+magic.SubscribeToEvent("Update", function(t, d) handle_room_update(t, d) end)
 
 -- **The launcher's own storage** ([LAUNCH_SANDBOX]): one name, and the
 -- client puts it under this launch extension's directory. The room used
@@ -3338,7 +3339,7 @@ function handle_save_update()
 		write_save()
 	end
 end
-magic.SubscribeToEvent("Update", "handle_save_update")
+magic.SubscribeToEvent("Update", function(t, d) handle_save_update(t, d) end)
 
 
 -- **The name is an overlay, not geometry** ([ORB_LABEL], user
@@ -3505,30 +3506,41 @@ function handle_wall_labels()
 				-- right of its middle, which clears every size there is
 				local e = cc:WorldToScreenPoint(magic.Vector3(p.x - 1.5,
 						p.y, p.z))
+				-- The text's height and colour asked and set only when
+				-- they change: each is a sandboxed call ([FRAME_WORK])
+				l.h = l.h or l.text.height
 				local x = math.floor(e.x * lw + 4)
-				local y = math.floor(c.y * lh - l.text.height / 2)
+				local y = math.floor(c.y * lh - l.h / 2)
 				l.text:SetPosition(x, y)
 				-- The one browsed or pointed at is lit, and its caption
 				-- hangs under it, left-aligned with it
 				local lit = l.b == label_orb
-				l.text:SetColor(lit and magic.Color(1.0, 0.82, 0.45, 1) or
-						(ORBS[l.b] and ORBS[l.b].empty and
-						magic.Color(0.75, 0.62, 0.45, 1) or
-						magic.Color(0.92, 0.90, 0.86, 1)))
+				local tone = lit and "lit" or (ORBS[l.b] and ORBS[l.b].empty and
+						"empty" or "full")
+				if l.tone ~= tone then
+					l.tone = tone
+					l.text:SetColor(lit and magic.Color(1.0, 0.82, 0.45, 1) or
+							(tone == "empty" and
+							magic.Color(0.75, 0.62, 0.45, 1) or
+							magic.Color(0.92, 0.90, 0.86, 1)))
+				end
 				if lit and desc_text.visible then
 					-- The caption is centred by its alignment: from the
 					-- middle of the root, and its own middle
 					desc_text:SetPosition(
 							math.floor(x - lw / 2 + desc_text.width / 2),
-							math.floor(y + l.text.height + 2 - lh / 2 +
+							math.floor(y + l.h + 2 - lh / 2 +
 							desc_text.height / 2))
 				end
 			end
 		end
-		l.text.visible = show
+		if l.shown ~= show then
+			l.shown = show
+			l.text.visible = show
+		end
 	end
 end
-magic.SubscribeToEvent("Update", "handle_wall_labels")
+magic.SubscribeToEvent("Update", function(t, d) handle_wall_labels(t, d) end)
 
 pointed_orb = 0
 -- How near the pointer counts as on an orb, as a fraction of the screen
@@ -3587,6 +3599,8 @@ end
 room_menu_button = require("buildat/extension/ui_utils")
 room_menu_button = (room_menu_button.safe or room_menu_button)
 		.menu_button(magic.ui.root, close_room, {close = true})
+-- Each orb's facing: {node, x, y, z (the view's), left (s), q}
+orb_face = {}
 function handle_orb_update(event_type, event_data)
 	room_menu_button.visible = not (launching or screen_taken())
 	-- **An animation stands down for a screen on top of the room and
@@ -3610,12 +3624,18 @@ function handle_orb_update(event_type, event_data)
 	end
 	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
 	local best, best_score, best_dot, best_up = 0, math.huge, -1, false
+	-- The view's and each orb's components read once: a field of a
+	-- vector is a sandboxed call, and the samples below read them 30
+	-- times an orb ([FRAME_WORK])
+	local fx, fy, fz = view_from.x, view_from.y, view_from.z
+	local vx, vy, vz = view_dir.x, view_dir.y, view_dir.z
 	-- Not ipairs: an empty niche leaves a hole in the list and ipairs
 	-- stops at it, which would hide every orb past the empty one
 	for i = 1, #orb_places do
 		local node = orb_nodes[i]
 		if node then
 			local p = node.position
+			local px, py, pz = p.x, p.y, p.z
 			-- **The selection volume is not the drawn volume** (user,
 			-- 2026-09-23): close to a floor orb a player points *over*
 			-- it, since that is where the horizon sits comfortably, and
@@ -3637,8 +3657,8 @@ function handle_orb_update(event_type, event_data)
 			-- of about ten, which is the distance a player reaches
 			-- from. The radius is what the orb was drawn at.
 			local r = 0.5 * orb_across(ORBS[i])
-			local bottom = p.y - r
-			local top = p.y + r
+			local bottom = py - r
+			local top = py + r
 			-- **Measured against the orb's own size, not by the angle
 			-- alone** ([POINT_LOW]'s other half, 2026-09-25): a dot
 			-- says nothing about how big a thing looks, so a distant
@@ -3651,17 +3671,15 @@ function handle_orb_update(event_type, event_data)
 			local score, dot, up = math.huge, -1, false
 			for k = 0, 4 do
 				local y = bottom + (top - bottom) * (k / 4)
-				local dx, dy, dz = p.x - view_from.x, y - view_from.y,
-						p.z - view_from.z
+				local dx, dy, dz = px - fx, y - fy, pz - fz
 				local l = math.sqrt(dx * dx + dy * dy + dz * dz)
-				local d = (dx * view_dir.x + dy * view_dir.y +
-						dz * view_dir.z) / l
+				local d = (dx * vx + dy * vy + dz * vz) / l
 				local s = math.huge
 				if d > 0 and r > 0 then
 					s = math.sqrt(math.max(0, 1 - d * d)) * l / r
 				end
 				if s < score then
-					score, dot, up = s, d, y > p.y
+					score, dot, up = s, d, y > py
 				end
 			end
 			if score < best_score then
@@ -3677,9 +3695,6 @@ function handle_orb_update(event_type, event_data)
 			-- now). The scratch node is where the target rotation comes
 			-- from: LookAt is the only way to build one, and reading it
 			-- off a node nobody draws costs nothing.
-			turner.position = p
-			turner:LookAt(magic.Vector3(view_from.x * 2 - p.x,
-					view_from.y * 2 - p.y, view_from.z * 2 - p.z))
 			-- Frame-rate independent: the same fraction of the way there
 			-- every second, whatever the frame took
 			-- **Where the middle of the UV map actually is** (user,
@@ -3692,12 +3707,29 @@ function handle_orb_update(event_type, event_data)
 			-- So the middle of `Sphere.mdl`'s UVs is a quarter turn
 			-- round from -Z, and this is that quarter -- named, so the
 			-- next model is a new measurement rather than a mystery.
-			-- BUILDAT_LAUNCH_FACE_YAW is how it gets measured again.
-			local extra = tonumber(env("BUILDAT_LAUNCH_FACE_YAW")) or
-					ONE_BIT.FACE_YAW
-			node.rotation = node.rotation:Slerp(
-					turner.rotation * magic.Quaternion(0, extra, 0),
-					1 - math.exp(-7.0 * dt))
+			-- BUILDAT_LAUNCH_FACE_YAW is how it gets measured again (read
+			-- at load).
+			-- **Turned to where the view was when it moved** ([FRAME_WORK]:
+			-- the look and the slerp were ~90 us an orb a frame): the target
+			-- made again when the view moves, and turned to for 3 s
+			-- (e^-21 of the way left); the bob under it is ignored.
+			local f = orb_face[i]
+			if not f or f.node ~= node or f.x ~= fx or f.y ~= fy or
+					f.z ~= fz then
+				turner.position = p
+				turner:LookAt(magic.Vector3(fx * 2 - px, fy * 2 - py,
+						fz * 2 - pz))
+				f = {node = node, x = fx, y = fy, z = fz, left = 3,
+						q = turner.rotation *
+						magic.Quaternion(0, ONE_BIT.FACE_YAW, 0)}
+				orb_face[i] = f
+			end
+			if f.left > 0 then
+				f.left = f.left - dt
+				node.rotation = f.left > 0 and
+						node.rotation:Slerp(f.q, 1 - math.exp(-7.0 * dt)) or
+						f.q
+			end
 		end
 	end
 	-- **What is browsed is what is pointed at** ([LAUNCH_WORLD] stage 2):
@@ -3738,7 +3770,7 @@ function handle_orb_update(event_type, event_data)
 	end
 	label_place()
 end
-magic.SubscribeToEvent("Update", "handle_orb_update")
+magic.SubscribeToEvent("Update", function(t, d) handle_orb_update(t, d) end)
 
 
 -- simplified: the pointer is read where it is clicked, not followed.
@@ -3986,7 +4018,7 @@ function handle_synth_update(event_type, event_data)
 		end
 	end
 end
-magic.SubscribeToEvent("Update", "handle_synth_update")
+magic.SubscribeToEvent("Update", function(t, d) handle_synth_update(t, d) end)
 
 -- **The dissolve**: a bay un-builds into flying slabs, and it is the
 -- only transition there is. The voxels stop being there -- the server is
@@ -4152,7 +4184,7 @@ function handle_dissolve_update(event_type, event_data)
 		end
 	end
 end
-magic.SubscribeToEvent("Update", "handle_dissolve_update")
+magic.SubscribeToEvent("Update", function(t, d) handle_dissolve_update(t, d) end)
 
 -- **Nothing is ever static.** The era this room refers to treated a
 -- still frame as a bug: idle rotation, breathing, drift. So the orbs
@@ -4317,7 +4349,7 @@ function handle_idle_update(event_type, event_data)
 		n.rotation = magic.Quaternion(0, idle_t * (4 + i * 1.3) % 360, 0)
 	end
 end
-magic.SubscribeToEvent("Update", "handle_idle_update")
+magic.SubscribeToEvent("Update", function(t, d) handle_idle_update(t, d) end)
 
 
 
@@ -5403,7 +5435,7 @@ function handle_launch_anim(event_type, event_data)
 	end
 	anim_camera(a)
 end
-magic.SubscribeToEvent("Update", "handle_launch_anim")
+magic.SubscribeToEvent("Update", function(t, d) handle_launch_anim(t, d) end)
 
 -- Back in the room: the orb in its pocket, its light and colour as the
 -- preset has them, the white gone
@@ -5982,7 +6014,10 @@ if env("BUILDAT_LAUNCH_STILL") ~= "" then room_switch("still") end
 -- hands these on as the extension's own.
 -- **Where a frame goes, while the room is young** (2026-09-26): each
 -- handler wrapped by name, since the sandbox has no _G to walk. Off
--- unless BUILDAT_LAUNCH_FRAME_TRACE is set: this is a measurement.
+-- unless BUILDAT_LAUNCH_FRAME_TRACE is set: this is a measurement. The
+-- handlers are subscribed through a closure for it: SubscribeToEvent
+-- looks a name up when subscribing, and the wrapped ones went uncalled
+-- ([FRAME_WORK], 2026-10-08).
 ;(function()
 	if env("BUILDAT_LAUNCH_FRAME_TRACE") == "" then
 		return
@@ -6002,13 +6037,17 @@ if env("BUILDAT_LAUNCH_STILL") ~= "" then room_switch("still") end
 	handle_synth_update = timed("synth", handle_synth_update)
 	handle_dissolve_update = timed("dissolve", handle_dissolve_update)
 	handle_idle_update = timed("idle", handle_idle_update)
+	handle_wall_labels = timed("wall_labels", handle_wall_labels)
+	handle_device_update = timed("device", handle_device_update)
+	handle_frame_watch = timed("frame_watch", handle_frame_watch)
+	handle_save_update = timed("save", handle_save_update)
+	handle_launch_anim = timed("launch_anim", handle_launch_anim)
 	handle_frame_trace = function(event_type, event_data)
 		frame_trace.due = frame_trace.due - event_data:GetFloat("TimeStep")
 		if frame_trace.due > 0 then
 			return
 		end
 		frame_trace.due = 1.0
-		local parts = {}
 		for n, us in pairs(frame_trace.us) do
 			if us > 500 then
 				parts[#parts + 1] = string.format("%s %.0f", n, us / 1000)

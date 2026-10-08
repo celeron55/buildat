@@ -13,6 +13,7 @@
 #include <luabind/adopt_policy.hpp>
 #include <luabind/pointer_traits.hpp>
 #include <VectorBuffer.h>
+#include <cmath>
 #define MODULE "lua_bindings"
 
 namespace magic = Urho3D;
@@ -713,6 +714,28 @@ void write_floats(const luabind::object &buffer_o,
 	}
 }
 
+// The same as 16-bit samples, each floored and clamped: a sound a script
+// makes is a WriteShort() a sample otherwise, ~2.8 us each in the sandbox,
+// which was most of the launch room's synth ([FRAME_WORK]).
+void write_shorts(const luabind::object &buffer_o,
+		const luabind::object &values_o, lua_State *L)
+{
+	TRY_GET_SANDBOX_STUFF(buf, 1, VectorBuffer);
+	if(buf == nullptr)
+		throw Exception("write_shorts(): first argument is not a VectorBuffer");
+	if(!values_o || luabind::type(values_o) != LUA_TTABLE)
+		throw Exception("write_shorts(): second argument is not a table");
+
+	buf->Clear();
+	for(size_t i = 1;; i++){
+		luabind::object v = values_o[i];
+		if(!v || luabind::type(v) != LUA_TNUMBER)
+			break;
+		double d = std::floor(luabind::object_cast<double>(v));
+		buf->WriteShort((short)(d < -32768 ? -32768 : d > 32767 ? 32767 : d));
+	}
+}
+
 #define LUABIND_FUNC(name) def("__buildat_" #name, name)
 
 void init_voxel_volume(lua_State *L)
@@ -772,7 +795,8 @@ void init_voxel_volume(lua_State *L)
 		LUABIND_FUNC(cast_voxel_rays),
 		LUABIND_FUNC(cast_voxel_rays_start),
 		LUABIND_FUNC(cast_voxel_rays_collect),
-		LUABIND_FUNC(write_floats)
+		LUABIND_FUNC(write_floats),
+		LUABIND_FUNC(write_shorts)
 	];
 }
 

@@ -250,6 +250,8 @@ buildat.cast_voxel_rays_collect(handle) -> nil until done, then the results
   job's lifetime.
 buildat.write_floats(vector_buffer, values)
 - The values into the buffer as floats, replacing what was in it
+buildat.write_shorts(vector_buffer, values)
+- The same as 16-bit samples, each floored and clamped to -32768..32767
 
 
 The extension environment

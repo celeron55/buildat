@@ -128,6 +128,19 @@ local function sine(phase)
 end
 local PENTA = {0, 2, 4, 7, 9, 12, 14, 16}
 
+-- A block's samples into its buffer at once ([FRAME_WORK]: a WriteShort()
+-- is a sandboxed call each, ~70% of a block's time); one at a time on a
+-- client without write_shorts
+local function write_block(buf, out)
+	if buildat.write_shorts then
+		return buildat.write_shorts(buf, out)
+	end
+	buf:Clear()
+	for i = 1, #out do
+		buf:WriteShort(math.floor(out[i]))
+	end
+end
+
 function M.new(magic, log, style)
 	local s = {
 		style = M.STYLES[style or ""] and style or "today",
@@ -167,6 +180,7 @@ function M.new(magic, log, style)
 	-- An underrun is a gap, not the end of the sound
 	s.stream.stopAtEnd = false
 	s.buffer = magic.VectorBuffer:new()
+	s.out = {}       -- a block's samples, for write_block
 
 	-- A cheap white noise: the same xorshift the ornament uses, which is
 	-- as random as a hat needs
@@ -211,7 +225,7 @@ function M.new(magic, log, style)
 	-- The soft styles' block: no beat, no drone, a pad or the bells, and
 	-- the softened thunk and beep
 	function s:fill_soft()
-		local buf = self.buffer
+		local buf, out = self.buffer, self.out
 		buf:Clear()
 		local cfg = SOFT[self.style]
 		if self.thunk_wanted then
@@ -302,8 +316,9 @@ function M.new(magic, log, style)
 				self.beep_age = self.beep_age + 1
 			end
 			x = x / (1 + math.abs(x))
-			buf:WriteShort(math.floor(x * 20000))
+			out[i + 1] = x * 20000
 		end
+		write_block(buf, out)
 		self.t = self.t + BLOCK
 		self.stream:AddData(buf)
 	end
@@ -466,7 +481,7 @@ function M.new(magic, log, style)
 		if self.style ~= "today" then
 			return self:fill_soft()
 		end
-		local buf = self.buffer
+		local buf, out = self.buffer, self.out
 		buf:Clear()
 		local step_len = RATE * CYCLE / STEPS
 		if self.thunk_wanted then
@@ -570,8 +585,9 @@ function M.new(magic, log, style)
 					pat + drone * up * (1 - 0.35 * pat) + thunk * 0.8 +
 					beep * 0.22
 			x = x / (1 + math.abs(x))
-			buf:WriteShort(math.floor(x * 20000))
+			out[i + 1] = x * 20000
 		end
+		write_block(buf, out)
 		self.t = self.t + BLOCK
 		self.stream:AddData(buf)
 	end
