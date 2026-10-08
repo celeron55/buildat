@@ -150,6 +150,7 @@ struct Module: public interface::Module
 	{
 		game_settings_self_check();
 		perf_self_check();
+		interface::launch_param_self_check();
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("luanti:game_loaded"));
@@ -890,22 +891,12 @@ struct Module: public interface::Module
 	// a directory name has, or "" with a warning. The lines are key=value.
 	ss_ launch_param(const ss_ &key_name)
 	{
-		const ss_ u = m_launch_sent ? m_launch :
-				m_server->get_config().get<ss_>("untrusted_launch");
-		const ss_ key = key_name + "=";
-		size_t at = u.find(key);
-		if(at == ss_::npos || !(at == 0 || u[at - 1] == '\n'))
-			return "";
-		ss_ v = u.substr(at + key.size());
-		v = v.substr(0, v.find('\n'));
-		bool ok = !v.empty() && v.size() <= 64;
-		for(char c : v)
-			if(!(isalnum((unsigned char)c) || c == '_' || c == '-'))
-				ok = false;
-		if(!ok){
+		bool refused = false;
+		const ss_ v = interface::launch_param(m_launch_sent ? m_launch :
+				m_server->get_config().get<ss_>("untrusted_launch"), key_name,
+				&refused);
+		if(refused)
 			log_w(MODULE, "untrusted_launch: %s refused", cs(key_name));
-			return "";
-		}
 		return v;
 	}
 

@@ -598,17 +598,8 @@ struct Module: public interface::Module, public Interface
 	// ([LAUNCH_GRID]), read as a packet would be
 	ss_ launch_param(const ss_ &key_name)
 	{
-		const ss_ u = m_server->get_config().get<ss_>("untrusted_launch");
-		const ss_ key = key_name + "=";
-		size_t at = u.find(key);
-		if(at == ss_::npos || !(at == 0 || u[at - 1] == '\n'))
-			return "";
-		ss_ v = u.substr(at + key.size());
-		v = v.substr(0, v.find('\n'));
-		for(char c : v)
-			if(!(isalnum((unsigned char)c) || c == '_' || c == '-'))
-				return "";
-		return v;
+		return interface::launch_param(
+				m_server->get_config().get<ss_>("untrusted_launch"), key_name);
 	}
 
 	void on_start()
