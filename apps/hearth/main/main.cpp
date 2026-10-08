@@ -1556,8 +1556,10 @@ struct Module: public interface::Module
 		}
 		if(!m_db)
 			return respond(r, 503, page("Hearth", "<p>Starting.</p>"));
-		if((r.path == "/search" && !allowed(r.address, SEARCHES_A_MINUTE)) ||
-				!allowed("page "+r.address, PAGES_A_MINUTE))
+		// By the /64 for v6 ([DUAL_STACK])
+		const ss_ from = network::address_key(r.address);
+		if((r.path == "/search" && !allowed(from, SEARCHES_A_MINUTE)) ||
+				!allowed("page "+from, PAGES_A_MINUTE))
 			return respond(r, 429, page("Hearth", "<p>Too many requests "
 					"from this address; try again in a minute.</p>"));
 		// **The launcher's mark** ([FORUM] 4): a POST of {name, token}, the

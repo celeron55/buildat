@@ -1083,7 +1083,7 @@ struct Module: public interface::Module
 				return;
 			}
 		} else {
-			if(!rate_ok("new_listing", r.address, 5, 86400)){
+			if(!rate_ok("new_listing", network::address_key(r.address), 5, 86400)){
 				refuse(r, "too many new listings from this address today");
 				return;
 			}
@@ -1442,7 +1442,7 @@ struct Module: public interface::Module
 
 	void api_list(const network::HttpRequest &r, const json::Value &b)
 	{
-		if(!rate_ok("list", r.address, 60, 60)){
+		if(!rate_ok("list", network::address_key(r.address), 60, 60)){
 			refuse(r, "listed too often");
 			return;
 		}
@@ -1571,7 +1571,7 @@ struct Module: public interface::Module
 
 	void api_report(const network::HttpRequest &r, const json::Value &b)
 	{
-		if(!rate_ok("report_addr", r.address, 10, 3600)){
+		if(!rate_ok("report_addr", network::address_key(r.address), 10, 3600)){
 			refuse(r, "too many reports from this address; try later");
 			return;
 		}
@@ -1925,7 +1925,7 @@ struct Module: public interface::Module
 	void api_report_status(const network::HttpRequest &r, const json::Value &b)
 	{
 		// Up to a hundred lookups a request, and nobody needs to log in
-		if(!rate_ok("report_status", r.address, 30, 60)){
+		if(!rate_ok("report_status", network::address_key(r.address), 30, 60)){
 			refuse(r, "asked too often");
 			return;
 		}
@@ -1960,7 +1960,7 @@ struct Module: public interface::Module
 	void api_transparency(const network::HttpRequest &r)
 	{
 		// Every report read, for anyone: once a few seconds an address
-		if(!rate_ok("transparency", r.address, 10, 60)){
+		if(!rate_ok("transparency", network::address_key(r.address), 10, 60)){
 			refuse(r, "asked too often");
 			return;
 		}
@@ -2087,7 +2087,7 @@ struct Module: public interface::Module
 	void front_page(const network::HttpRequest &r)
 	{
 		using interface::web_brand::html;
-		if(!rate_ok("page", r.address, 30, 60)){
+		if(!rate_ok("page", network::address_key(r.address), 30, 60)){
 			network::access(m_server, [&](network::Interface *iface){
 				iface->http_respond(r.peer, 429, "text/plain",
 						"Too many requests; try again in a minute.\n");
@@ -2570,7 +2570,8 @@ struct Module: public interface::Module
 			const ss_ name = jstr(b, "name");
 			const json::Value o = load("operators", name);
 			if(!rate_ok("id_reset", name, 3, 86400) ||
-					!rate_ok("id_reset_addr", r.address, 10, 86400))
+					!rate_ok("id_reset_addr",
+						network::address_key(r.address), 10, 86400))
 				throw Exception("too many resets; try later");
 			// Said the same whether or not there is an address, so a
 			// name's e-mail cannot be probed
@@ -3318,13 +3319,19 @@ struct Module: public interface::Module
 	// -- 10d. Bans shared: blocklists
 
 	// A server's whole current set of reported bans: kept as its own, and
-	// a ban new to it is a report about the ID for a moderator
+	// a ban new to it is a report about the ID for a moderator -- once:
+	// a ban dropped and announced again is not news for 30 days
+	// (ban_reported, a key a listing and an identity this Starport gave
+	// in its scope; simplified: not pruned, bounded by those identities)
 	void take_bans(const json::Value &l, const json::Value &bans)
 	{
 		if(!bans.is_array())
 			return;
 		const ss_ scope = scope_of(l);
 		const json::Value old = load("listing_bans", jstr(l, "id"));
+		std::set<ss_> was;
+		for(unsigned j = 0; old.is_array() && j < old.size(); j++)
+			was.insert(jstr(old.at(j), "sub"));
 		json::Value now = json::array();
 		for(unsigned i = 0; i < bans.size() && i < 10000; i++){
 			const json::Value &x = bans.at(i);
@@ -3338,11 +3345,15 @@ struct Module: public interface::Module
 			ss_ reason = jstr(x, "reason");
 			e.set("reason", reason);
 			now.append(e);
-			bool was = false;
-			for(unsigned j = 0; old.is_array() && j < old.size(); j++)
-				was |= jstr(old.at(j), "sub") == sub;
-			if(was)
+			if(was.count(sub))
 				continue;
+			const ss_ rkey = jstr(l, "id")+"|"+sub;
+			const json::Value seen = load("ban_reported", rkey);
+			if(seen.is_object() && now_s() - jint(seen, "ts") < 30 * 86400)
+				continue;
+			json::Value mark = json::object();
+			mark.set("ts", now_s());
+			put("ban_reported", rkey, mark);
 			if(!in_set(reason, REASONS))
 				reason = "other";
 			json::Value rep = json::object();

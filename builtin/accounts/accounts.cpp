@@ -928,7 +928,8 @@ struct Module: public interface::Module, public Interface
 		m_store->set("ban/"+name, pack(b));
 		if(m_access.open_registration)
 			for(PeerId p : peers)
-				m_store->set("banaddr/"+address_of(p), name);
+				m_store->set("banaddr/"+network::address_key(address_of(p)),
+						name);
 		log_i(MODULE, "%s banned %s (%s)", cs(by), cs(name), cs(b.address));
 		for(PeerId p : peers)
 			kick(p, "banned by "+by);
@@ -956,17 +957,28 @@ struct Module: public interface::Module, public Interface
 		}
 		if(m_store->get("ban/"+name_or_address, data)){
 			Ban b;
-			if(unpack(data, b) && !b.address.empty())
+			if(unpack(data, b) && !b.address.empty()){
 				m_store->remove("banaddr/"+b.address);
+				m_store->remove("banaddr/"+network::address_key(b.address));
+			}
 			m_store->remove("ban/"+name_or_address);
 			// Off the Starports at the next announce, too (10d)
 			m_store->remove("ban_report/"+name_or_address);
 			found = true;
 		}
-		if(m_store->get("banaddr/"+name_or_address, data)){
-			m_store->remove("banaddr/"+name_or_address);
-			m_store->remove("ban/"+data);
-			m_store->remove("ban_report/"+data);
+		// An address as it was saved, or by its key ([DUAL_STACK])
+		ss_ banned_name;
+		for(const ss_ &k : {"banaddr/"+name_or_address,
+				"banaddr/"+network::address_key(name_or_address)}){
+			ss_ n;
+			if(m_store->get(k, n)){
+				m_store->remove(k);
+				banned_name = n;
+			}
+		}
+		if(!banned_name.empty()){
+			m_store->remove("ban/"+banned_name);
+			m_store->remove("ban_report/"+banned_name);
 			found = true;
 		}
 		if(!found)
@@ -1004,8 +1016,10 @@ struct Module: public interface::Module, public Interface
 		ss_ data;
 		if(m_store->get("ban/"+name, data))
 			return "You are banned from this server";
+		// The exact address too: a ban saved before [DUAL_STACK]'s key
 		if(m_access.open_registration && !address.empty() &&
-				m_store->get("banaddr/"+address, data))
+				(m_store->get("banaddr/"+network::address_key(address), data) ||
+				m_store->get("banaddr/"+address, data)))
 			return "This address is banned from this server";
 		return "";
 	}
@@ -1601,6 +1615,14 @@ struct Module: public interface::Module, public Interface
 			}
 			result(why.empty() ? r.name+" was banned" : why);
 		} else if(r.cmd == "unban"){
+			if(by_lv < LV_ADMIN){
+				ss_ data;
+				Ban b;
+				if(m_store->get("ban/"+r.name, data) && unpack(data, b) &&
+						level(b.by) >= by_lv)
+					return result("Banned by "+b.by+"; only the "+
+							level_name(LV_ADMIN)+" lifts it");
+			}
 			const ss_ why = unban(r.name, "");
 			result(why.empty() ? r.name+" was unbanned" : why);
 		} else if(r.cmd == "password"){
@@ -1890,6 +1912,14 @@ struct Module: public interface::Module, public Interface
 			return "Wrong code: check the app's time and try again";
 		}
 		m_store->remove("totp_pending/"+name);
+		// Kept logins made before it would log in without a code
+		for(const ss_ &key : m_store->list("token/")){
+			ss_ data;
+			KeptLogin kept;
+			if(m_store->get(key, data) && unpack(data, kept) &&
+					kept.name == name)
+				m_store->remove(key);
+		}
 		log_i(MODULE, "%s turned TOTP on", cs(name));
 		return "";
 	}
@@ -1921,7 +1951,11 @@ struct Module: public interface::Module, public Interface
 			return;
 		const ss_ name = it->second.name;
 		TotpResult r;
-		if(req.cmd == "begin"){
+		if(req.cmd == "begin" && totp_on(name)){
+			// A session (a kept login's, which skips the code) does not
+			// swap the secret for one of its own: off first, by a code
+			r.error = "TOTP is on: turn it off with a code first";
+		} else if(req.cmd == "begin"){
 			r.secret = totp_begin(name);
 			r.uri = totp_uri(name, r.secret);
 		} else if(req.cmd == "confirm"){

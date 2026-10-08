@@ -61,6 +61,14 @@ namespace network
 		return out+":/64";
 	}
 
+	// What a per-address limit or ban keys an address by: IPv4 as it is,
+	// IPv6 by its /64 ([DUAL_STACK]), which one host has 2^64 of
+	inline ss_ address_key(const ss_ &a)
+	{
+		return a.find(':') != ss_::npos && a.find('.') == ss_::npos ?
+				address_bin(a) : a;
+	}
+
 	struct PeerInfo
 	{
 		typedef PeerId Id;

@@ -963,9 +963,11 @@ struct Module: public interface::Module, public network::Interface
 		// the trusted proxies carry many players each and are not counted.
 		const ss_ from = socket->get_remote_address();
 		if(!loopback(from) && !trusted_proxy(from)){
+			const ss_ key = network::address_key(from);
 			size_t same = 0;
 			for(auto &pair : m_peers)
-				same += pair.second.socket->get_remote_address() == from;
+				same += network::address_key(
+						pair.second.socket->get_remote_address()) == key;
 			if(same >= web::MAX_PEERS_PER_ADDRESS){
 				if(m_peers_full_logged_us + 10000000 < interface::os::time_us()){
 					m_peers_full_logged_us = interface::os::time_us();
