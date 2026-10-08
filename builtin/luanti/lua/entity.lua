@@ -2155,6 +2155,19 @@ local function pos_string(pos)
 			math.floor(pos.z)
 end
 
+-- The player's formspec prepend in front of a form, unless the form says
+-- no_prepend[]: Luanti's client does that to every form it shows, and
+-- VoxeLibre's grey panel is in its prepend ([VL_INV_PARITY]). Done here
+-- because this client is sent the forms and not the prepend.
+local function prepended(playername, spec)
+	local id = players[playername]
+	local p = id and objects[id] and objects[id].formspec_prepend or ""
+	if spec == "" or p == "" or spec:find("no_prepend[", 1, true) then
+		return spec
+	end
+	return p .. spec
+end
+
 function core.show_formspec(playername, formname, formspec)
 	if type(playername) ~= "string" or type(formspec) ~= "string" then
 		return false
@@ -2163,7 +2176,8 @@ function core.show_formspec(playername, formname, formspec)
 	form_detached[playername] = detached_in_spec(formspec)
 	shown_forms[playername] = formspec ~= "" and tostring(formname or "") or
 			nil
-	__show_formspec(playername, tostring(formname or ""), formspec, "")
+	__show_formspec(playername, tostring(formname or ""),
+			prepended(playername, formspec), "")
 	return true
 end
 
@@ -2174,7 +2188,7 @@ local function show_node_formspec(playername, pos, formspec)
 	form_nodes[playername] = {x = math.floor(pos.x), y = math.floor(pos.y),
 			z = math.floor(pos.z)}
 	form_detached[playername] = detached_in_spec(formspec)
-	__show_formspec(playername, "", formspec,
+	__show_formspec(playername, "", prepended(playername, formspec),
 			pos_string(form_nodes[playername]))
 end
 
@@ -4043,10 +4057,11 @@ local function send_inventories()
 		-- The form the player's own inventory key opens, when a mod has
 		-- changed it. It is sent when it changes rather than when it is
 		-- asked for, so that opening it costs no round trip.
-		if o and o.inventory_formspec ~= o.sent_inventory_formspec then
-			o.sent_inventory_formspec = o.inventory_formspec
+		local inv_spec = o and prepended(name, o.inventory_formspec or "")
+		if o and inv_spec ~= o.sent_inventory_formspec then
+			o.sent_inventory_formspec = inv_spec
 			o.own_detached = detached_in_spec(o.inventory_formspec)
-			__player_formspec(name, o.inventory_formspec or "")
+			__player_formspec(name, inv_spec)
 		end
 	end
 end

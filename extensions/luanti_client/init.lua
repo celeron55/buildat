@@ -1394,6 +1394,9 @@ local function show_client(host, port, name, password, mode, origin)
 			if sender ~= "" then
 				line = "<"..formspec.strip_escapes(sender).."> "..line
 			end
+			-- In the log too, as vanilla's is: the one thing a fixture can
+			-- put in the client's own log for a driven run to wait on
+			log:info("chat: " .. line)
 			add_chat(line)
 		end
 
