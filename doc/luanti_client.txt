@@ -266,8 +266,10 @@ itemdef.lua     ITEMDEF: what an item is, and what a tool can dig
 inventory.lua   TOCLIENT_INVENTORY: what the player is carrying
 res/hud.lua     The HUD the server describes, and the flags that turn this
                 client's own off; the luanti module serves the same file
-sounds.lua      PLAY_SOUND and friends, and the sound groups a game's media
-                falls into
+res/sounds.lua  PLAY_SOUND and friends, and the sound groups a game's media
+                falls into; the luanti module runs its fade_step
+res/particles.lua The particle packets; the luanti module runs its
+                speed_range
 res/formspec.lua The elements of a formspec, and where they go; served by
                 the luanti module too
 res/formspec_ui.lua A formspec on the screen, as Urho3D UI elements; the luanti

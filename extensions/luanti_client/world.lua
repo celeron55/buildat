@@ -18,9 +18,9 @@
 -- world coordinates one for one. block_node_position() is the same arithmetic
 -- builtin/voxelworld does for its chunks.
 
-local sounds_proto = buildat.run_extension_file("sounds.lua")
+local sounds_proto = buildat.run_extension_file("res/sounds.lua")
 local shapes = buildat.run_extension_file("shapes.lua")
-local particles = buildat.run_extension_file("particles.lua")
+local particles = buildat.run_extension_file("res/particles.lua")
 local light_flood = buildat.run_extension_file("light.lua")
 local skyvis = buildat.run_extension_file("skyvis.lua")
 -- BUILDAT_LUANTI_NO_SPOTS=1, the reference runs' switch: no sparkle on

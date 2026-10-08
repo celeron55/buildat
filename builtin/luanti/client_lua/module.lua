@@ -1369,17 +1369,9 @@ local function play_sound(handle, name, gain, pitch, loop, fade, location,
 	handle_sounds[handle] = entry
 end
 
--- One step of a fade: which way it goes is which side of the target the gain
--- is on, because Luanti's own step sign is not to be trusted
-local function fade_step(gain, target, step, dtime)
-	local by = math.abs(step) * dtime
-	if gain < target then
-		gain = math.min(target, gain + by)
-	else
-		gain = math.max(target, gain - by)
-	end
-	return gain, gain == target
-end
+-- One step of a fade, the extension's ([LUANTI_SHARED])
+local _, _, sounds_proto = buildat.run_script_file("luanti/sounds.lua")
+local fade_step = sounds_proto.fade_step
 
 -- **A footstep** ([NO_SOUND], 2026-09-25): official Luanti plays these
 -- in the engine off the player's own movement, so nothing on the wire
@@ -1615,21 +1607,10 @@ local function particle_frames(effect, tex, anim, ttl)
 	end
 end
 
--- What velocity range a direction box holds: without the speeds every
--- particle leaves at one node a second whatever the game asked for
-local function speed_range(vel_min, vel_max)
-	local near, far = 0, 0
-	for i = 1, 3 do
-		local lo, hi = vel_min[i], vel_max[i]
-		local a, b = math.abs(lo), math.abs(hi)
-		-- Nothing has to travel along this axis at all when the range
-		-- crosses zero; otherwise the shorter end is as slow as it gets
-		local closest = (lo <= 0 and hi >= 0) and 0 or math.min(a, b)
-		near = near + closest * closest
-		far = far + math.max(a, b) * math.max(a, b)
-	end
-	return math.sqrt(near), math.sqrt(far)
-end
+-- What velocity range a direction box holds, the extension's
+-- ([LUANTI_SHARED])
+local _, _, particles_proto = buildat.run_script_file("luanti/particles.lua")
+local speed_range = particles_proto.speed_range
 
 local function middle(a, b)
 	return {(a[1] + b[1]) / 2, (a[2] + b[2]) / 2, (a[3] + b[3]) / 2}
