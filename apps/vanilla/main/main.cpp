@@ -1649,17 +1649,20 @@ struct Module: public interface::Module
 		return buf;
 	}
 	// How far full detail reaches, as a share of the viewing range
-	// ([CLIENT_FRAME]): "lod_detail": "full" | "half" | "third". Beyond
-	// it voxelworld meshes chunks at a reduced LOD, which is how a
+	// ([CLIENT_FRAME]): "distant_detail": "full" | "half" | "third".
+	// Beyond it voxelworld meshes chunks at a reduced LOD, which is how a
 	// machine whose GPU is slower than its processor keeps its range --
-	// LOD spends CPU to buy triangles back. "half" is the default (user,
-	// 2026-10-03): the player short of GPU is the one least likely to find
-	// the setting, and one who is not can turn it back to "full".
+	// LOD spends CPU to buy triangles back. "full" is the default (user,
+	// 2026-10-08, [LOD_FULL_DEFAULT]): the reduced LOD's texture scale and
+	// detail do not follow the distance as the voxels' do, and the sense
+	// of scale goes. The key was "lod_detail", which every save of the
+	// settings screen wrote as "half" while that was the default; it is
+	// not read, so nobody keeps a reduction they never picked.
 	ss_ read_lod_detail()
 	{
 		const char *env = getenv("BUILDAT_LOD_DETAIL");
-		const ss_ v = env ? ss_(env) : read_setting("lod_detail");
-		return (v == "full" || v == "third") ? v : ss_("half");
+		const ss_ v = env ? ss_(env) : read_setting("distant_detail");
+		return (v == "half" || v == "third") ? v : ss_("full");
 	}
 	ss_ read_view_range()
 	{
@@ -1771,7 +1774,7 @@ struct Module: public interface::Module
 				<< view_range << "\", ";
 		if(!web_range.empty())
 			f << "\"web_view_range\": \"" << web_range << "\", ";
-		f << "\"lod_detail\": \""
+		f << "\"distant_detail\": \""
 				<< lod_detail << "\", \"view_bobbing_amount\": \""
 				<< view_bobbing << "\", \"third_person_shoulder\": \""
 				<< shoulder << "\", \"import_paths\": [";
@@ -2180,7 +2183,7 @@ struct Module: public interface::Module
 		ss_ view_range = "120";
 		ss_ view_bobbing = "1";
 		ss_ shoulder = "0";
-		ss_ lod_detail = "half";
+		ss_ lod_detail = "full";
 		for(const ss_ &v : values){
 			if(v.compare(0, 22, "third_person_shoulder=") == 0){
 				shoulder = v.substr(22) == "1" ? "1" : "0";

@@ -619,7 +619,7 @@ function draw_settings(paths)
 	local view_range = "120"
 	local view_bobbing = "1"
 	local shoulder = "0"
-	local lod_detail = "half"
+	local lod_detail = "full"
 	local kept = {}
 	for _, p in ipairs(paths) do
 		local m = p:match("^render_mode=(.*)$")

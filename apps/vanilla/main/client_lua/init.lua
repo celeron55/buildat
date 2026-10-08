@@ -1441,8 +1441,8 @@ end
 -- the distance. What it is for is a machine whose GPU is slower than its
 -- processor -- LOD spends CPU to buy triangles back -- and on this desk's
 -- Intel a made VoxeLibre world reads 30 fps at full, 55 at half. On a
--- fast GPU it is worth almost nothing. The server's default is "half"
--- (user, 2026-10-03); "full" here is only until its row arrives.
+-- fast GPU it is worth almost nothing. "full" is the default, the
+-- server's too ([LOD_FULL_DEFAULT]).
 --
 -- The share and not a distance, because it has to follow the range the
 -- player picks beside it.

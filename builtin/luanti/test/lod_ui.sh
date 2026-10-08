@@ -22,6 +22,9 @@ cd "$here/Build"
 settings=$BUILDAT_USER_PATH/shared/vanilla/settings.json
 mkdir -p $BUILDAT_USER_PATH/shared/vanilla
 [ -f "$settings" ] && cp "$settings" "$tmp/settings.json.bak"
+# An install from before [LOD_FULL_DEFAULT], whose saves wrote the old
+# default under the old key: it must start at Full
+printf '{"lod_detail": "half"}' > "$settings"
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 cli=""
 trap 'exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; check_pkill -INT buildat_server 2>/dev/null;
@@ -84,8 +87,10 @@ for i in range(20):
     time.sleep(2)
 if not row:
     fail("no distant terrain row; saw " + ", ".join(e[5] for e in els or [])[:300])
-# Not the default (half, since d2ba2f08): a pick that is already made
-# proves nothing
+full = next((e for e in els if e[5][4:] == "Full"), None)
+if not full or not full[5].startswith("[x]"):
+    fail("an old install's stored half is not Full: " + str(full and full[5]))
+# Not the default: a pick that is already made proves nothing
 if not row[5].startswith("[ ]"):
     fail("third is already the pick, so this proves nothing: " + row[5])
 click(row)
@@ -103,7 +108,7 @@ try:
     kept = open(settings).read()
 except IOError as e:
     fail("no settings file: %s" % e)
-if '"lod_detail": "third"' not in kept:
+if '"distant_detail": "third"' not in kept:
     fail("the file does not carry the pick: " + kept[:200])
 print("PASS")
 write("quit")
