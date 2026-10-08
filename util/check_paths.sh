@@ -24,6 +24,18 @@ for _d in games texture_packs textures; do
 done
 unset _d
 
+# An address a scripted client may connect to without the network
+# permission dialog, which a command file cannot answer: an accepted entry
+# in the checks' own store, fresh for the week it is valid.
+#   check_allow udp://127.0.0.1:30030
+check_allow()
+{
+	local now; now=$(date +%s)
+	mkdir -p "$BUILDAT_USER_PATH"
+	printf '"true","%s","","%s","%s","","",""\n' "$1" "$now" "$now" \
+		>> "$BUILDAT_USER_PATH/network_addresses.csv"
+}
+
 # **The checks' own processes, never the desk's.** A check's client and
 # server -- and a server its client starts -- carry BUILDAT_USER_PATH in
 # their environment from here; a playtest's do not. So "is a server up",

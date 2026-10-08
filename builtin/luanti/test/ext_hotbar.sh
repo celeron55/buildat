@@ -48,6 +48,7 @@ printf 'name = hotbar\n' > "$work/worldmods/hotbar/mod.conf"
 { echo "fixed_map_seed = 5"; echo "time_speed = 0"; echo "enable_damage = false"
 	echo "mute_sound = true"; } > "$out/luanti.conf"
 port=30030
+check_allow "udp://127.0.0.1:$port"
 ( cd "$luanti" && "$bin" --server --world "$work" --port "$port" \
 	--config "$out/luanti.conf" > "$out/luanti_srv.log" 2>&1 ) &
 for i in $(seq 1 300); do
