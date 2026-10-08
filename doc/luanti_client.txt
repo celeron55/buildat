@@ -264,8 +264,8 @@ objects.lua     The things in the world that are not nodes: what the server
                 says they are and where
 itemdef.lua     ITEMDEF: what an item is, and what a tool can dig
 inventory.lua   TOCLIENT_INVENTORY: what the player is carrying
-hud.lua         The HUD the server describes, and the flags that turn this
-                client's own off
+res/hud.lua     The HUD the server describes, and the flags that turn this
+                client's own off; the luanti module serves the same file
 sounds.lua      PLAY_SOUND and friends, and the sound groups a game's media
                 falls into
 res/formspec.lua The elements of a formspec, and where they go; served by

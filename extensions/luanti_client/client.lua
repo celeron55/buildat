@@ -21,7 +21,7 @@ local connection = buildat.run_extension_file("connection.lua")
 local srp = buildat.run_extension_file("srp.lua")
 local nodemeta = buildat.run_extension_file("nodemeta.lua")
 local inventory = buildat.run_extension_file("inventory.lua")
-local hud = buildat.run_extension_file("hud.lua")
+local hud = buildat.run_extension_file("res/hud.lua")
 local sounds = buildat.run_extension_file("sounds.lua")
 local particles = buildat.run_extension_file("particles.lua")
 

@@ -48,7 +48,7 @@ local objects = dofile(dir.."/objects.lua")
 local nodedef = dofile(dir.."/nodedef.lua")
 local media = dofile(dir.."/media.lua")
 local shapes = dofile(dir.."/shapes.lua")
-local hud = dofile(dir.."/hud.lua")
+local hud = dofile(dir.."/res/hud.lua")
 local b3dmesh = dofile(dir.."/b3dmesh.lua")
 local luanti_client = dofile(dir.."/client.lua")
 local sounds = dofile(dir.."/sounds.lua")
@@ -1743,26 +1743,8 @@ assert(iw == 32 and ih == 24, "hud: a positive scale multiplies the image")
 iw, ih = hud.image_size({scale = {-50, -10}}, 200, 100, 16, 8)
 assert(iw == 100 and ih == 10, "hud: a negative scale is percent of screen")
 
--- A statbar counts in halves: 7 of 8 is three whole icons and a half over
--- four background ones, and the half keeps the half of the image the icons
--- march away from
-local bar = {pos = {0, 0}, align = {-1, -1}, offset = {0, 0},
-		size = {0, 0}, number = 7, item = 8, dir = 0}
-local icons = hud.statbar_icons(bar, 200, 100, 16, 16, true)
-assert(#icons == 8, "hud: four background icons and four over them")
-assert(icons[1].bg and not icons[5].bg, "hud: the background is drawn first")
-assert(icons[8].w == 8 and icons[8].src[3] == 0.5,
-		"hud: the odd half icon keeps the left half of its image")
-assert(icons[7].x == 32 and icons[7].y == 0,
-		"hud: the icons march to the right")
-local down = hud.statbar_icons({pos = {0, 0}, align = {-1, -1},
-		offset = {0, 0}, size = {0, 0}, number = 3, item = 4, dir = 3},
-		200, 100, 16, 16, false)
-assert(#down == 2, "hud: no background texture, no maximum drawn")
-assert(down[1].y == 0 and down[2].y == -16 + 8,
-		"hud: a bottom-to-top bar goes up")
-assert(down[2].src[2] == 0.5,
-		"hud: its half icon keeps the bottom half of the image")
+-- A statbar's icons: builtin/luanti/test/statbar_check.lua, as Luanti's
+-- drawStatbar() places them
 
 end
 

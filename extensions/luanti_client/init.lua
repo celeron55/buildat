@@ -54,7 +54,7 @@ local itemdef = buildat.run_extension_file("itemdef.lua")
 local inventory = buildat.run_extension_file("inventory.lua")
 local objmesh = buildat.run_extension_file("objmesh.lua")
 local b3dmesh = buildat.run_extension_file("b3dmesh.lua")
-local luanti_hud = buildat.run_extension_file("hud.lua")
+local luanti_hud = buildat.run_extension_file("res/hud.lua")
 -- On the HUD module's table rather than a local of its own: the connect
 -- callback below is at Lua's 60-upvalue line ([EXT_HUD_PARITY])
 luanti_hud.minimap = buildat.run_extension_file("res/minimap.lua")

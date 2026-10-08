@@ -5,7 +5,7 @@
 --
 --   luajit builtin/luanti/test/statbar_check.lua
 local here = arg[0]:match("^(.*)/[^/]*$") or "."
-local M = dofile(here .. "/../client_lua/hud.lua")
+local M = dofile(here .. "/../../../extensions/luanti_client/res/hud.lua")
 local function run(n, item, dir)
 	local e = {size = {0, 0}, dir = dir, pos = {0, 0}, align = {0, 0},
 			offset = {0, 0}, number = n, item = item}
