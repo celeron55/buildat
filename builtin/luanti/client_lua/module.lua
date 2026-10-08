@@ -989,33 +989,65 @@ local function parse_look(kind, texture, detail)
 	return look
 end
 
+-- **What the packet last said about an object** ([PACKET_STALL] (3),
+-- measured on this desk 2026-09-26). The server sends every object's
+-- full state whenever any one of them moved, and standing still in a
+-- VoxeLibre world that is 78 to 83 objects several times a second, of
+-- which a handful are moving. Placing one costs a node lookup, three
+-- transforms through the binding, a box table and a voxel light lookup
+-- -- about 0.4 ms, so 25 to 42 ms a packet, and that packet is the
+-- frame. Two minutes standing still: 407 packets over 5 ms, 5.1
+-- seconds of frame time in them.
+--
+-- So an object the packet says nothing new about is left where it is.
+-- The nine doubles are compared in place -- no table is built to
+-- compare, since building one per object per packet is the cost being
+-- removed. Cleared wherever the node would have to be made again: a
+-- look that changed, an object that went.
+local object_last = {}
+
+-- object_box(id) -> min, max: the box an object is aimed at and framed
+-- by, in world coordinates: its selection box about its position, which
+-- is what Luanti points at ([OBJECT_SELECTION_BOX]); before its look has
+-- said where that is, its collision box
+function M.object_box(id)
+	local last, look = object_last[id], object_looks[id]
+	if not last then
+		return nil
+	end
+	local sel, mid = look and look.sel, look and look.middle
+	if sel and mid then
+		local x, y, z = last[1] - mid[1], last[2] - mid[2], last[3] - mid[3]
+		return {x + sel[1], y + sel[2], z + sel[3]},
+				{x + sel[4], y + sel[5], z + sel[6]}
+	end
+	local hx, hy, hz = last[4] / 2, last[5] / 2, last[6] / 2
+	return {last[1] - hx, last[2] - hy, last[3] - hz},
+			{last[1] + hx, last[2] + hy, last[3] + hz}
+end
+
 -- pointed_object(x, y, z, dx, dy, dz, max_distance) -> id, distance
 --
--- Which object a ray runs into first, by the box each one is drawn at: the
--- game points the ray because it has the camera, and what is in the world is
--- here. A slab-test against an axis-aligned box, which is what an object is
--- drawn as whatever it wears.
+-- Which object a ray runs into first, by object_box(): the game points
+-- the ray because it has the camera, and what is in the world is here. A
+-- slab-test against an axis-aligned box.
+-- simplified: a box is not turned with the object, which is Luanti's own
+-- default (selectionbox's rotate = false)
 function M.pointed_object(x, y, z, dx, dy, dz, max_distance)
 	local best, best_t = nil, max_distance
 	for id, have in pairs(object_nodes) do
+		local look = object_looks[id]
 		-- Not the player's own object: the camera is inside it, so a ray
 		-- from the eye hits it before anything else in the world
-		if id ~= M.self_id and (have.look == nil or have.look.pointable ~= false) then
-			local p = have.node.position
-			-- The box the object collides with, which the server sends
-			-- whatever the object is drawn as: a model's own scale is not
-			-- it, and aiming by that missed every mob VoxeLibre has
-			local s = have.box or {1, 1, 1}
-			local hx = math.max(0.15, s[1] / 2)
-			local hy = math.max(0.15, s[2] / 2)
-			local hz = math.max(0.15, s[3] / 2)
+		local lo, hi = M.object_box(id)
+		if id ~= M.self_id and lo and (look == nil or look.pointable ~= false) then
 			local t0, t1 = 0, best_t
-			local function slab(o, d, lo, hi)
+			local function slab(o, d, l, h)
 				if math.abs(d) < 1e-9 then
-					return o >= lo and o <= hi
+					return o >= l and o <= h
 				end
-				local a = (lo - o) / d
-				local b = (hi - o) / d
+				local a = (l - o) / d
+				local b = (h - o) / d
 				if a > b then
 					a, b = b, a
 				end
@@ -1023,10 +1055,8 @@ function M.pointed_object(x, y, z, dx, dy, dz, max_distance)
 				if b < t1 then t1 = b end
 				return t0 <= t1
 			end
-			if slab(x, dx, p.x - hx, p.x + hx) and
-					slab(y, dy, p.y - hy, p.y + hy) and
-					slab(z, dz, p.z - hz, p.z + hz) and
-					t0 >= 0 and t0 < best_t then
+			if slab(x, dx, lo[1], hi[1]) and slab(y, dy, lo[2], hi[2]) and
+					slab(z, dz, lo[3], hi[3]) and t0 >= 0 and t0 < best_t then
 				best, best_t = id, t0
 			end
 		end
@@ -1051,22 +1081,6 @@ function M.object_label(id)
 	return (tostring(t or have.drawn_as or "?"):gsub("[%s|]", "_"))
 end
 
--- **What the packet last said about an object** ([PACKET_STALL] (3),
--- measured on this desk 2026-09-26). The server sends every object's
--- full state whenever any one of them moved, and standing still in a
--- VoxeLibre world that is 78 to 83 objects several times a second, of
--- which a handful are moving. Placing one costs a node lookup, three
--- transforms through the binding, a box table and a voxel light lookup
--- -- about 0.4 ms, so 25 to 42 ms a packet, and that packet is the
--- frame. Two minutes standing still: 407 packets over 5 ms, 5.1
--- seconds of frame time in them.
---
--- So an object the packet says nothing new about is left where it is.
--- The nine doubles are compared in place -- no table is built to
--- compare, since building one per object per packet is the cost being
--- removed. Cleared wherever the node would have to be made again: a
--- look that changed, an object that went.
-local object_last = {}
 -- How many packets it takes to re-light every object that is standing
 -- still, and which slice this packet does
 local LIGHT_TURNS = 8
@@ -1086,10 +1100,20 @@ end
 
 startup_packet("luanti:object_props", "luanti_data/object_props.bin", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
-	for i = 1, #values - 4, 5 do
-		object_looks[values[i]] = parse_look(values[i + 1], values[i + 2],
-				values[i + 3])
-		object_looks[values[i]].pointable = values[i + 4] ~= "0"
+	for i = 1, #values - 5, 6 do
+		local look = parse_look(values[i + 1], values[i + 2], values[i + 3])
+		object_looks[values[i]] = look
+		look.pointable = values[i + 4] ~= "0"
+		-- The collision box's middle and the selection box, about the
+		-- object's position ([OBJECT_SELECTION_BOX])
+		local b = {}
+		for n in string.gmatch(values[i + 5] or "", "%S+") do
+			b[#b + 1] = tonumber(n) or 0
+		end
+		if #b == 9 then
+			look.middle = {b[1], b[2], b[3]}
+			look.sel = {b[4], b[5], b[6], b[7], b[8], b[9]}
+		end
 		-- A look that changed is a node made again, and the next packet
 		-- has to do it rather than recognise the same doubles
 		object_last[values[i]] = nil
@@ -1294,8 +1318,19 @@ local function place_object(id, v, i)
 		-- Out of this packet's budget; the next one places it
 		return
 	end
-	node.position = magic.Vector3(v[i + 1], v[i + 2], v[i + 3])
 	local have = object_nodes[id]
+	-- The packet's place is the collision box's middle, which is where a
+	-- box scaled to it goes; a model and a sprite are drawn at the
+	-- position itself, as Luanti draws them ([OBJECT_SELECTION_BOX]):
+	-- a mob's model stood half its height up in the air
+	local mid = (have.drawn_as == "mesh" or have.drawn_as == "sprite") and
+			object_looks[id] and object_looks[id].middle
+	if mid then
+		node.position = magic.Vector3(v[i + 1] - mid[1], v[i + 2] - mid[2],
+				v[i + 3] - mid[3])
+	else
+		node.position = magic.Vector3(v[i + 1], v[i + 2], v[i + 3])
+	end
 	-- The player's own model is the client's to place: see set_self_pose
 	if id == M.self_id and self_pose then
 		node.position = magic.Vector3(self_pose.x, self_pose.y, self_pose.z)

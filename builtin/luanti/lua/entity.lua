@@ -3295,6 +3295,7 @@ function core.__object_appearances()
 		out[#out + 1] = look[2]
 		out[#out + 1] = look[3] or ""
 		out[#out + 1] = look[4] or "1"
+		out[#out + 1] = look[5] or ""
 	end
 	return out
 end
@@ -3456,11 +3457,25 @@ local function show_objects(dtime)
 			-- wieldview rides at its player's feet with pointable false,
 			-- and a client that did not know stood punching it instead of
 			-- digging the ground (2026-09-19)
+			--
+			-- And where its boxes are about its position
+			-- ([OBJECT_SELECTION_BOX]): the collision box's middle, which
+			-- the packet below places it at, and the selection box (the
+			-- collision box when there is none, as Luanti's), which is what
+			-- is aimed at and framed. A model and a sprite are drawn at
+			-- the position itself, as Luanti draws them. In the look, which
+			-- goes out when it changes, rather than in every packet.
+			local sel = o.props.selectionbox or box
 			local look = {kind, texture, detail or "",
-				(o.props.pointable ~= false) and "1" or "0"}
+				(o.props.pointable ~= false) and "1" or "0",
+				string.format("%g %g %g %g %g %g %g %g %g",
+					(box[1] + box[4]) / 2, (box[2] + box[5]) / 2,
+					(box[3] + box[6]) / 2, sel[1] or 0, sel[2] or 0,
+					sel[3] or 0, sel[4] or 0, sel[5] or 0, sel[6] or 0)}
 			local was = sent_appearance[id]
 			if not was or was[1] ~= look[1] or was[2] ~= look[2] or
-					was[3] ~= look[3] or was[4] ~= look[4] then
+					was[3] ~= look[3] or was[4] ~= look[4] or
+					was[5] ~= look[5] then
 				sent_appearance[id] = look
 			else
 				look = was
@@ -3529,6 +3544,7 @@ local function show_objects(dtime)
 					props[#props + 1] = look[2]
 					props[#props + 1] = look[3]
 					props[#props + 1] = look[4]
+					props[#props + 1] = look[5]
 				end
 			end
 		end

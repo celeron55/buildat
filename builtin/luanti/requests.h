@@ -138,7 +138,7 @@
 			inetwork->send(packet.sender, "luanti:object_props", os.str());
 		});
 		log_v(MODULE, "C%zu: %zu object looks", (size_t)packet.sender,
-				flat.size() / 4);
+				flat.size() / 6);
 	}
 
 	// The quads of one model, asked for by name: an object whose visual is a

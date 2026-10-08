@@ -2182,6 +2182,10 @@ function M.new(magic, buildat, log, options)
 			sz = math.max(0.05, props.collision_max[3] - props.collision_min[3])
 			cy = (props.collision_max[2] + props.collision_min[2]) / 2
 		end
+		-- Only the stand-in box is centred on its collision box: Luanti
+		-- draws a model, a sprite and a cube at the position itself, and
+		-- the selection box is about that ([OBJECT_SELECTION_BOX])
+		if cube or meshed or sprite then cy = 0 end
 		entry.offset = cy
 		if cube then
 			-- Drawn at the size the object asked for rather than at what

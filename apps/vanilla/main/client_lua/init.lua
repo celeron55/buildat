@@ -3220,6 +3220,9 @@ local POINT_STEP = 0.1
 
 local pointed_p = nil
 local pointed_above = nil
+-- An object in front of that node, which takes the pointing from it: hit
+-- rather than dug, and framed by its own box ([OBJECT_SELECTION_BOX])
+local pointed_obj = nil
 local pointed_node = scene:CreateChild("pointed")
 do
 	-- Four thin strips around the top face, drawn on every face of the
@@ -3582,16 +3585,11 @@ local function update_dig(dt, playing)
 	if not holding then
 		hit_wait = 0
 	end
-	-- What the ray runs into first: an object in front of the node is what
-	-- is hit, and the reach is the same one a dig has
+	-- An object in front of the node is what is hit (pointed_obj, found
+	-- with the frame), at the reach a dig has
 	if holding then
-		local eye = camera_node.worldPosition
-		local dir = camera_node.worldDirection
-		local reach = math.min(POINT_RANGE, luanti.dig_range(wield_index))
-		local id, distance = luanti.pointed_object(eye.x, eye.y, eye.z,
-				dir.x, dir.y, dir.z, reach)
-		if id and (pointed_p == nil or distance <
-				(buildat.Vector3(eye.x, eye.y, eye.z) - pointed_p):length()) then
+		local id = pointed_obj
+		if id then
 			dig = nil
 			update_crack()
 			if hit_wait <= 0 then
@@ -4061,9 +4059,33 @@ function frame_peak.update(dt)
 			pointed_p, pointed_above = bp, babove
 		end
 	end
-	if pointed_p then
+	-- An object nearer than the node is what is pointed at, and the frame
+	-- goes around its selection box, scaled from the voxel's
+	-- simplified: the frame's bars scale with it, thicker on a big box
+	do
+		local eye = camera_node.worldPosition
+		local dir = camera_node.worldDirection
+		local reach = math.min(POINT_RANGE, luanti.dig_range(wield_index))
+		local id, distance = luanti.pointed_object(eye.x, eye.y, eye.z,
+				dir.x, dir.y, dir.z, reach)
+		pointed_obj = id and (pointed_p == nil or distance <
+				(buildat.Vector3(eye.x, eye.y, eye.z) - pointed_p):length()) and
+				id or nil
+	end
+	local lo, hi = nil, nil
+	if pointed_obj then
+		lo, hi = luanti.object_box(pointed_obj)
+	end
+	if lo then
+		pointed_node.position = magic.Vector3((lo[1] + hi[1]) / 2,
+				(lo[2] + hi[2]) / 2, (lo[3] + hi[3]) / 2)
+		pointed_node.scale = magic.Vector3(math.max(0.05, hi[1] - lo[1]),
+				math.max(0.05, hi[2] - lo[2]), math.max(0.05, hi[3] - lo[3]))
+		pointed_node.enabled = true
+	elseif pointed_p then
 		pointed_node.position = magic.Vector3.from_buildat(
 				luanti.body_world(pointed_p) or pointed_p)
+		pointed_node.scale = magic.Vector3(1, 1, 1)
 		pointed_node.enabled = true
 	else
 		pointed_node.enabled = false
