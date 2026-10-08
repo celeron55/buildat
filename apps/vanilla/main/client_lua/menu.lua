@@ -502,6 +502,14 @@ function draw(saves, save_games)
 					cereal.binary_output({selected_save}, {"array", "string"}))
 		end
 	end, fit(420))
+	-- [SERVER_PRESETS] the same form, of what the world costs its server
+	button_on(menu, right, "Server performance...", function()
+		if selected_save then
+			waiting("Reading the settings of " .. selected_save .. "...")
+			buildat.send_packet("main:get_perf_settings",
+					cereal.binary_output({selected_save}, {"array", "string"}))
+		end
+	end, fit(420))
 	button_on(menu, right, "Play", function()
 		if selected_save then
 			play(selected_save)
@@ -1198,14 +1206,17 @@ end
 -- simplified: the label only; the comment lines above a setting in
 -- settingtypes.txt, its help, are not read
 local game_settings = {filter = "", changed = {}}
-local function draw_game_settings(flat)
+-- perf: main:perf_settings, the server's ([SERVER_PRESETS]), which
+-- comes as the same list
+local function draw_game_settings(flat, perf)
 	local save, note = flat[1], flat[2]
-	local menu = import_menu(save .. ": its game's settings")
+	local menu = import_menu(save .. (perf and ": server performance" or
+			": its game's settings"))
 	if note ~= "" then
 		local t = menu.window:CreateChild("Text")
 		t:SetStyleAuto()
 		t:SetText(note)
-		if note ~= "Saved." then
+		if note:sub(1, 6) ~= "Saved." then
 			t.color = magic.Color(rgb("error"))
 		end
 	end
@@ -1236,7 +1247,7 @@ local function draw_game_settings(flat)
 		add_filter(menu, game_settings.filter, #items, #shown, function(f)
 			collect()
 			game_settings.filter = f
-			draw_game_settings(flat)
+			draw_game_settings(flat, perf)
 		end)
 		local list = menu.window:CreateChild("ListView")
 		list:SetStyleAuto()
@@ -1296,7 +1307,8 @@ local function draw_game_settings(flat)
 				out[#out + 1] = v
 			end
 			waiting("Saving the settings of " .. save .. "...")
-			buildat.send_packet("main:set_game_settings",
+			buildat.send_packet(perf and "main:set_perf_settings" or
+					"main:set_game_settings",
 					cereal.binary_output(out, {"array", "string"}))
 		end)
 	end
@@ -1314,6 +1326,12 @@ buildat.sub_packet("main:game_settings", function(data)
 		game_settings.filter = ""
 	end
 	draw_game_settings(flat)
+end)
+buildat.sub_packet("main:perf_settings", function(data)
+	local flat = cereal.binary_input(data, {"array", "string"})
+	game_settings.changed = {}
+	game_settings.filter = ""
+	draw_game_settings(flat, true)
 end)
 
 buildat.sub_packet("main:save_info", function(data)

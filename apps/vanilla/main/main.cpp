@@ -149,6 +149,7 @@ struct Module: public interface::Module
 	void init()
 	{
 		game_settings_self_check();
+		perf_self_check();
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("luanti:game_loaded"));
@@ -177,6 +178,10 @@ struct Module: public interface::Module
 				"network:packet_received/main:get_game_settings"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:set_game_settings"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:get_perf_settings"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:set_perf_settings"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:delete"));
 		m_server->sub_event(this, Event::t(
@@ -239,6 +244,10 @@ struct Module: public interface::Module
 				on_get_game_settings, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:set_game_settings",
 				on_set_game_settings, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:get_perf_settings",
+				on_get_perf_settings, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:set_perf_settings",
+				on_set_perf_settings, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:delete", on_delete,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:open", on_open,
@@ -1260,20 +1269,28 @@ struct Module: public interface::Module
 		walk(game_path+"/mods", 3);
 		return out;
 	}
-	// The save's directory and its game's settings, or false
-	bool save_settings(const ss_ &name, ss_ &path, sv_<GameSetting> &out)
+	// The save's directory, and its gameid when asked, or false
+	bool save_dir(const ss_ &name, ss_ &path, ss_ *gameid = nullptr)
 	{
 		if(!is_world_name(name))
 			return false;
-		ss_ gameid;
 		storage::access(m_server, [&](storage::Interface *istorage){
 			storage::Save *save = istorage->open(name);
 			if(save){
 				path = save->path();
-				save->store("main")->get("gameid", gameid);
+				if(gameid)
+					save->store("main")->get("gameid", *gameid);
 				istorage->close(save);
 			}
 		});
+		return !path.empty();
+	}
+	// The save's directory and its game's settings, or false
+	bool save_settings(const ss_ &name, ss_ &path, sv_<GameSetting> &out)
+	{
+		ss_ gameid;
+		if(!save_dir(name, path, &gameid))
+			return false;
 		const ss_ game_path = gameid.empty() ? "" : find_game(gameid);
 		if(path.empty() || game_path.empty())
 			return false;
@@ -1295,19 +1312,23 @@ struct Module: public interface::Module
 	}
 	// main:game_settings {name, note, then per setting name, label, type,
 	// default, the enum's values or "min max", the world's value or ""}
+	// main:perf_settings is the same, of perf_settings() ([SERVER_PRESETS])
 	void send_game_settings(const network::Packet &packet, const ss_ &name,
-			const ss_ &note)
+			const ss_ &note, bool perf = false)
 	{
 		if(!is_world_name(name))
 			return;
 		ss_ path;
 		sv_<GameSetting> settings;
 		// An answer either way: the client waits on it
-		const bool found = save_settings(name, path, settings);
+		const bool found = perf ? save_dir(name, path) :
+				save_settings(name, path, settings);
+		if(perf)
+			settings = perf_settings();
 		const std::map<ss_, ss_> mt = found ?
 				read_world_mt(path+"/luanti/world.mt") :
 				std::map<ss_, ss_>();
-		sv_<ss_> flat{name, found ? note :
+		sv_<ss_> flat{name, found ? note : perf ? "No such world." :
 				"This world's game is not installed here."};
 		for(const GameSetting &s : settings){
 			ss_ extra;
@@ -1326,7 +1347,8 @@ struct Module: public interface::Module
 			ar(flat);
 		}
 		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(packet.sender, "main:game_settings", os.str());
+			inetwork->send(packet.sender, perf ? "main:perf_settings" :
+					"main:game_settings", os.str());
 		});
 	}
 	// main:get_game_settings {name}
@@ -1365,6 +1387,166 @@ struct Module: public interface::Module
 				refused.empty() ? "" : cs(", refused: "+refused));
 		send_game_settings(packet, values[0], refused.empty() ?
 				"Saved." : "Not saved, out of range: "+refused);
+	}
+
+	// [SERVER_PRESETS]: what a world costs its server, as a preset of
+	// Luanti's own settings in world.mt or "Custom". Ranges are blocks of
+	// 16 nodes, read in sections of 64 (luanti.cpp read_range_settings).
+	// simplified: a first cut, to be tuned by a run with a few players on
+	// a small machine
+	static const sv_<ss_> &perf_keys()
+	{
+		static const sv_<ss_> k{"max_block_send_distance",
+				"max_block_generate_distance", "active_object_send_range_blocks",
+				"liquid_loop_max", "item_entity_ttl"};
+		return k;
+	}
+	static const std::map<ss_, sv_<ss_>> &perf_presets()
+	{
+		static const std::map<ss_, sv_<ss_>> p{
+			{"VPS / Raspberry Pi", {"4", "4", "4", "5000", "300"}},
+			{"Dedicated server", {"8", "4", "8", "10000", "600"}},
+			{"Desktop", {"12", "10", "12", "20000", "900"}},
+		};
+		return p;
+	}
+	// A world with no preset takes its context's: headless is a small
+	// server, one the client starts has the machine to itself
+	ss_ default_preset() const
+	{
+		return m_public ? "VPS / Raspberry Pi" : "Desktop";
+	}
+	sv_<GameSetting> perf_settings() const
+	{
+		const sv_<ss_> &dflt = perf_presets().at(default_preset());
+		GameSetting p;
+		p.name = "buildat_preset";
+		p.label = "Preset";
+		p.type = "enum";
+		p.dflt = default_preset();
+		for(const auto &kv : perf_presets())
+			p.values.push_back(kv.first);
+		p.values.push_back("Custom");
+		sv_<GameSetting> out{p};
+		const char *labels[] = {"Map send range, blocks of 16 nodes",
+				"Map generate range, blocks of 16 nodes",
+				"Object send range, blocks of 16 nodes",
+				"Liquid updates per step", "Dropped item lifetime, s (-1: forever)"};
+		const char *ranges[][2] = {{"4", "64"}, {"4", "64"}, {"4", "64"},
+				{"100", "1000000"}, {"-1", "86400"}};
+		for(size_t i = 0; i < perf_keys().size(); i++){
+			GameSetting s;
+			s.name = perf_keys()[i];
+			s.label = labels[i];
+			s.type = "int";
+			s.dflt = dflt[i];
+			s.min = ranges[i][0];
+			s.max = ranges[i][1];
+			out.push_back(s);
+		}
+		return out;
+	}
+	// The preset's values with the edits over them, and the preset named
+	// "Custom" when an edit differs from it. A world.mt with no preset is
+	// its context's default, or "Custom" when it has values of its own.
+	std::map<ss_, ss_> perf_resolve(const std::map<ss_, ss_> &mt,
+			std::map<ss_, ss_> edits) const
+	{
+		const sv_<ss_> &keys = perf_keys();
+		const bool own = std::any_of(keys.begin(), keys.end(),
+				[&](const ss_ &k){ return mt.count(k) != 0; });
+		ss_ preset = edits.count("buildat_preset") ? edits["buildat_preset"] :
+				mt.count("buildat_preset") ? mt.at("buildat_preset") :
+				own ? "Custom" : default_preset();
+		edits.erase("buildat_preset");
+		auto it = perf_presets().find(preset);
+		if(it == perf_presets().end())
+			preset = "Custom";
+		const sv_<ss_> &dflt = perf_presets().at(default_preset());
+		std::map<ss_, ss_> out;
+		for(size_t i = 0; i < keys.size(); i++)
+			out[keys[i]] = it != perf_presets().end() ? it->second[i] :
+					mt.count(keys[i]) ? mt.at(keys[i]) : dflt[i];
+		for(const auto &kv : edits){
+			if(out[kv.first] != kv.second){
+				out[kv.first] = kv.second;
+				preset = "Custom";
+			}
+		}
+		out["buildat_preset"] = preset;
+		return out;
+	}
+	void perf_self_check() const
+	{
+		auto fail = [](const char *what){
+			throw Exception(ss_("vanilla: preset self-check: ")+what);
+		};
+		std::map<ss_, ss_> r = perf_resolve({}, {});
+		if(r["buildat_preset"] != default_preset())
+			fail("a new world");
+		r = perf_resolve({{"max_block_send_distance", "20"}}, {});
+		if(r["buildat_preset"] != "Custom" || r["max_block_send_distance"] != "20")
+			fail("values of its own");
+		r = perf_resolve({{"buildat_preset", "Custom"}},
+				{{"buildat_preset", "Dedicated server"}});
+		if(r["buildat_preset"] != "Dedicated server" ||
+				r["liquid_loop_max"] != "10000")
+			fail("a preset chosen");
+		r = perf_resolve({{"buildat_preset", "Desktop"}},
+				{{"item_entity_ttl", "900"}, {"liquid_loop_max", "7000"}});
+		if(r["buildat_preset"] != "Custom" || r["liquid_loop_max"] != "7000" ||
+				r["max_block_send_distance"] != "12")
+			fail("an edit");
+	}
+	// main:get_perf_settings {name}
+	void on_get_perf_settings(const network::Packet &packet)
+	{
+		if(!may_manage(packet.sender))
+			return;
+		const sv_<ss_> values = read_packet_strings(packet);
+		if(!values.empty())
+			send_game_settings(packet, values[0], "", true);
+	}
+	// main:set_perf_settings {name, key, value, ...}
+	void on_set_perf_settings(const network::Packet &packet)
+	{
+		if(!may_manage(packet.sender))
+			return;
+		const sv_<ss_> values = read_packet_strings(packet);
+		ss_ path;
+		if(values.empty() || !save_dir(values[0], path))
+			return;
+		const sv_<GameSetting> settings = perf_settings();
+		std::map<ss_, ss_> edits;
+		ss_ refused;
+		for(size_t i = 1; i + 1 < values.size(); i += 2){
+			auto it = std::find_if(settings.begin(), settings.end(),
+					[&](const GameSetting &s){ return s.name == values[i]; });
+			if(it != settings.end() && setting_value_ok(*it, values[i + 1]))
+				edits[values[i]] = values[i + 1];
+			else
+				refused += (refused.empty() ? "" : ", ")+values[i];
+		}
+		const ss_ mt_path = path+"/luanti/world.mt";
+		if(refused.empty())
+			write_world_mt(mt_path, perf_resolve(read_world_mt(mt_path), edits));
+		const bool running = m_world_name == values[0] && m_starting;
+		send_game_settings(packet, values[0], !refused.empty() ?
+				"Not saved, out of range: "+refused : running ?
+				"Saved. Takes effect when the server restarts." : "Saved.", true);
+	}
+	// A world with no preset gets its context's as it starts, so the form
+	// and the world.mt say what the world runs with
+	void apply_default_preset(const ss_ &save_path)
+	{
+		const ss_ mt_path = save_path+"/luanti/world.mt";
+		const std::map<ss_, ss_> mt = read_world_mt(mt_path);
+		if(mt.count("buildat_preset"))
+			return;
+		const std::map<ss_, ss_> set = perf_resolve(mt, {});
+		write_world_mt(mt_path, set);
+		log_i(MODULE, "%s: server preset %s", cs(save_path),
+				cs(set.at("buildat_preset")));
 	}
 
 	// main:save_info <name>: what a save answers at a glance, as a flat
@@ -3279,6 +3461,7 @@ struct Module: public interface::Module
 			// ([VANILLA_PUBLIC] 3)
 			if(m_public)
 				i->load_lua("core.__public = true", "vanilla_public");
+			apply_default_preset(save->path());
 			i->run_game(game_path, save);
 		});
 	}
