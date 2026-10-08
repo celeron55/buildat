@@ -502,15 +502,25 @@ local function recipe_to_table(recipe)
 			local grid
 			grid, w = rows_to_grid(recipe.recipe or {})
 			if grid then
+				-- An empty cell is left out and the rest keep their
+				-- places, as Luanti's push_items(): a "" in the table is
+				-- an item nobody has, and VoxeLibre's recipe book hid
+				-- every recipe with a gap in it ([VL_INV_PARITY])
 				for y = 1, #grid do
 					for x = 1, w do
-						items[(y - 1) * w + x] = spec_name(grid[y][x])
+						local name = spec_name(grid[y][x])
+						if name ~= "" then
+							items[(y - 1) * w + x] = name
+						end
 					end
 				end
 			end
 		else
 			for i, spec in ipairs(recipe.recipe or {}) do
-				items[i] = spec_name(spec)
+				local name = spec_name(spec)
+				if name ~= "" then
+					items[i] = name
+				end
 			end
 		end
 		return {method = "normal", width = w or 0, items = items,
