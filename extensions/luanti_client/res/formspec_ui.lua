@@ -1081,13 +1081,12 @@ function M.new(magic, buildat, log, ctx)
 					local button_name = is_image and e.fields[4] or e.fields[3]
 					local text = is_image and e.fields[5] or e.fields[4]
 					local st = style_of(name, button_name)
-					local drawn = is_image and
-							image(window, x, y, w, h, e.fields[3])
-					-- A game that styles its buttons means them to look like
-					-- the image it gives, and a bordered box behind that is
-					-- not what it asked for
-					if not drawn then
-						button_bg(x, y, w, h, st)
+					-- The button under its image, as Luanti: the style's
+					-- bgimg, or a box unless border=false (VoxeLibre's
+					-- recipe book buttons are its bgimg with an icon on it)
+					button_bg(x, y, w, h, st)
+					if is_image then
+						image(window, x, y, w, h, e.fields[3])
 					end
 					if text and text ~= "" then
 						-- Luanti centres a button's text in it
