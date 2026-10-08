@@ -38,7 +38,7 @@ buildat = {
 local serialize = dofile(dir.."/serialize.lua")
 local connection = dofile(dir.."/connection.lua")
 local player = dofile(dir.."/player.lua")
-local texmod = dofile(dir.."/texmod.lua")
+local texmod = dofile(dir.."/res/texmod.lua")
 -- Its own checks run when it loads; loading it here is what runs them outside
 -- a client
 dofile(dir.."/surface.lua")
@@ -1100,17 +1100,20 @@ assert(composed[2].ops[1].src == "srv/composed/1",
 -- expression unusable rather than half a texture
 assert(texmod.resolve("missing.png^[noalpha", ctx) == nil,
 		"texmod: built on a missing file")
-assert(texmod.resolve("a.png^[invert:rgb", ctx) == nil,
+assert(texmod.resolve("a.png^[colorizehsl:120", ctx) == nil,
 		"texmod: built an unimplemented modifier")
+local inv = ops_of("a.png^[invert:rgb")
+assert(inv[2].op == "invert" and inv[2].channels[1] == 1 and
+		inv[2].channels[4] == 0, "texmod: [invert")
 assert(texmod.resolve("a.png^[colorize:chartreuse", ctx) == nil,
 		"texmod: built an unknown colour")
 
 -- A modifier build() does not implement leaves the expression unusable, and
 -- says so once with an example: a node whose texture cannot be built is drawn
 -- as a placeholder and nothing else explains why
-assert(texmod.resolve("a.png^[invert:rgb", ctx) == nil,
+assert(texmod.resolve("a.png^[overlay:b.png", ctx) == nil,
 		"texmod: an unimplemented modifier does not build")
-assert(texmod.unimplemented["invert"] == "a.png^[invert:rgb",
+assert(texmod.unimplemented["overlay"] == "a.png^[overlay:b.png",
 		"texmod: an unimplemented modifier is recorded with an example")
 
 

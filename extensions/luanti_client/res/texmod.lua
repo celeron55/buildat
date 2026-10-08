@@ -1,7 +1,12 @@
--- Buildat: extension/luanti_client/texmod.lua
+-- Buildat: extensions/luanti_client/res/texmod.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 -- SPDX-License-Identifier: Apache-2.0 OR MIT
+--
+-- The one copy for both Luanti clients ([LUANTI_SHARED]): the extension
+-- runs it from res/, and the luanti module serves it as luanti/texmod.lua.
+-- It touches no file and no image -- it reads the language and hands back
+-- operations -- so it needs nothing of either.
 --
 -- Luanti's texture modifier language, turned into buildat.compose_image()
 -- operations.
@@ -243,7 +248,7 @@ local function each_sub_expression(part, cb)
 				cb(unescape(sub))
 			end
 		end
-	elseif name == "mask" then
+	elseif name == "mask" or name == "hardlight" then
 		cb(unescape(args[1] or ""))
 	end
 end
@@ -454,6 +459,15 @@ function M.build(expr, ctx)
 						color = {255, 255, 255, 255}, ratio = 128}
 			elseif name == "noalpha" then
 				ops[#ops + 1] = {op = "alpha", value = 255}
+			elseif name == "invert" then
+				local mode = args[1] or ""
+				ops[#ops + 1] = {op = "invert", channels = {
+						mode:find("r") and 1 or 0, mode:find("g") and 1 or 0,
+						mode:find("b") and 1 or 0, mode:find("a") and 1 or 0}}
+			elseif name == "contrast" then
+				ops[#ops + 1] = {op = "contrast",
+						contrast = tonumber(args[1]) or 0,
+						brightness = tonumber(args[2]) or 0}
 			elseif name == "hsl" then
 				ops[#ops + 1] = {op = "hsl",
 						hue = tonumber(args[1]) or 0,
@@ -475,6 +489,13 @@ function M.build(expr, ctx)
 				end
 				ops[#ops + 1] = {op = "blit", src = resource,
 						fill = true, blend = "and"}
+			elseif name == "hardlight" then
+				local resource = ctx.compose(unescape(args[1] or ""))
+				if not resource then
+					return nil
+				end
+				ops[#ops + 1] = {op = "blit", src = resource,
+						fill = true, blend = "hardlight"}
 			elseif name == "lowpart" then
 				-- The bottom part of an overlay, stretched over the whole
 				-- image and then cut: Luanti's [lowpart:<percent>:<file>,
@@ -534,10 +555,11 @@ function M.build(expr, ctx)
 				end
 				ops[#ops + 1] = {op = "crop", grid = wh, cell = at}
 			else
-				-- [crack, [inventorycube, [invert, [contrast,
-				-- [colorizehsl, [overlay, [hardlight,
-				-- [applyfiltersformesh. None of the games tested use any
-				-- of these.
+				-- [crack, [inventorycube, [colorizehsl, [overlay,
+				-- [applyfiltersformesh. None of the games on disk use
+				-- these (2026-09-21's sweep; [invert, [contrast and
+				-- [hardlight were here until VoxeLibre, devtest and
+				-- capturetheflag turned out to).
 				if M.unimplemented[name] == nil then
 					M.unimplemented[name] = expr
 				end

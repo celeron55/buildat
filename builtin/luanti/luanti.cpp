@@ -1148,7 +1148,7 @@ struct Module: public interface::Module, public luanti::Interface
 		const ss_ shared = m_server->get_config().get<ss_>("share_path")+
 				"/extensions/luanti_client/res";
 		for(const char *name : {"camera_motion.lua", "key_editor.lua",
-				"minimap.lua", "hotbar.lua"}){
+				"minimap.lua", "hotbar.lua", "texmod.lua"}){
 			const ss_ path = shared+"/"+name;
 			if(interface::fs::path_exists(path)){
 				client_file::access(m_server, [&](client_file::Interface *i){
