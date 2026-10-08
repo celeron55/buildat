@@ -10215,12 +10215,15 @@ end
 -- each two sandboxed vectors): the walls and objects above the cut, the
 -- objects' outlines and the doors' and windows' symbols, as a line list on
 -- a node, made again when the plan, the zoom, the cut or the floor edited
--- change. Drawn a frame at a time as before during a drag, which moves
--- things without a rebuild, and on a client without set_line_geometry.
+-- change. Drawn a frame at a time as before during a drag that moves
+-- things without a rebuild (not a box selection's), and on a client without
+-- set_line_geometry.
 local plan_lines_node = scene:CreateChild("PlanLines")
 -- And the grid, over three times the view each way, made again when the
 -- view leaves that or the step changes
 local grid_node = scene:CreateChild("PlanGrid")
+-- And the selection's outlines (draw_overlay)
+M.sel_lines_node = scene:CreateChild("SelLines")
 M.build_gen = 0
 M.sel_gen = 0
 
@@ -10228,10 +10231,16 @@ local function draw_overlay()
 	local y = S.view == "2d" and W(settings().cut) - 0.001 or 0.004
 	plan_lines_node.enabled = false
 	grid_node.enabled = false
+	M.sel_lines_node.enabled = false
 	local function P(x, z, yy)
 		return magic.Vector3(W(x), yy or y, W(z))
 	end
+	-- Where the lines go instead of the debug renderer, while one is set
+	local sink
 	local function line(ax, az, bx, bz, col)
+		if sink then
+			return sink(ax, az, bx, bz, col)
+		end
 		debug:AddLine(P(ax, az), P(bx, bz), col, false)
 	end
 	local function dashed(pts, col, ln)
@@ -10251,7 +10260,11 @@ local function draw_overlay()
 		for _, yy in ipairs(ys or {y}) do
 			for i = 1, #pts do
 				local p, q = pts[i], pts[i % #pts + 1]
-				debug:AddLine(P(p[1], p[2], yy), P(q[1], q[2], yy), col, false)
+				if sink and yy == y then
+					sink(p[1], p[2], q[1], q[2], col)
+				else
+					debug:AddLine(P(p[1], p[2], yy), P(q[1], q[2], yy), col, false)
+				end
 			end
 		end
 	end
@@ -10357,7 +10370,7 @@ local function draw_overlay()
 				end
 			end
 		end
-		if buildat.set_line_geometry and not S.drag then
+		if buildat.set_line_geometry and not (S.drag and S.drag.kind ~= "box") then
 			local key = M.build_gen .. ":" .. mm_per_px() .. ":" .. cut ..
 					":" .. tostring(S.layout) .. ":" .. S.plan_look
 			if key ~= M.plan_lines_key then
@@ -10381,10 +10394,46 @@ local function draw_overlay()
 		end
 	end
 	local accent = magic.Color(1.0, 0.6, 0.1)
+	-- **The selection's outlines, kept on a node** in the plan view while
+	-- nothing is dragged ([FRAME_WORK]): a wall's outline three times over
+	-- was some 60 sandboxed lines, over a millisecond a frame
+	local sel_out, sel_kept
+	if buildat.set_line_geometry and S.view == "2d" and not S.drag then
+		local ks = {}
+		for id, kind in pairs(S.sel) do
+			ks[#ks + 1] = id .. kind
+		end
+		table.sort(ks)
+		local key = M.build_gen .. ":" .. mm_per_px() .. ":" .. y .. ":" ..
+				tostring(S.layout) .. ":" .. table.concat(ks, " ")
+		sel_kept = key == M.sel_lines_key
+		if not sel_kept then
+			M.sel_lines_key, sel_out = key, {}
+		end
+		M.sel_lines_node.enabled = true
+	else
+		M.sel_lines_key = nil
+	end
+	local function sel(fn, ...)
+		if sel_kept then
+			return
+		end
+		sink = sel_out and function(ax, az, bx, bz, c)
+			local k = #sel_out
+			sel_out[k + 1], sel_out[k + 2], sel_out[k + 3] = W(ax), y, W(az)
+			sel_out[k + 4], sel_out[k + 5], sel_out[k + 6], sel_out[k + 7] =
+					c.r, c.g, c.b, 1
+			sel_out[k + 8], sel_out[k + 9], sel_out[k + 10] = W(bx), y, W(bz)
+			sel_out[k + 11], sel_out[k + 12], sel_out[k + 13], sel_out[k + 14] =
+					c.r, c.g, c.b, 1
+		end
+		fn(...)
+		sink = nil
+	end
 	for id, kind in pairs(S.sel) do
 		if kind == "wall" and outlines[id] then
 			local y0, y1 = wall_span(doc.ents[id].ints)
-			thick(outlines[id].pts, accent, S.view ~= "2d" and
+			sel(thick, outlines[id].pts, accent, S.view ~= "2d" and
 					{W(y0) + 0.004, W(y1) + 0.004} or nil)
 			-- The face it was selected by, brighter
 			if S.sel_face[id] then
@@ -10395,16 +10444,21 @@ local function draw_overlay()
 			world_label((w.ax + w.bx) / 2, 0, (w.az + w.bz) / 2,
 					mm_text(geom.len(w.bx - w.ax, w.bz - w.az)))
 		elseif kind == "room" and room_data[id] then
-			thick(room_data[id].pts, accent, S.sel_face[id] == "ceiling" and
+			sel(thick, room_data[id].pts, accent, S.sel_face[id] == "ceiling" and
 					S.view ~= "2d" and {W(room_ceiling(doc.ents[id])) - 0.004} or nil)
-			outline(room_data[id].inner, magic.Color(0.2, 0.6, 1.0))
+			sel(outline, room_data[id].inner, magic.Color(0.2, 0.6, 1.0))
 		elseif kind == "image" and image_data[id] then
-			thick(image_data[id].foot, accent)
+			sel(thick, image_data[id].foot, accent)
 		elseif kind == "instance" and inst_data[id] then
 			local it = inst_data[id]
-			thick(it.foot, accent, S.view ~= "2d" and
+			sel(thick, it.foot, accent, S.view ~= "2d" and
 					{W(it.y0) + 0.004, W(it.y1) + 0.004} or nil)
 		end
+	end
+	if sel_out then
+		buildat.set_line_geometry(M.sel_lines_node, sel_out)
+		M.sel_lines_node:GetComponent("CustomGeometry"):SetMaterial(0,
+				flat_material)
 	end
 	-- **The rooms on a dragged node, outlined** (a playtest, 2026-10-06)
 	local dg = S.drag
