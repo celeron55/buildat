@@ -632,34 +632,9 @@ browse = function(kind, query, by, filter, focus_filter)
 	end
 	local drop = nil
 	if filters then
-		drop = window:CreateChild("DropDownList")
-		drop:SetStyleAuto()
-		drop:SetFixedSize(240, ROW_HEIGHT)
-		drop:SetFocusMode(magic.FM_FOCUSABLE)
-		drop.resizePopup = true
-		-- The arrow at its right end, floor planner's (panel.lua M.mark):
-		-- the list lays its children out in a row, so the choice's text
-		-- takes all but the arrow's room
-		drop.placeholder:SetFixedWidth(240 - 28)
-		text(drop, "▼", 12, "dim")
-		for i, f in ipairs(filters) do
-			local t = text(window, f)
-			t:SetFixedHeight(ROW_HEIGHT - 4)
-			drop:AddItem(t)
-			if f == filter then drop:SetSelection(i - 1) end
-			-- The entry under the mouse is highlighted, the chosen one
-			-- less: main_style.xml's button and button-line greys. Text
-			-- draws neither without a colour, and only when enabled.
-			t.enabled = true
-			t:SetSelectionColor(magic.Color(0.2, 0.2, 0.25))
-			t:SetHoverColor(magic.Color(0.33, 0.33, 0.4))
-		end
-		magic.SubscribeToEvent(drop, "ItemSelected", function(_, _, data)
-			local f = filters[data:GetInt("Selection") + 1]
-			if f and f ~= filter then
-				deferred = function() refilter(f, true) end
-			end
-		end)
+		drop = ui_utils.dropdown(window, filters, filter, function(f)
+			deferred = function() refilter(f, true) end
+		end, {width = 240, height = ROW_HEIGHT})
 		local kept = {}
 		for _, e in ipairs(of_kind) do
 			if passes(e, filter) then kept[#kept + 1] = e end
@@ -874,7 +849,7 @@ browse = function(kind, query, by, filter, focus_filter)
 	end
 	log:info("launch_menu_v2: " .. kind .. ", " .. #items .. " rows" ..
 			(query ~= "" and " for \"" .. query .. "\"" or "") ..
-			", by " .. by)
+			", by " .. by .. (filters and ", " .. filter or ""))
 end
 
 -- **Settings**, one tree: each part once

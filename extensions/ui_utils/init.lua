@@ -79,9 +79,10 @@ local function page_items(e, out)
 		return out
 	end
 	local t = e:GetTypeName()
-	if (t == "Button" and e.enabled) or t == "LineEdit" then
+	if ((t == "Button" or t == "DropDownList") and e.enabled) or
+			t == "LineEdit" then
 		out[#out + 1] = e
-		if t == "Button" then
+		if t ~= "LineEdit" then
 			-- A dropdown's or a checkbox's insides are the button's
 			return out
 		end
@@ -402,6 +403,11 @@ local function button_menu_nav(root, options)
 	return nav
 end
 
+-- A dropdown's popup was up at the last Update (M.safe.dropdown)
+local drop_open = false
+-- One closed its popup on this frame's Escape
+local escape_taken = false
+
 -- The pages that took the keys, newest last: only the newest one still
 -- shown answers, so a page over another does not share its keys
 local keyboard_pages = {}
@@ -571,7 +577,8 @@ function M.safe.keyboard_page(win)
 			end
 			return
 		end
-		if newest_page() ~= page or not arranged then
+		-- A dropdown's popup has the keys
+		if newest_page() ~= page or not arranged or drop_open then
 			return
 		end
 		dirty = true
@@ -1085,6 +1092,182 @@ function M.safe.server_list(parent, options, on_pick)
 end
 
 local message_handle = nil
+
+-- **One dropdown for every choice of one** ([UI_DROPDOWN], user
+-- 2026-10-09), launch_menu_v2's filter's look: the "▼" at its right end,
+-- the row under the pointer highlighted and the chosen one less
+-- (main_style.xml's button and button-line greys). choices are
+-- {label, value} (a plain string is both), current a value;
+-- on_choose(value, index) on a pick of another. options: width (the
+-- longest choice's, at least min_width), height (28), label (a text
+-- before it, label_width wide), none (what it says in red while nothing
+-- is chosen), on_dismiss (called when it closes with no pick), fill (as
+-- wide as its row lets it, at least that).
+-- By the keyboard (keyboard_page takes it as a button): Enter or Space
+-- opens it, Up and Down move, Enter picks; Escape or a press outside it
+-- closes it with the choice as it was, and the page does not see that
+-- Escape. The popup is under it, or over it where there is more room,
+-- scrolled when neither holds it. Returns the DropDownList, and the row
+-- holding it and its label when there is one.
+local drops = {} -- live dropdowns
+local drop_serial = 0
+function M.safe.dropdown(parent, choices, current, on_choose, options)
+	options = options or {}
+	local h = options.height or 28
+	local row = nil
+	if options.label then
+		row = parent:CreateChild("UIElement")
+		row:SetLayout(magic.LM_HORIZONTAL, 10, magic.IntRect(0, 0, 0, 0))
+		local t = row:CreateChild("Text")
+		t:SetStyleAuto()
+		t.text = options.label
+		-- Its text's own width: a layout may have stretched it already
+		t:SetFixedWidth(options.label_width or t.minWidth)
+		t.verticalAlignment = VA_CENTER
+		parent = row
+	end
+	local drop = parent:CreateChild("DropDownList")
+	drop_serial = drop_serial + 1
+	drop:SetName("dropdown_" .. drop_serial)
+	drop:SetStyleAuto()
+	drop:SetFocusMode(magic.FM_FOCUSABLE)
+	drop.resizePopup = true
+	local arrow = drop:CreateChild("Text")
+	arrow:SetStyleAuto()
+	arrow.text = "▼"
+	arrow:SetFontSize(12)
+	arrow.color = magic.Color(M.safe.rgb("dim"))
+	-- Its own text, the placeholder's being the client's
+	local none = nil
+	if options.none then
+		none = drop.placeholder:CreateChild("Text")
+		none:SetStyleAuto()
+		none.text = options.none
+		none.color = magic.Color(M.safe.rgb("error"))
+		none.verticalAlignment = VA_CENTER
+	end
+	local values, index, widest = {}, nil, none and none.width or 0
+	for i, c in ipairs(choices) do
+		local label, value = c, c
+		if type(c) == "table" then
+			label, value = c[1], c[2]
+		end
+		values[i] = value
+		-- A row: an empty text, which draws the colours over all of it,
+		-- and the label centred in it, a font's glyphs overhanging their
+		-- own text's box
+		local t = parent:CreateChild("Text")
+		t:SetStyleAuto()
+		t:SetFixedHeight(h)
+		-- Named for a driven click covered by it ([SEQ_CLICK])
+		t:SetName(drop:GetName() .. ": " .. tostring(label))
+		local l = t:CreateChild("Text")
+		l:SetStyleAuto()
+		l.text = label
+		l.verticalAlignment = VA_CENTER
+		widest = math.max(widest, l.width)
+		drop:AddItem(t)
+		-- Text draws neither colour without one, and only when enabled
+		t.enabled = true
+		t:SetSelectionColor(magic.Color(0.2, 0.2, 0.25))
+		t:SetHoverColor(magic.Color(0.33, 0.33, 0.4))
+		if value == current and current ~= nil then
+			index = i
+			drop:SetSelection(i - 1)
+		end
+	end
+	-- Urho3D chooses the first one added when none is: none again
+	if not index then
+		drop.listView:ClearSelection()
+	elseif none then
+		none.visible = false
+	end
+	local w = options.width or
+			math.max(widest + 40, options.min_width or 0)
+	if options.fill then
+		drop:SetFixedHeight(h)
+		drop.minWidth = w
+		drop.maxWidth = 100000
+	else
+		drop:SetFixedSize(w, h)
+	end
+	-- The list lays its children out in a row, so the choice's text takes
+	-- all but the arrow's room (kept so as it grows: the Update below)
+	drop.placeholder:SetFixedWidth(w - 28)
+	-- The popup closing sends the list's selection whatever closed it. A
+	-- pick (a click on a row, Enter) leaves the focus on the dropdown;
+	-- Escape and a press elsewhere take it away, and the arrows may have
+	-- moved the selection: put back
+	magic.SubscribeToEvent(drop, "ItemSelected", function(_, _, data)
+		if not drop:HasFocus() then
+			if index then
+				drop:SetSelection(index - 1)
+			end
+			if magic.input:GetKeyPress(KEY_ESCAPE) then
+				escape_taken = true
+				uistack.take_key(KEY_ESCAPE)
+				drop:SetFocus(true)
+			end
+			if options.on_dismiss then
+				options.on_dismiss()
+			end
+			return
+		end
+		local i = data:GetInt("Selection") + 1
+		if i ~= index and values[i] ~= nil then
+			index = i
+			if none then
+				none.visible = false
+			end
+			on_choose(values[i], i)
+		end
+	end)
+	drops[#drops + 1] = drop
+	return drop, row
+end
+
+-- Whether a dropdown has the keys and the mouse: its popup up, or closed
+-- by this frame's Escape. A screen's own Escape or click-off stands down.
+function M.safe.dropdown_open()
+	return drop_open or escape_taken
+end
+
+-- Every dropdown's popup closed, with no pick
+function M.safe.close_dropdowns()
+	for _, d in ipairs(drops) do
+		if not gone(d) and d.showPopup then
+			d:ShowPopup(false)
+		end
+	end
+end
+
+-- Each frame: the popups' room set for their next opening, which is
+-- where Urho3D picks under or over, and the dropdowns removed forgotten
+magic.SubscribeToEvent("Update", function()
+	escape_taken = false
+	if #drops == 0 then
+		drop_open = false
+		return
+	end
+	local open, kept = false, {}
+	local root_h = magic.ui.root.height
+	for _, d in ipairs(drops) do
+		if not gone(d) then
+			kept[#kept + 1] = d
+			if d.showPopup then
+				open = true
+			elseif shown(d) then
+				if d.placeholder.width ~= d.width - 28 then
+					d.placeholder:SetFixedWidth(d.width - 28)
+				end
+				local y = d.screenPosition.y
+				-- simplified: the popup's frame is taken as 8 px
+				d.popup.maxHeight = math.max(root_h - y - d.height, y) - 8
+			end
+		end
+	end
+	drops, drop_open = kept, open
+end)
 
 -- on_close is optional and is called when the dialog goes away, however it
 -- goes: what wants it is a message that is the last thing before something

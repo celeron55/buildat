@@ -117,6 +117,6 @@ grep -a "Plan refused: Your plans use" "$tmp/d3.log" ||
 # names what covers it (the menu's Mode list over "Plan settings...")
 printf 'wait_log 30000 Entered the plan\ndelay 1500\nkeypress Escape\ndelay 1000\nmouse_pos 320 145\nmouse_click left\ndelay 800\nclick Button "Plan settings..."\nquit\n' > "$tmp/cd4"
 CMDS="$tmp/cd4" client d d4.log 0 BUILDAT_FP_PLAN=pd
-grep -aq 'Button "Plan settings..." at .*: covered by Button "Viewing"' "$tmp/d4.log" ||
+grep -aq 'Button "Plan settings..." at .*: covered by Text "" "dropdown_[0-9]*: Viewing"' "$tmp/d4.log" ||
 	fail "a covered click not refused ($tmp/d4.log)"
 echo "PASS"

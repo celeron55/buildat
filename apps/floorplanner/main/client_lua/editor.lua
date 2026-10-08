@@ -7615,10 +7615,9 @@ end
 
 local function over_ui()
 	local s = magic.ui.scale
-	return panel.over({toolbar, props, palette_win, pause_win, picker_win,
-			place.win, S.touch_bar, doc.accounts.page, doc.accounts.frame,
-			panel.popup}, S.mx / s,
-			S.my / s)
+	return panel.popup_open() or panel.over({toolbar, props, palette_win,
+			pause_win, picker_win, place.win, S.touch_bar, doc.accounts.page,
+			doc.accounts.frame}, S.mx / s, S.my / s)
 end
 
 local press_target, plan_facing, plan_aligned, stream_drag, use, use_target, walk
@@ -8871,10 +8870,9 @@ do
 			return
 		end
 		local sc = magic.ui.scale
-		local on_ui = panel.over({toolbar, props, palette_win, pause_win,
-				picker_win, place.win, S.touch_bar, doc.accounts.page,
-				doc.accounts.frame, panel.popup},
-				x / sc, y / sc)
+		local on_ui = panel.popup_open() or panel.over({toolbar, props,
+				palette_win, pause_win, picker_win, place.win, S.touch_bar,
+				doc.accounts.page, doc.accounts.frame}, x / sc, y / sc)
 		S.fingers[id] = {x = x, y = y, x0 = x, y0 = y, t0 = buildat.get_time_us(),
 				ui = on_ui}
 		if on_ui or S.paused then
@@ -9203,8 +9201,9 @@ do
 	-- progress; at the bottom of a view, the pause menu. Esc's, and the
 	-- touch bar's Cancel ([FP_TOUCH] 4).
 	function M.escape()
-		if panel.popup then
-			panel.close_popup()
+		if panel.popup_open() then
+			-- Its popup's, which Urho3D closed
+			return
 		elseif S.voxel_box then
 			-- The box given up; the button's release does nothing then
 			S.voxel_box = nil
@@ -11355,8 +11354,8 @@ function M.start(d)
 			S.swallow_up = true
 			return
 		end
-		local sc = magic.ui.scale
-		if panel.press(S.mx / sc, S.my / sc) and not over_ui() then
+		-- A press with a dropdown's popup up is the popup's
+		if panel.popup_open() then
 			S.swallow_up = true
 			return
 		end
@@ -11373,8 +11372,7 @@ function M.start(d)
 		M.mouse_wheel(data:GetInt("Wheel"))
 	end))
 	magic.SubscribeToEvent("TouchBegin", live(function(_, data)
-		local x, y, sc = data:GetInt("X"), data:GetInt("Y"), magic.ui.scale
-		panel.press(x / sc, y / sc)
+		local x, y = data:GetInt("X"), data:GetInt("Y")
 		M.touch_begin(data:GetInt("TouchID"), x, y)
 	end))
 	magic.SubscribeToEvent("TouchMove", live(function(_, data)

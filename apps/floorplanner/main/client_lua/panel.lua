@@ -5,6 +5,7 @@
 -- The few widgets the editor's panels are made of, on the default style
 -- init.lua sets. A panel is rebuilt whole when what it shows changes.
 local magic = require("buildat/extension/urho3d")
+local ui_utils = require("buildat/extension/ui_utils")
 local M = {}
 
 -- A window at a corner of the screen: halign/valign as SetAlignment takes
@@ -115,26 +116,9 @@ function M.button(parent, text, on_click, down, min_width)
 	return b
 end
 
--- **A dropdown** (user): a button saying the choice, which opens under it
--- a list of the choices over everything else. A choice, the button again,
--- a press elsewhere (M.press) or Esc closes it; one is open at a time.
+-- **A dropdown** (user): ui_utils' ([UI_DROPDOWN]), its label before it.
 -- choices: {{text, value}, ...}; on_choose(value); on_dismiss(), when
 -- given, when it is closed with nothing chosen
-M.popup = nil
-local owner_at = nil -- the open one's button's place, found again by it
-local skip_owner = false
-local dismissed = nil -- the open one's on_dismiss
-function M.close_popup()
-	if M.popup then
-		M.popup:Remove()
-		M.popup, owner_at = nil, nil
-		local f = dismissed
-		dismissed = nil
-		if f then
-			f()
-		end
-	end
-end
 -- A button's mark at its right end, its text centred in what is left:
 -- the dropdown's (Overpass has U+25BC and U+25B2, not the smaller ones)
 function M.mark(b, mark)
@@ -153,61 +137,28 @@ end
 
 function M.dropdown(parent, label, choices, current, on_choose, min_width,
 		on_dismiss)
-	local shown = "?"
-	for _, c in ipairs(choices) do
-		if c[2] == current then
-			shown = c[1]
-		end
-	end
 	if M.view_only then
+		local shown = "?"
+		for _, c in ipairs(choices) do
+			if c[2] == current then
+				shown = c[1]
+			end
+		end
 		return M.label(parent, (label and label .. ": " or "") .. shown)
 	end
-	local b
-	b = M.button(parent, (label and label .. ": " or "") .. shown,
-			function()
-		if skip_owner then
-			-- This press on it closed it already
-			skip_owner = false
-			return
-		end
-		M.close_popup()
-		dismissed = on_dismiss
-		local w = magic.ui.root:CreateChild("Window")
-		w:SetStyleAuto()
-		w:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(4, 4, 4, 4))
-		w:SetFocusMode(magic.FM_FOCUSABLE)
-		-- Over the pause menu and the colour picker
-		w.priority = 300
-		for _, c in ipairs(choices) do
-			M.button(w, c[1], function()
-				dismissed = nil
-				M.close_popup()
-				on_choose(c[2])
-			end, c[2] == current, b.width - 8)
-		end
-		local p = b.screenPosition
-		local y = p.y + b.height
-		if y + w.height > magic.ui.root.height then
-			y = math.max(0, p.y - w.height)
-		end
-		w:SetPosition(p.x, y)
-		M.popup = w
-		owner_at = {p.x, p.y, b.width, b.height}
-	end, false, min_width)
-	return M.mark(b, "▼")
+	local drop, row = ui_utils.dropdown(parent, choices, current, on_choose,
+			{label = label, min_width = min_width, height = 24,
+			on_dismiss = on_dismiss, fill = true})
+	return row or drop
 end
 
--- A press anywhere, in UI coordinates, before it goes on: one off the open
--- dropdown closes it. True when it did.
-function M.press(ux, uy)
-	if not M.popup or M.over({M.popup}, ux, uy) then
-		return false
-	end
-	local o = owner_at
-	skip_owner = ux >= o[1] and uy >= o[2] and ux < o[1] + o[3] and
-			uy < o[2] + o[4]
-	M.close_popup()
-	return true
+-- Whether a dropdown's popup is up, which takes a press or Esc
+function M.popup_open()
+	return ui_utils.dropdown_open()
+end
+
+function M.close_popup()
+	ui_utils.close_dropdowns()
 end
 
 -- **A menu by the keyboard** (user, 2026-10-01): ui_utils' keyboard

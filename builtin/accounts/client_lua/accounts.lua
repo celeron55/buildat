@@ -801,17 +801,9 @@ M.page_field = field
 
 local WARN = magic.Color(rgb("warn"))
 
--- The open dropdown's choices, one at a time (the Starport page's)
-local popup = nil
 -- The Starport page's listing as being edited, kept over its redraws (a
 -- dropdown's choice redraws it); nil to take the server's config again
 local draft = nil
-local function close_popup()
-	if popup then
-		popup:Remove()
-		popup = nil
-	end
-end
 local DIM = magic.Color(rgb("dim"))
 
 local chat_list = nil
@@ -820,7 +812,6 @@ local chat_list = nil
 local chat_width = 100
 
 local function drop_page()
-	close_popup()
 	-- What was typed on the Health page, kept over its redraws
 	if page_kind == "health" then
 		health_capture()
@@ -1441,42 +1432,13 @@ local DESCRIPTORS = {
 local ERROR = magic.Color(rgb("error"))
 
 
--- A dropdown: its label, and a button saying the value, a red "?" for none;
--- pressed, the choices under it
+-- A dropdown: its label, and the value, a red "?" for none
 local function dropdown(parent, label, choices, current, on_choose)
 	local l = page_text(parent, label)
 	l:SetWordwrap(false)
 	l:SetFixedWidth(130)
-	local b
-	b = button(parent, (current or "?") .. "  \226\150\188", function()
-		close_popup()
-		local w = magic.ui.root:CreateChild("Window")
-		w.defaultStyle = magic.cache:GetResource("XMLFile",
-				"launch_menu/res/main_style.xml")
-		w:SetStyleAuto()
-		w:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(4, 4, 4, 4))
-		-- Over the page (100)
-		w.priority = 200
-		for _, c in ipairs(choices) do
-			local cb = button(w, c, function()
-				close_popup()
-				on_choose(c)
-			end)
-			cb.minWidth = b.width
-		end
-		local p = b.screenPosition
-		local y = p.y + b.height
-		if y + w.height > magic.ui.root.height then
-			y = math.max(0, p.y - w.height)
-		end
-		w:SetPosition(p.x, y)
-		popup = w
-	end)
-	b:SetFixedWidth(118)
-	if not current then
-		b:GetChild(0):SetColor(ERROR)
-	end
-	return b
+	return ui_utils.dropdown(parent, choices, current, on_choose,
+			{width = 118, none = "?"})
 end
 
 -- **What the Starport page is, and what goes in each field** ([STARPORT]
@@ -1588,7 +1550,6 @@ local STARPORT_HELP = {
 -- A heading is a line beginning with "# "
 
 starport_help = function()
-	close_popup()
 	if sw.help then
 		sw.help:Remove()
 	end
@@ -2388,7 +2349,7 @@ local function off_window()
 	local sc = magic.ui.scale or 1
 	local m = magic.input:GetMousePosition()
 	local ux, uy = m.x / sc, m.y / sc
-	for _, el in ipairs({sw.frame, popup or false, sw.help or false}) do
+	for _, el in ipairs({sw.frame, sw.help or false}) do
 		if el then
 			local p, sz = el.screenPosition, el.size
 			if ux >= p.x and uy >= p.y and ux < p.x + sz.x and
@@ -2400,7 +2361,8 @@ local function off_window()
 	return true
 end
 magic.SubscribeToEvent("MouseButtonDown", function()
-	pressed_off = off_window()
+	-- A press off a dropdown's popup closes only that
+	pressed_off = not ui_utils.dropdown_open() and off_window()
 end)
 magic.SubscribeToEvent("MouseButtonUp", function()
 	if pressed_off and off_window() then
@@ -2412,8 +2374,7 @@ end)
 -- Back from where the window or a page is, as a Back button: for a game's
 -- Esc. False at the top of a window that is the app's own.
 M.back = function()
-	if popup then
-		close_popup()
+	if ui_utils.dropdown_open() then
 		return true
 	end
 	if M.page and page_back then

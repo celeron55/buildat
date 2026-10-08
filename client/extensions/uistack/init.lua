@@ -188,6 +188,12 @@ function M.UIStack(root)
 				if not element:HasRecursiveFocus() then
 					return
 				end
+				-- A key a dropdown took this frame (ui_utils.dropdown's
+				-- Escape, which closed its popup)
+				if M.key_taken and event_name == "KeyDown" and
+						event_data:GetInt("Key") == M.key_taken then
+					return
+				end
 				callback(event_type, event_data)
 			end)
 			table.insert(element.event_subscriptions, {
@@ -298,6 +304,16 @@ magic.SubscribeToEvent("UIMouseClick", function(event_type, event_data)
 end)
 -- Set by whoever answers `event scan` for the world (vanilla's scan.lua),
 -- so the menu's answer below stands aside once it is there
+-- A key taken for the rest of its frame: ui_utils.dropdown's Escape, which
+-- closed its popup, is not the screen's
+M.key_taken = nil
+function M.safe.take_key(key)
+	M.key_taken = key
+end
+magic.SubscribeToEvent("Update", function()
+	M.key_taken = nil
+end)
+
 M.world_scan = false
 -- An element outside the stack that a scan should walk too: a client that
 -- draws its world UI on the UI root rather than on its screen (the Luanti
