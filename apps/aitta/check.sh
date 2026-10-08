@@ -9,7 +9,8 @@
 #      changelog), downloaded and installed;
 #   3. a licence the instance does not take, and a manifest whose author
 #      is not the key's, are refused;
-#   4. the admin delists it: off the list, and its archive not served.
+#   4. the admin delists it: off the list, and its archive not served;
+#   5. a network's reads past 240 a minute are refused.
 #
 #   apps/aitta/check.sh
 set -u
@@ -95,4 +96,10 @@ curl -s "http://127.0.0.1:$P/api/aitta/list" | grep -q '"version":"1.0"' &&
 [ "$(curl -s -o /dev/null -w '%{http_code}' \
 	"http://127.0.0.1:$P/api/aitta/archive/$sha.zip")" = 404 ] ||
 	fail "a delisted release's archive is served"
-echo "PASS: bound, published, listed, installed; an unbound key, a licence, another author refused; delisted"
+
+# 5. 240 reads a minute a network ([REWORK_FIXES]): 490 cannot all fit in
+# the minutes they span, whichever minute boundary falls among them
+curl -s $(for i in $(seq 490); do echo "http://127.0.0.1:$P/api/aitta/info"; done) |
+	grep -q "too many requests from your network" ||
+	fail "490 reads in a row were not limited"
+echo "PASS: bound, published, listed, installed; an unbound key, a licence, another author refused; delisted; reads limited"

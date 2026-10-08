@@ -64,6 +64,11 @@ using interface::Event;
 
 // [SIM_CLOCK]: the calendar, which a check may move
 static int64_t now_s(){ return interface::os::wall_us() / 1000000; }
+// [REWORK_FIXES] Requests a minute per network (network::address_bin: a
+// v4 /24, a v6 /64): reads (pages, lists, archives) and uploads.
+// simplified: per network; many networks get many times it
+static const int READS_A_MINUTE = 240;
+static const int UPLOADS_A_MINUTE = 30;
 
 static ss_ jstr(const json::Value &v, const char *k)
 {
@@ -160,6 +165,8 @@ struct Module: public interface::Module
 	ss_ m_archives;
 	ss_ m_tmp;
 	sm_<ss_, Upload> m_uploads; // by sha256
+	int64_t m_hits_minute = 0;
+	std::map<ss_, int> m_hits;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -265,14 +272,29 @@ struct Module: public interface::Module
 		respond(r, v);
 	}
 
+	bool allowed(const network::HttpRequest &r)
+	{
+		if(now_s() / 60 != m_hits_minute){
+			m_hits_minute = now_s() / 60;
+			m_hits.clear();
+		}
+		const bool post = r.method == "POST";
+		return ++m_hits[(post ? "u " : "r ")+network::address_bin(r.address)] <=
+				(post ? UPLOADS_A_MINUTE : READS_A_MINUTE);
+	}
+
 	void on_http(const network::HttpRequest &r)
 	{
 		const ss_ base = "/api/aitta/";
-		if(r.path == "/" || r.path.compare(0, 3, "/p/") == 0 ||
-				r.path.compare(0, 7, "/brand/") == 0)
-			return html_page(r);
-		if(r.path.compare(0, base.size(), base) != 0)
+		const bool page = r.path == "/" || r.path.compare(0, 3, "/p/") == 0 ||
+				r.path.compare(0, 7, "/brand/") == 0;
+		if(!page && r.path.compare(0, base.size(), base) != 0)
 			return;
+		if(!allowed(r))
+			return refuse(r, "too many requests from your network: wait a "
+					"minute");
+		if(page)
+			return html_page(r);
 		if(!m_save)
 			return refuse(r, "Aitta is not ready");
 		const ss_ call = r.path.substr(base.size());
