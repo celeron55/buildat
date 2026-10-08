@@ -735,12 +735,19 @@ if(NOT CMAKE_CROSSCOMPILING)
 		"${CMAKE_SOURCE_DIR}/builtin/*.lua" "${CMAKE_SOURCE_DIR}/apps/*.lua")
 	list(FILTER CLIENT_SIDE_LUA INCLUDE REGEX
 		"/(client|extensions)/|/client_lua/")
+	# The files to a script as one argument
+	string(JOIN "|" CLIENT_SIDE_LUA_ARG ${CLIENT_SIDE_LUA})
 	set(LUA51_STAMP "${CMAKE_BINARY_DIR}/lua51_parse.stamp")
 	add_custom_command(OUTPUT "${LUA51_STAMP}"
 		COMMAND luac51 -p ${CLIENT_SIDE_LUA}
+		# [LUA51_ESCAPES]: what Lua 5.1 parses but reads otherwise
+		COMMAND ${CMAKE_COMMAND} "-DFILES=${CLIENT_SIDE_LUA_ARG}"
+			-P "${CMAKE_SOURCE_DIR}/util/lua51_escapes.cmake"
 		COMMAND ${CMAKE_COMMAND} -E touch "${LUA51_STAMP}"
 		DEPENDS luac51 ${CLIENT_SIDE_LUA}
-		COMMENT "Parsing the client-side Lua as Lua 5.1 (the web build's)")
+			"${CMAKE_SOURCE_DIR}/util/lua51_escapes.cmake"
+		COMMENT "Parsing the client-side Lua as Lua 5.1 (the web build's)"
+		VERBATIM)
 	add_custom_target(lua51_parse ALL DEPENDS "${LUA51_STAMP}")
 endif()
 if(BUILD_CLIENT)
