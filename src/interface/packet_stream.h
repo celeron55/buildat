@@ -3,10 +3,30 @@
 #pragma once
 #include "core/types.h"
 #include <functional>
-#include <deque>
 
 namespace interface
 {
+	// Bytes read from a socket and not yet taken as packets: taken from the
+	// front by an offset, the front dropped on an append once it is half
+	// of the whole ([EVENT_DISPATCH]: a deque copied byte by byte)
+	struct InputBuffer
+	{
+		ss_ data;
+		size_t at = 0;
+		size_t size() const { return data.size() - at; }
+		bool empty() const { return at == data.size(); }
+		const char* begin() const { return data.data() + at; }
+		void clear(){ data.clear(); at = 0; }
+		void append(const char *p, size_t n){
+			if(at > 0 && at * 2 >= data.size()){
+				data.erase(0, at);
+				at = 0;
+			}
+			data.append(p, n);
+		}
+		void append(const ss_ &s){ append(s.data(), s.size()); }
+	};
+
 	typedef size_t PacketType;
 
 	struct UnknownPacketReceived: public Exception {
@@ -114,7 +134,7 @@ namespace interface
 		// next turn; 0 drains everything, which is what it did before
 		// there was a budget ([PACKET_STALL]: one update took every
 		// buffered packet, and one of them can be 80 ms).
-		void input(std::deque<char> &socket_buffer,
+		void input(InputBuffer &socket_buffer,
 				std::function<void(const ss_&name, const ss_&data)> cb,
 				int64_t budget_us = 0);
 
@@ -125,7 +145,7 @@ namespace interface
 		// dropped is a definition never sent again, and that peer cannot
 		// read anything of that type for the rest of the session.
 		void output(const ss_ &name, const ss_ &data,
-				std::function<void(const ss_&packet_data, bool droppable)> cb,
+				std::function<void(ss_ &&packet_data, bool droppable)> cb,
 				bool droppable = true);
 
 		// Only the definition of a type, sent now rather than before its
@@ -133,11 +153,11 @@ namespace interface
 		// which tells the server's network module that it is not a
 		// browser without the quiet wait ([WEB_CLIENT]).
 		void define(const ss_ &name,
-				std::function<void(const ss_&packet_data, bool droppable)> cb);
+				std::function<void(ss_ &&packet_data, bool droppable)> cb);
 
 	private:
 		void send_new_types(
-				std::function<void(const ss_&packet_data, bool droppable)> cb);
+				std::function<void(ss_ &&packet_data, bool droppable)> cb);
 	};
 }
 // vim: set noet ts=4 sw=4:

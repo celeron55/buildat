@@ -689,7 +689,10 @@ struct CState: public State, public interface::Server
 	//       everything until top)
 	sv_<ss_> m_module_load_order;
 	size_t m_module_count = 0;
-	sv_<sv_<wp_<ModuleContainer>>> m_event_subs;
+	// Each type's subscribers, copied on write: an emit holds its type's
+	// list without copying the rest ([EVENT_DISPATCH])
+	typedef sv_<wp_<ModuleContainer>> SubList;
+	sv_<sp_<const SubList>> m_event_subs;
 	// NOTE: You can make a copy of an sp_<ModuleContainer> and unlock this
 	//       mutex for processing the module asynchronously (just lock mc->mutex)
 	interface::Mutex m_modules_mutex;
@@ -1279,18 +1282,20 @@ struct CState: public State, public interface::Server
 						cs(module_name));
 				{
 					for(Event::Type type = 0; type < m_event_subs.size(); type++){
-						sv_<wp_<ModuleContainer>> &sublist = m_event_subs[type];
-						sv_<wp_<ModuleContainer>> new_sublist;
-						for(wp_<ModuleContainer> &mc1 : sublist){
+						if(!m_event_subs[type])
+							continue;
+						const SubList &sublist = *m_event_subs[type];
+						auto new_sublist = std::make_shared<SubList>();
+						for(const wp_<ModuleContainer> &mc1 : sublist){
 							if(sp_<ModuleContainer>(mc1.lock()).get() !=
 									mc.get())
-								new_sublist.push_back(mc1);
+								new_sublist->push_back(mc1);
 							else
 								log_v(MODULE,
 										"Removing %s subscription to event %zu",
 										cs(module_name), type);
 						}
-						sublist = new_sublist;
+						m_event_subs[type] = new_sublist;
 					}
 				}
 				// Remove server-wide reference to module container
@@ -1690,9 +1695,11 @@ struct CState: public State, public interface::Server
 		}
 		if(m_event_subs.size() <= type + 1)
 			m_event_subs.resize(type + 1);
-		sv_<wp_<ModuleContainer>> &sublist = m_event_subs[type];
+		auto sublist = std::make_shared<SubList>();
+		if(m_event_subs[type])
+			*sublist = *m_event_subs[type];
 		bool found = false;
-		for(wp_<ModuleContainer> &item : sublist){
+		for(wp_<ModuleContainer> &item : *sublist){
 			if(item.lock() == mc0){
 				found = true;
 				break;
@@ -1705,7 +1712,8 @@ struct CState: public State, public interface::Server
 		auto *evreg = interface::getGlobalEventRegistry();
 		log_d(MODULE, "sub_event(): %s subscribed to %s (%zu)",
 				cs(module_name), cs(evreg->name(type)), type);
-		sublist.push_back(wp_<ModuleContainer>(mc0));
+		sublist->push_back(wp_<ModuleContainer>(mc0));
+		m_event_subs[type] = sublist;
 	}
 
 	// Do not use synchronous=true unless specifically needed in a special case.
@@ -1717,27 +1725,22 @@ struct CState: public State, public interface::Server
 					cs(evreg->name(event.type)), event.type);
 		}
 
-		sv_<sv_<wp_<ModuleContainer>>> event_subs_snapshot;
+		sp_<const SubList> subs;
 		{
 			interface::MutexScope ms(m_modules_mutex);
-			event_subs_snapshot = m_event_subs;
+			if(event.type < m_event_subs.size())
+				subs = m_event_subs[event.type];
 		}
-
-		if(event.type >= event_subs_snapshot.size()){
-			log_t(MODULE, "emit_event(): %zu: No subs", event.type);
-			return;
-		}
-		sv_<wp_<ModuleContainer>> &sublist = event_subs_snapshot[event.type];
-		if(sublist.empty()){
+		if(!subs || subs->empty()){
 			log_t(MODULE, "emit_event(): %zu: No subs", event.type);
 			return;
 		}
 		if(log_get_max_level() >= CORE_TRACE){
 			auto *evreg = interface::getGlobalEventRegistry();
 			log_t(MODULE, "emit_event(): %s (%zu): Pushing to %zu modules",
-					cs(evreg->name(event.type)), event.type, sublist.size());
+					cs(evreg->name(event.type)), event.type, subs->size());
 		}
-		for(wp_<ModuleContainer> &mc_weak : sublist){
+		for(const wp_<ModuleContainer> &mc_weak : *subs){
 			sp_<ModuleContainer> mc(mc_weak.lock());
 			if(mc){
 				if(synchronous)

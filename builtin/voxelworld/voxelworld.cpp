@@ -4500,6 +4500,16 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
+		dispatch(type, p);
+		for(auto &pair : m_instances){
+			up_<CInstance> &instance = pair.second;
+			instance->event(type, p);
+		}
+	}
+
+	// The handlers' list, which returns at its match
+	void dispatch(const Event::Type &type, const Event::Private *p)
+	{
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_VOIDN("core:unload", on_unload)
 		EVENT_VOIDN("core:shutdown", on_shutdown)
@@ -4513,11 +4523,6 @@ struct Module: public interface::Module, public voxelworld::Interface
 				client_file::FilesTransmitted)
 		EVENT_TYPEN("main_context:scene_deleted", on_scene_deleted,
 				main_context::SceneDeleted);
-
-		for(auto &pair : m_instances){
-			up_<CInstance> &instance = pair.second;
-			instance->event(type, p);
-		}
 	}
 
 	void on_start()

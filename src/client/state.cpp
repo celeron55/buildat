@@ -118,7 +118,7 @@ struct CState: public State
 	std::unique_ptr<client::LanRelay> m_lan_relay;
 	// m_wss is a pipe, not TLS over m_socket
 	bool m_pipe = false;
-	std::deque<char> m_socket_buffer;
+	interface::InputBuffer m_socket_buffer;
 	interface::PacketStream m_packet_stream;
 	sp_<app::App> m_app;
 	ss_ m_remote_cache_path;
@@ -605,8 +605,7 @@ struct CState: public State
 			if(n <= 0)
 				return false;
 			m_last_data_us = get_timeofday_us();
-			m_socket_buffer.insert(m_socket_buffer.end(), got.begin(),
-					got.end());
+			m_socket_buffer.append(got);
 			return !m_disconnected;
 		}
 		int fd = m_socket->fd();
@@ -624,7 +623,7 @@ struct CState: public State
 		}
 		log_d(MODULE, "Received %zu bytes", r);
 		m_last_data_us = get_timeofday_us();
-		m_socket_buffer.insert(m_socket_buffer.end(), buf, buf + r);
+		m_socket_buffer.append(buf, r);
 		return !m_disconnected;
 	}
 

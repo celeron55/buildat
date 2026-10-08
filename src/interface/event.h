@@ -3,8 +3,12 @@
 #pragma once
 #include "core/types.h"
 
+// A handler's match returns from the calling function: an event()
+// dispatches to one handler and does nothing after the list
+// ([EVENT_DISPATCH]); work for every event goes in the caller of a
+// function that holds only the list.
 #define EVENT_DISPATCH_VOID(event_type, handler) \
-	if(type == event_type){handler(); }
+	if(type == event_type){handler(); return; }
 #define EVENT_DISPATCH_TYPE(event_type, handler, param_type) \
 	if(type == event_type){ \
 		auto p0 = dynamic_cast<const param_type*>(p); \
@@ -14,13 +18,20 @@
 				#param_type ")"); \
 		else throw Exception(ss_()+"Invalid parameter to "+__PRETTY_FUNCTION__+ \
 					  "::" #handler " (expected " #param_type ")"); \
+		return; \
 	}
 #define EVENT_VOID EVENT_DISPATCH_VOID
 #define EVENT_TYPE EVENT_DISPATCH_TYPE
-#define EVENT_VOIDN(name, handler) \
-	EVENT_DISPATCH_VOID(interface::Event::t(name), handler)
-#define EVENT_TYPEN(name, handler, param_type) \
-	EVENT_DISPATCH_TYPE(interface::Event::t(name), handler, param_type)
+// The name's type looked up once a site: the name is a literal, and a type
+// is never freed
+#define EVENT_VOIDN(name, handler) { \
+	static const interface::Event::Type event_type_ = \
+			interface::Event::t(name); \
+	EVENT_DISPATCH_VOID(event_type_, handler) }
+#define EVENT_TYPEN(name, handler, param_type) { \
+	static const interface::Event::Type event_type_ = \
+			interface::Event::t(name); \
+	EVENT_DISPATCH_TYPE(event_type_, handler, param_type) }
 
 namespace interface
 {

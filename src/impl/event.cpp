@@ -13,7 +13,8 @@ Event::Type Event::t(const ss_ &name)
 struct CEventRegistry: public EventRegistry
 {
 	sm_<ss_, Event::Type> m_types;
-	Event::Type m_next_type = 1;
+	// The names by type, [0] none
+	sv_<ss_> m_names{""};
 	interface::Mutex m_mutex;
 
 	Event::Type type(const ss_ &name)
@@ -22,8 +23,9 @@ struct CEventRegistry: public EventRegistry
 		auto it = m_types.find(name);
 		if(it != m_types.end())
 			return it->second;
-		m_types[name] = m_next_type++;
-		return m_next_type - 1;
+		m_types[name] = m_names.size();
+		m_names.push_back(name);
+		return m_names.size() - 1;
 	}
 
 	Event::Type find(const ss_ &name)
@@ -36,11 +38,7 @@ struct CEventRegistry: public EventRegistry
 	ss_ name(const Event::Type &type)
 	{
 		interface::MutexScope ms(m_mutex);
-		for(auto &pair : m_types){
-			if(pair.second == type)
-				return pair.first;
-		}
-		return "";
+		return type < m_names.size() ? m_names[type] : "";
 	}
 };
 

@@ -22,7 +22,7 @@ static ss_ hex_of(const char *p, size_t n)
 
 static void self_check();
 
-void PacketStream::input(std::deque<char> &socket_buffer,
+void PacketStream::input(InputBuffer &socket_buffer,
 		std::function<void(const ss_&name, const ss_&data)> cb,
 		int64_t budget_us)
 {
@@ -37,14 +37,15 @@ void PacketStream::input(std::deque<char> &socket_buffer,
 	for(;;){
 		if(socket_buffer.size() < 6)
 			return;
+		const char *b = socket_buffer.begin();
 		size_t type =
-				(socket_buffer[0] & 0xff)<<0 |
-				(socket_buffer[1] & 0xff)<<8;
+				(b[0] & 0xff)<<0 |
+				(b[1] & 0xff)<<8;
 		size_t size =
-				(socket_buffer[2] & 0xff)<<0 |
-				(socket_buffer[3] & 0xff)<<8 |
-				(socket_buffer[4] & 0xff)<<16 |
-				(size_t)(socket_buffer[5] & 0xff)<<24;
+				(b[2] & 0xff)<<0 |
+				(b[3] & 0xff)<<8 |
+				(b[4] & 0xff)<<16 |
+				(size_t)(b[5] & 0xff)<<24;
 		//log_d(MODULE, "size=%zu", size);
 		if(size > m_max_packet_bytes){
 			throw UnknownPacketReceived("A packet of "+itos((int64_t)size)+
@@ -56,12 +57,11 @@ void PacketStream::input(std::deque<char> &socket_buffer,
 			return;
 		char header[6];
 		for(size_t i = 0; i < 6; i++)
-			header[i] = socket_buffer[i];
+			header[i] = b[i];
 		log_d(MODULE, "Received full packet; type=%zu, "
 				"length=6+%zu", type, size);
-		ss_ data(socket_buffer.begin() + 6, socket_buffer.begin() + 6 + size);
-		socket_buffer.erase(socket_buffer.begin(),
-				socket_buffer.begin() + 6 + size);
+		ss_ data(b + 6, size);
+		socket_buffer.at += 6 + size;
 		const uint64_t packet_at = m_input_offset;
 		m_input_offset += 6 + size;
 
@@ -168,14 +168,14 @@ void PacketStream::input(std::deque<char> &socket_buffer,
 }
 
 void PacketStream::define(const ss_ &name,
-		std::function<void(const ss_&packet_data, bool droppable)> cb)
+		std::function<void(ss_ &&packet_data, bool droppable)> cb)
 {
 	m_outgoing_types.get(name);
 	send_new_types(cb);
 }
 
 void PacketStream::send_new_types(
-		std::function<void(const ss_&packet_data, bool droppable)> cb)
+		std::function<void(ss_ &&packet_data, bool droppable)> cb)
 {
 	// Send new packet types if needed
 	log_d(MODULE, "m_outgoing_types.m_next_type=%zu"
@@ -206,7 +206,7 @@ void PacketStream::send_new_types(
 }
 
 void PacketStream::output(const ss_ &name, const ss_ &data,
-		std::function<void(const ss_&packet_data, bool droppable)> cb,
+		std::function<void(ss_ &&packet_data, bool droppable)> cb,
 		bool droppable)
 {
 	PacketType type = m_outgoing_types.get(name);
@@ -280,7 +280,8 @@ static void self_check()
 
 	PacketStream r;
 	sv_<std::pair<ss_, ss_>> got;
-	std::deque<char> buf(stream.begin(), stream.end());
+	InputBuffer buf;
+	buf.append(stream);
 	r.input(buf, [&](const ss_ &name, const ss_ &data){
 		got.push_back(std::make_pair(name, data));
 	});
@@ -300,7 +301,8 @@ static void self_check()
 		ss_ s3;
 		auto write3 = [&](const ss_ &d, bool droppable){ s3 += d; };
 		w3.output("test:big", ss_(150, 'x'), write3, false);
-		std::deque<char> b3(s3.begin(), s3.end());
+		InputBuffer b3;
+		b3.append(s3);
 		bool refused = false;
 		try {
 			r3.input(b3, [&](const ss_&, const ss_&){});
@@ -315,7 +317,8 @@ static void self_check()
 		ss_ s4;
 		auto write4 = [&](const ss_ &d, bool droppable){ s4 += d; };
 		w4.output("test:frag", ss_(PacketStream::FRAGMENT_BYTES * 3, 'y'), write4, true);
-		std::deque<char> b4(s4.begin(), s4.end());
+		InputBuffer b4;
+		b4.append(s4);
 		refused = false;
 		try {
 			r4.input(b4, [&](const ss_&, const ss_&){});
@@ -339,7 +342,8 @@ static void self_check()
 		for(int i = 0; i < 40; i++)
 			w2.output(ss_()+"test:n"+itos(i), itos(i), write2);
 		sv_<ss_> got2;
-		std::deque<char> b2(s2.begin(), s2.end());
+		InputBuffer b2;
+		b2.append(s2);
 		try {
 			r2.input(b2, [&](const ss_ &name, const ss_ &data){
 				got2.push_back(name+"="+data);
@@ -369,7 +373,8 @@ static void self_check()
 					itos((int64_t)packets)+" packets");
 		w3.output("test:small", "s", write3);
 		sv_<std::pair<ss_, ss_>> got3;
-		std::deque<char> b3(s3.begin(), s3.end());
+		InputBuffer b3;
+		b3.append(s3);
 		r3.input(b3, [&](const ss_ &name, const ss_ &data){
 			got3.push_back(std::make_pair(name, data));
 		});
@@ -381,9 +386,9 @@ static void self_check()
 
 	// A type nobody defined: what a stream read at the wrong offset looks
 	// like, and the message has to say where rather than only which number
-	std::deque<char> bad;
+	InputBuffer bad;
 	const char raw[] = {(char)200, 0, 1, 0, 0, 0, (char)0x78};
-	bad.insert(bad.end(), raw, raw + sizeof raw);
+	bad.append(raw, sizeof raw);
 	try {
 		r.input(bad, [&](const ss_ &name, const ss_ &data){});
 		throw Exception("packet_stream self_check: an undefined type was "

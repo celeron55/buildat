@@ -207,7 +207,7 @@ struct Peer
 		return forwarded_for.empty() ? socket->get_remote_address() :
 				forwarded_for;
 	}
-	std::deque<char> socket_buffer;
+	interface::InputBuffer socket_buffer;
 	interface::PacketStream packet_stream;
 	// This peer's packets handed to the modules and not handled yet. Over
 	// MAX_IN_FLIGHT its socket is not read until they are; it is not
@@ -270,6 +270,10 @@ struct Peer
 	// the peer reads a type it has not been told. Until the count is
 	// zero the name's payloads go ordered too.
 	sm_<ss_, size_t> ordered_first;
+	// A LatestOnly name's payload in the ordered queue, for its
+	// replacement without a scan of the queue (a deque keeps an element
+	// where it is as the ends change)
+	sm_<ss_, Queued*> queued_latest;
 	size_t out_queued_bytes = 0;
 	// When the queue first went over the policy's limit, for Disconnect
 	int64_t over_since_us = 0;
@@ -314,10 +318,14 @@ struct Peer
 			out_buf = std::move(out_latest.front().second);
 			out_latest.pop_front();
 		} else if(!out_queue.empty()){
-			out_buf = std::move(out_queue.front().packet);
-			auto f = ordered_first.find(out_queue.front().name);
+			Queued &q = out_queue.front();
+			out_buf = std::move(q.packet);
+			auto f = ordered_first.find(q.name);
 			if(f != ordered_first.end() && --f->second == 0)
 				ordered_first.erase(f);
+			auto l = queued_latest.find(q.name);
+			if(l != queued_latest.end() && l->second == &q)
+				queued_latest.erase(l);
 			out_queue.pop_front();
 		} else if(file && file_at < file->size()){
 			const size_t n = std::min(file->size() - file_at,
@@ -344,35 +352,38 @@ struct Peer
 	// fragment, so a replacement is one entry; a fragmented payload of a
 	// LatestOnly name goes ordered whole (simplified: none of the three
 	// LatestOnly names fragments in practice).
-	void enqueue(const ss_ &name, const ss_ &packet, bool latest_only,
+	void enqueue(const ss_ &name, ss_ &&packet, bool latest_only,
 			bool droppable, bool one_piece)
 	{
+		const size_t size = packet.size();
 		if(latest_only && droppable && !ordered_first.count(name)){
+			// simplified: a scan, of at most the three LatestOnly names
 			for(auto &pair : out_latest){
 				if(pair.first == name){
 					out_queued_bytes -= pair.second.size();
-					out_queued_bytes += packet.size();
-					pair.second = packet;
+					out_queued_bytes += size;
+					pair.second = std::move(packet);
 					return;
 				}
 			}
-			out_latest.push_back(std::make_pair(name, packet));
+			out_latest.emplace_back(name, std::move(packet));
 		} else {
 			if(latest_only && droppable && one_piece){
-				for(Queued &q : out_queue){
-					if(q.name == name && q.payload){
-						out_queued_bytes -= q.packet.size();
-						out_queued_bytes += packet.size();
-						q.packet = packet;
-						return;
-					}
+				auto l = queued_latest.find(name);
+				if(l != queued_latest.end()){
+					out_queued_bytes -= l->second->packet.size();
+					out_queued_bytes += size;
+					l->second->packet = std::move(packet);
+					return;
 				}
 			}
-			out_queue.push_back(Queued{name, packet, droppable});
+			out_queue.push_back(Queued{name, std::move(packet), droppable});
 			if(latest_only)
 				ordered_first[name]++;
+			if(latest_only && droppable && one_piece)
+				queued_latest[name] = &out_queue.back();
 		}
-		out_queued_bytes += packet.size();
+		out_queued_bytes += size;
 	}
 
 	// Bytes that go as they are, ahead of nothing and behind what is queued:
@@ -1108,8 +1119,7 @@ struct Module: public interface::Module, public network::Interface
 	void become_native(Peer &peer)
 	{
 		peer.kind = Peer::Kind::Native;
-		peer.socket_buffer.insert(peer.socket_buffer.end(),
-				peer.http_request.begin(), peer.http_request.end());
+		peer.socket_buffer.append(peer.http_request);
 		peer.http_request.clear();
 		emit_connected(peer);
 		input_packets(peer);
@@ -1479,8 +1489,7 @@ struct Module: public interface::Module, public network::Interface
 				}
 				// simplified: the order of a message's frames is not checked;
 				// every data frame is more of the stream
-				peer.socket_buffer.insert(peer.socket_buffer.end(),
-						payload.begin(), payload.end());
+				peer.socket_buffer.append(payload);
 				break;
 			case 8: // close: answered with its status, and the peer goes
 				log_i(MODULE, "Client %zu from %s closed its WebSocket",
@@ -1616,8 +1625,7 @@ struct Module: public interface::Module, public network::Interface
 			break;
 		case Peer::Kind::Native:
 			if(!peer.closing){
-				peer.socket_buffer.insert(peer.socket_buffer.end(), buf,
-						buf + r);
+				peer.socket_buffer.append(buf, r);
 				input_packets(peer);
 			}
 			break;
@@ -1648,6 +1656,7 @@ struct Module: public interface::Module, public network::Interface
 				peer.out_queue.clear();
 				peer.out_latest.clear();
 				peer.ordered_first.clear();
+				peer.queued_latest.clear();
 				peer.out_queued_bytes = 0;
 				peer.file.reset();
 				return;
@@ -1792,7 +1801,7 @@ struct Module: public interface::Module, public network::Interface
 		// it: the fragments of one call are one packet to the reader
 		bool dropping = false;
 		peer.packet_stream.output(name, data,
-				[&](const ss_ &packet_data, bool droppable){
+				[&](ss_ &&packet_data, bool droppable){
 			if(dropping && droppable)
 				return;
 			// Over the limit, a Drop game throws the new packet away rather
@@ -1820,7 +1829,7 @@ struct Module: public interface::Module, public network::Interface
 			// flow control only ever see whole frames: a LatestOnly
 			// replacement swaps one whole frame for another.
 			peer.enqueue(name, peer.kind == Peer::Kind::WebSocket ?
-					web::frame(2, packet_data) : packet_data,
+					web::frame(2, packet_data) : std::move(packet_data),
 					latest_only, droppable,
 					data.size() <= interface::PacketStream::FRAGMENT_BYTES);
 		});
