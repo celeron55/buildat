@@ -1413,7 +1413,7 @@ local SKY_ENV = {
 	translucency = tonumber(
 			buildat.get_env("BUILDAT_LUANTI_TRANSLUCENCY") or ""),
 	cave_ao_floor = tonumber(
-			buildat.get_env("BUILDAT_CAVE_AO_FLOOR") or "") or 0.04,
+			buildat.get_env("BUILDAT_CAVE_AO_FLOOR") or "") or PHYS.cave_floor,
 	chamber_light = tonumber(
 			buildat.get_env("BUILDAT_CHAMBER_LIGHT") or "") or 1.0,
 	light_log = buildat.get_env("BUILDAT_LUANTI_LIGHT_LOG") == "1",
@@ -2030,11 +2030,11 @@ local function update_sky(dt)
 				PHYS.ground.b * (sun * sc.b + c.b * k + ga * gc.b))
 		-- [CAVE_AO]: a constant light under the ambient so a cave at both
 		-- nibbles nought keeps its corners. The same at every hour, which
-		-- is what [UNDERGROUND_LIGHT]'s invariant needs. **0.04, picked by
-		-- the user 2026-09-25** off local/options_for_UNDERGROUND_LIGHT/:
-		-- a sealed chamber reads 12.6 levels with 6.3 of spread, so its
-		-- pillar and corners are there, where at nought it is one flat
-		-- black. BUILDAT_CAVE_AO_FLOOR overrides it, 0 turning it off.
+		-- is what [UNDERGROUND_LIGHT]'s invariant needs. PHYS.cave_floor,
+		-- shared with luanti_client (0.04 picked by the user 2026-09-25 off
+		-- local/options_for_UNDERGROUND_LIGHT/, lowered by
+		-- [CAVE_EXPOSURE_FLOOR]). BUILDAT_CAVE_AO_FLOOR overrides it, 0
+		-- turning it off.
 		-- What the camera's own rays say the chamber has, read once: the
 		-- floor below and the bounce term's scale both take it
 		local chamber_read = voxel_shading.chamber_light()

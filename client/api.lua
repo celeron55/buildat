@@ -2119,6 +2119,21 @@ function buildat.safe.get_voxel_data(safe_node)
 	return __buildat_get_voxel_data(getmetatable(safe_node).unsafe)
 end
 
+-- set_mesh_bounce(r, g, b): the light the unpacked mesher bakes into every
+-- face the sky does not reach, for meshes made after it; nil restores the
+-- default. See src/interface/mesh.h set_bounce_color()
+function buildat.safe.set_mesh_bounce(r, g, b)
+	if r == nil then
+		r, g, b = 0.055, 0.050, 0.045
+	end
+	for _, v in ipairs({r, g, b}) do
+		if type(v) ~= "number" or not (v >= 0 and v <= 1) then
+			error("set_mesh_bounce: a colour channel is not in 0...1")
+		end
+	end
+	__buildat_set_mesh_bounce(r, g, b)
+end
+
 -- column_heights(buffer, voxel_reg) -> string; see src/lua_bindings/mesh.cpp
 function buildat.safe.column_heights(safe_buffer, ...)
 	local buffer

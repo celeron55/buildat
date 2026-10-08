@@ -598,6 +598,15 @@ function M.new(magic, buildat, log, options)
 	-- lights start at; the shadows mode reads neither.
 	local PHYS = sky_model.PHYS
 	local UNITS = 1 / PHYS.lamp
+	-- And no mesher's constant bounce, which was the whole of the light
+	-- in a sealed cave on this path: its 0.055 lit the cave eleven times
+	-- vanilla's, and a vertex colour is a byte, so vanilla's floor in
+	-- these units (0.00125) rounds to nought there. The floor is the
+	-- shader's CaveAmbient instead, set with the sky visibility below
+	-- ([CAVE_EXPOSURE_FLOOR]).
+	if pbr then
+		buildat.set_mesh_bounce(0, 0, 0)
+	end
 	-- The render's moon, a 4100 K lamp; the cold blue is the other modes'
 	local PBR_MOON_COLOR = magic.Color(1.0, 0.86, 0.70)
 
@@ -1692,6 +1701,8 @@ function M.new(magic, buildat, log, options)
 	local vis = pbr and skyvis.new(magic, buildat, collect_vis_volumes) or nil
 	-- Where the camera was last frame, to tell a step from a teleport
 	local vis_at = nil
+	local cave_floor_now = nil
+	local CAVE_FLOOR_GAIN = 0.3
 
 	local function update_sky_visibility()
 		if not vis then return end
@@ -1703,6 +1714,23 @@ function M.new(magic, buildat, log, options)
 				math.abs(p.y - vis_at[2]), math.abs(p.z - vis_at[3])) or nil
 		vis_at = {p.x, p.y, p.z}
 		vis:update(p, (moved ~= nil and moved < 8) and 1 or nil)
+		-- Vanilla's cave floor in these units, only where the camera sees
+		-- no sky, as vanilla scales its own by how dark the chamber is
+		-- ([CAVE_EXPOSURE_FLOOR]): everywhere it lifted the moonlit snow
+		-- a third. simplified: the most sky any direction sees stands in
+		-- for vanilla's chamber reading, which also counts daylit faces
+		-- in sight; a cave lit round a corner reads darker here.
+		-- CAVE_FLOOR_GAIN is measured, not derived: at vanilla's value the
+		-- closed cave read 43/255 to vanilla's 27.7, flat where vanilla's
+		-- has its corners (the unpacked mesh carries no occlusion where
+		-- no sky reaches); at 0.3 of it pbr_pair reads 20.4 to 21.6.
+		-- Set only on a change: set_param walks the render path.
+		local cf = PHYS.cave_floor * UNITS * CAVE_FLOOR_GAIN *
+				(1 - math.min(1, vis:most()))
+		if not cave_floor_now or math.abs(cf - cave_floor_now) > cf * 0.02 + 1e-6 then
+			cave_floor_now = cf
+			vis:set_param("CaveAmbient", magic.Vector3(cf, cf, cf))
+		end
 	end
 
 	-- For the counters: how much sky the shader is being told there is
@@ -3731,6 +3759,9 @@ function M.new(magic, buildat, log, options)
 	-- Give the screen back to whatever was drawing before, and drop the
 	-- blocks' scene nodes. The scene itself goes when nothing points at it.
 	function self:close()
+		if pbr then
+			buildat.set_mesh_bounce(nil)
+		end
 		for key, block in pairs(blocks) do
 			if block.node then
 				scene:RemoveChild(block.node)

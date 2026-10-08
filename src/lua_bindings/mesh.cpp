@@ -930,6 +930,13 @@ luabind::object set_quad_geometry(const luabind::object &node_o,
 	return out;
 }
 
+// set_mesh_bounce(r, g, b): the unpacked mesher's bounce colour; see
+// interface/mesh.h set_bounce_color()
+void set_mesh_bounce(float r, float g, float b)
+{
+	interface::mesh::set_bounce_color(r, g, b);
+}
+
 void init_mesh(lua_State *L)
 {
 	using namespace luabind;
@@ -940,6 +947,7 @@ void init_mesh(lua_State *L)
 			LUABIND_FUNC(set_line_geometry),
 			LUABIND_FUNC(set_image_data),
 			LUABIND_FUNC(column_heights),
+			LUABIND_FUNC(set_mesh_bounce),
 			LUABIND_FUNC(set_simple_voxel_model),
 			LUABIND_FUNC(set_8bit_voxel_geometry),
 			LUABIND_FUNC(set_voxel_geometry),

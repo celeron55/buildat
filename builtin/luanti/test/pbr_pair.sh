@@ -76,6 +76,7 @@ local steps = {
 	{0.5, C, 0, 0.3},
 	{0.5, K, 0, 0.3},
 	{0.0, N, 0, 0.5},
+	{0.0, K, 0, 0.3},
 }
 core.register_on_joinplayer(function(player)
 	local name = player:get_player_name()
@@ -101,7 +102,7 @@ core.register_on_joinplayer(function(player)
 end)'
 cmds(){ # out-dir
 	local i
-	for i in 1 2 3 4 5 6; do
+	for i in 1 2 3 4 5 6 7; do
 		echo "wait_log 240000 chat: pbr_pair: step $i"
 		echo "delay 2000"; echo "screenshot $1/s$i.png"
 	done
@@ -121,7 +122,8 @@ run_vanilla(){
 		{ echo "FAIL: the server did not start"; exit 1; }
 	local srv=$SERVER_PID
 	cmds "$o" > "$o/cmds.txt"
-	BUILDAT_LUANTI_PBR=pbr timeout 330 bin/buildat -s localhost:29797 \
+	BUILDAT_LUANTI_LIGHT_LOG=1 BUILDAT_LUANTI_PBR=pbr timeout 330 \
+		bin/buildat -s localhost:29797 \
 		-w 1280x720 -l 3 -o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1
 	kill -INT "$srv" 2>/dev/null
 	for _i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
@@ -161,9 +163,9 @@ python3 - "$out" <<'PY'
 import os, sys
 from PIL import Image, ImageStat
 out = sys.argv[1]
-names = ["noon", "dusk", "night", "room", "cave", "snow"]
+names = ["noon", "dusk", "night", "room", "cave", "snow", "cave0"]
 bad = []
-for n in range(1, 7):
+for n in range(1, 8):
     shots = ["%s/%s/s%d.png" % (out, c, n) for c in ("vanilla", "ext")]
     if not all(os.path.exists(s) for s in shots):
         bad.append("%s: no shot" % names[n - 1]); continue

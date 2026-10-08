@@ -326,11 +326,20 @@ end
 local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
 		-- the moon at three times lunar irradiance, the user's pick off
 		-- the x1 | x3 | x5 sheet (2026-09-20, [NIGHT_LIGHT]); the render's
-		-- MOON_FACTOR is the same 3
-		sky_horizon = 12.0, moon_e = 0.0025 * 3,
+		-- MOON_FACTOR is the same 3. And three times that (user,
+		-- 2026-10-08, [CAVE_EXPOSURE_FLOOR]): the moonlit field brighter
+		-- against the exposure's floor, which a sealed cave is not
+		sky_horizon = 12.0, moon_e = 0.0025 * 3 * 3,
 		-- the night sky at the user's pick off the 0.00002 | 0.00005 | 0.0002
-		-- ladder (2026-09-20, [NIGHT_LIGHT]); the render's NIGHT_SKY is the same
-		night_sky = 0.0001,
+		-- ladder (2026-09-20, [NIGHT_LIGHT]), the render's NIGHT_SKY; three
+		-- times it with the moon (2026-10-08)
+		night_sky = 0.0001 * 3,
+		-- [CAVE_AO]'s floor: a constant light under the ambient so a sealed
+		-- cave keeps its corners, the same at every hour. 0.04 was the
+		-- user's pick of 2026-09-25; 0.005 since [CAVE_EXPOSURE_FLOOR]
+		-- (2026-10-09), so a sealed cave is darker than a moonlit field:
+		-- pbr_pair's closed cave reads 21.6/255 (0.01 read 27.7)
+		cave_floor = 0.005,
 		-- dome 0.9 -> 1.2 (2026-09-21, [PBR_FIT] a): the open-sky contrast
 		-- read 4.5 against the render's 2.8 and snow's 13.6 against 11.2;
 		-- at 1.2 snow's is 10.7 and its shade reads 1.0, dirt's 4.0; 1.5

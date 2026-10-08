@@ -543,7 +543,19 @@ static bool face_owned_by_padding(VoxelVolume &volume,
 // of, so it lives here rather than in a world's settings. It is close to
 // neutral, which is what makes a cave read as grey while a face that is merely
 // shaded from the sun keeps the sky's blue.
-static const Color BOUNCE_COLOR(0.055f, 0.050f, 0.045f);
+// A game can set its own (set_bounce_color()): extensions/luanti_client
+// puts it in its pbr light units, where 0.055 lit a sealed cave eleven
+// times vanilla's cave floor ([CAVE_EXPOSURE_FLOOR]). Atomic, since the
+// workers read it while a client may set it.
+static std::atomic<float> bounce_r{0.055f}, bounce_g{0.050f},
+		bounce_b{0.045f};
+
+void set_bounce_color(float r, float g, float b)
+{
+	bounce_r = r;
+	bounce_g = g;
+	bounce_b = b;
+}
 
 // What a voxel's lamplight looks like at full strength. White, because a lamp
 // is as bright as a world says it is and its color belongs in the texture of
@@ -969,6 +981,7 @@ static void face_vertex_colors(VoxelVolume &volume,
 		const pv::Vector3DFloat &n, uint face_id, unsigned out[4],
 		const HorizonMap *horizon, int lod = 1)
 {
+	const Color BOUNCE_COLOR(bounce_r, bounce_g, bounce_b);
 	pv::Vector3DFloat centre(0, 0, 0);
 	for(size_t i = 0; i < 4; i++)
 		centre += quad[i];
@@ -2323,6 +2336,7 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 						// No constant bounce for a packed client; see
 						// face_vertex_colors()
 						float bshade = packed_alpha ? 0.0f : shade * (1.0f - sky_f);
+						const Color BOUNCE_COLOR(bounce_r, bounce_g, bounce_b);
 						// The packed layout as face_vertex_colors() writes
 						// it: lamp, terrain, local shade; the sky's share
 						// takes the terrain, the local shade does not

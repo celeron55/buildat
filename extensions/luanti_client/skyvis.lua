@@ -369,6 +369,15 @@ function M.new(magic, buildat, collect)
 		return sky_vis[cell]
 	end
 
+	-- The most sky any direction sees, nought in a sealed place
+	function self:most()
+		local m = 0
+		for i = 1, CELL_COUNT do
+			if sky_vis[i] > m then m = sky_vis[i] end
+		end
+		return m
+	end
+
 	function self:has_volumes()
 		return have_volumes
 	end
