@@ -67,11 +67,15 @@ local SETTINGS_KEYS = {["app/vanilla/settings"] = true,
 		["extension/luanti_client/settings"] = true}
 
 -- How well an entry matches what is typed: 2 its label starts with it, 1
--- it is in the label or the badge, nil not at all
+-- it is in the label, the badge or the description (a server's address
+-- is there), nil not at all
 local function match(e, q)
 	local at = e.label:lower():find(q, 1, true)
 	if at == 1 then return 2 end
-	if at or (e.badge or ""):lower():find(q, 1, true) then return 1 end
+	if at or (e.badge or ""):lower():find(q, 1, true) or
+			(e.description or ""):lower():find(q, 1, true) then
+		return 1
+	end
 	return nil
 end
 
@@ -184,6 +188,8 @@ do
 		{label = "flat", kind = "save", badge = "Floor planner", last = 9},
 		{label = "A floor mat", kind = "app"},
 		{label = "Engine settings", kind = "action"},
+		{label = "Hearth of Oak", kind = "server", badge = "Buildat",
+			description = "hearth.example:20000   3 playing"},
 	}
 	local r = search(es, "FL")
 	assert(#r == 3 and r[1].kind == "app" and r[2].kind == "save" and
@@ -194,6 +200,12 @@ do
 	assert(r[1][1].label == "A floor mat", "search: by name")
 	r = search(es, "planner")
 	assert(#r == 2 and r[2][1].label == "flat", "search: badges match")
+	r = search(es, "oak")
+	assert(#r == 1 and r[1][1].label == "Hearth of Oak",
+			"search: a server by a word of its name")
+	r = search(es, "hearth.example")
+	assert(#r == 1 and r[1][1].label == "Hearth of Oak",
+			"search: a server by its address, in the description")
 	assert(#search(es, "zz") == 0, "search: nothing")
 	r = recent(es, 1)
 	assert(#r == 1 and r[1].label == "flat", "recent: newest first")
@@ -353,6 +365,18 @@ local function gather()
 		if e.key then by_key[e.key] = e end
 	end
 	local known = {}
+	-- Starport's public list as last fetched (the connect screen fetches
+	-- it again): a joined server whose kept name is empty takes its name
+	-- from there ([SEARCH_SERVER_NAMES]), and the rest are added below
+	-- simplified: the kept list, not a fetch of this menu's own
+	local starport = require("buildat/extension/starport")
+	starport = starport and (starport.kept_rows and starport or
+			starport.safe)
+	local rows = starport and starport.kept_rows() or {}
+	local listed_name = {}
+	for _, row in ipairs(rows) do
+		listed_name[tostring(row.address)] = tostring(row.name)
+	end
 	local net = require("buildat/extension/network")
 	net = net.known_addresses and net or net.safe
 	for _, a in ipairs(net.known_addresses()) do
@@ -366,7 +390,8 @@ local function gather()
 		if host and a.accepted and a.uri:sub(1, 6) == "tcp://" then
 			local address = host .. ":" .. port
 			known[address] = true
-			add({label = a.name ~= "" and a.name or address,
+			add({label = a.name ~= "" and a.name or
+					listed_name[address] or address,
 				kind = "server", unseen = unseen[address],
 				network = "Buildat",
 				badge = unseen[address] and "Buildat, " .. unseen[address] ..
@@ -377,13 +402,9 @@ local function gather()
 				run = function() api.join_server(address) end})
 		end
 	end
-	-- And Starport's public list as last fetched (the connect screen
-	-- fetches it again); on an https page only those behind TLS
-	-- simplified: the kept list, not a fetch of this menu's own
-	local starport = require("buildat/extension/starport")
-	starport = starport and (starport.kept_rows and starport or
-			starport.safe)
-	for _, row in ipairs(starport and starport.kept_rows() or {}) do
+	-- And the Starport's servers not joined; on an https page only those
+	-- behind TLS
+	for _, row in ipairs(rows) do
 		local address = tostring(row.address)
 		if not known[address] and not (page == "1" and not row.tls) then
 			add({label = tostring(row.name), kind = "server",
