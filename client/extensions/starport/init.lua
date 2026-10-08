@@ -2638,6 +2638,11 @@ dofile(__buildat_extension_path("starport") .. "/publish.lua")({M = M,
 	open_window = open_window, add_text = add_text, add_label = add_label,
 	add_row = add_row, add_button = add_button, add_edit = add_edit,
 	effective = effective, WARN = WARN, DIM = DIM})
+-- The verb itself in this file, the extension's surface, which is what
+-- the sandbox scan holds an extension's verbs to; publish.lua's is what
+-- it calls
+local open_publish = M.safe.open_publish
+function M.safe.open_publish() open_publish() end
 M.open_publish = M.safe.open_publish
 return M
 -- vim: set noet ts=4 sw=4:

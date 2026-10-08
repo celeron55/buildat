@@ -16,6 +16,12 @@ static int l_print_log(lua_State *L)
 	ss_ level = lua_tocppstring(L, 1);
 	const char *module_c = lua_tostring(L, 2);
 	const char *text_c = lua_tostring(L, 3);
+	// Either can be nil from Lua, and a null module crashed the client in
+	// log_() -- the sandbox scan's walk reached it from a script
+	if(module_c == nullptr)
+		module_c = "?";
+	if(text_c == nullptr)
+		text_c = "nil";
 	int loglevel = CORE_INFO;
 	if(level == "trace")
 		loglevel = CORE_TRACE;
