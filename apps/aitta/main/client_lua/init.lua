@@ -34,13 +34,7 @@ local text = accounts.page_text
 local button = accounts.page_button
 
 local function edit(parent, label)
-	text(parent, label)
-	local e = parent:CreateChild("LineEdit")
-	e:SetStyleAuto()
-	e.minHeight = 26
-	e.textSelectable = true
-	e.textCopyable = true
-	return e
+	return accounts.page_field(parent, label)
 end
 
 -- In builtin/accounts' Server window ([SERVER_ADMIN_PAGE]), an entry

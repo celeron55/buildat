@@ -88,7 +88,7 @@ mapfile -t cmds < <(
 	tabs 1; echo "keypress Return"; echo "delay 15000"
 	echo "shot bind.png"; echo "event scan"
 	# The Aitta's page: Bind, then Back to the launcher
-	echo "mouse_pos 422 214"; echo "mouse_click left"; echo "delay 2500"
+	echo "mouse_pos 422 177"; echo "mouse_click left"; echo "delay 2500"
 	echo "mouse_pos 422 139"; echo "mouse_click left"; echo "delay 5000"
 	printf '%s\n' "${OPEN[@]}"
 	tabs 14; echo "keypress Return"; echo "delay 3000"; echo "event scan"

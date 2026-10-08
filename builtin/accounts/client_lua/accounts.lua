@@ -773,7 +773,8 @@ end
 -- For a game's own pages in the same look: vanilla's pause menu
 M.page_button = button
 
-local function field(parent, label, secret, on_finish)
+-- on_finish: optional; value: the text it starts with
+local function field(parent, label, secret, on_finish, value)
 	local r = row(parent)
 	local l = page_text(r, label)
 	l:SetWordwrap(false)
@@ -788,9 +789,15 @@ local function field(parent, label, secret, on_finish)
 	else
 		e.textCopyable = true
 	end
-	magic.SubscribeToEvent(e, "TextFinished", function() on_finish() end)
+	if on_finish then
+		magic.SubscribeToEvent(e, "TextFinished", function() on_finish() end)
+	end
+	e:SetText(value or "")
 	return e
 end
+-- The same look for a game's pages: Starport's, Aitta's
+M.page_row = row
+M.page_field = field
 
 local WARN = magic.Color(rgb("warn"))
 

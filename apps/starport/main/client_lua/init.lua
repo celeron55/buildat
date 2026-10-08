@@ -50,25 +50,9 @@ local GREY = magic.Color(0.7, 0.7, 0.7)
 local text = accounts.page_text
 local button = accounts.page_button
 
-local function row(parent)
-	local r = parent:CreateChild("UIElement")
-	r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
-	return r
-end
-
+local row = accounts.page_row
 local function edit(parent, label, value)
-	local r = row(parent)
-	local l = text(r, label)
-	l:SetWordwrap(false)
-	l.minWidth = 120
-	local e = r:CreateChild("LineEdit")
-	e:SetStyleAuto()
-	e.minHeight = 26
-	e.minWidth = 200
-	e.textSelectable = true
-	e.textCopyable = true
-	e:SetText(value or "")
-	return e
+	return accounts.page_field(parent, label, false, nil, value)
 end
 
 -- [STARPORT_COPY_IDS]: an id or line the operator pastes elsewhere (a
