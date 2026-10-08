@@ -602,7 +602,6 @@ static json::Value default_settings()
 	notice.set("text", "");
 	notice.set("priority", "low");
 	s.set("notice", notice);
-	// Who moderates, and whose reports go first ([STARPORT] 6)
 	// Whether an operator's e-mail address is confirmed by a code mailed
 	// to it ([STARPORT] 2a); off for a test instance, the address then
 	// taken as given
@@ -615,6 +614,7 @@ static json::Value default_settings()
 	// [WEB_ID_TRUST]: web pages besides a listed server's own that
 	// /authorize sends a token to, as origins ("https://play.example.org")
 	s.set("web_clients", json::array());
+	// Whose reports go first ([STARPORT] 6)
 	s.set("trusted_flaggers", json::array());
 	// [STARPORT_RECOMMENDS]: the Hearth a client's "Discuss" joins, and
 	// the Aittas a client is offered, as addresses
