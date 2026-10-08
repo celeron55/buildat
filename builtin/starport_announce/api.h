@@ -28,6 +28,10 @@ namespace starport_announce
 		// announcing is off ([HEARTH_VISITOR_FLOW]: Hearth reads their
 		// lists)
 		virtual sv_<ss_> starports() = 0;
+		// The Luanti game the server's world is, as its installer named
+		// where it came from ("contentdb:author/name"; "" for none): a
+		// Hearth's thread about the game links the servers running it
+		virtual void set_game(const ss_ &source) = 0;
 		// Writes "ids" into starport.json; what it did ("" for nothing to
 		// tell), else why not. IDs on with no Starport named adds the
 		// default one, unlisted, and `address` (the admin's, or "") as

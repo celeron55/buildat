@@ -143,6 +143,7 @@ struct Module: public interface::Module, public Interface
 	json::Value m_config;
 	ss_ m_config_text;
 	std::mutex m_mutex;
+	ss_ m_game; // set_game()'s, under m_mutex
 	// 10g: the Starports to delist from, for the thread; each Starport's
 	// last answer and the blocklists it says this server follows
 	sv_<ss_> m_delist;
@@ -644,6 +645,22 @@ struct Module: public interface::Module, public Interface
 		body.set("login", ids_mode_of(cfg) == "off" ? "local" : "both");
 		body.set("access", access_of(cfg));
 		body.set("app", m_server->get_app_id());
+		// [HEARTH_VISITOR_FLOW] What the app and the world are as packages:
+		// an app from Aitta has the id "author.name" (server::app_of)
+		// simplified: a directory of another app named with a dot reads as
+		// a package too
+		const ss_ app = m_server->get_app_id();
+		const size_t dot = app.find('.');
+		if(dot != ss_::npos && dot > 0 && dot + 1 < app.size() &&
+				app.find_first_not_of("abcdefghijklmnopqrstuvwxyz"
+				"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.") == ss_::npos &&
+				app.find('.', dot + 1) == ss_::npos)
+			body.set("package", app.substr(0, dot)+"/"+app.substr(dot + 1));
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			if(!m_game.empty())
+				body.set("game", m_game);
+		}
 		if(!body.get("kind").is_string())
 			body.set("kind", app_kind());
 		body.set("version", ss_(BUILDAT_VERSION));
@@ -817,6 +834,17 @@ struct Module: public interface::Module, public Interface
 	bool accepts_ids()
 	{
 		return ids_mode() != "off";
+	}
+
+	void set_game(const ss_ &source)
+	{
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			if(m_game == source)
+				return;
+			m_game = source;
+		}
+		announce_soon();
 	}
 
 	sv_<ss_> starports()

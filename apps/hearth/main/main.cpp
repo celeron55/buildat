@@ -1504,17 +1504,10 @@ struct Module: public interface::Module
 			std::lock_guard<std::mutex> lock(m_rmutex);
 			for(unsigned i = 0; i < m_slist.size(); i++){
 				const json::Value &v = m_slist.at(i);
-				// A page over https opens only a secure WebSocket; one
-				// over http, a local Starport's, a plain one too
-				const ss_ play = jstr(v, "play");
-				const bool secure = play.rfind("https://", 0) == 0;
-				if(jstr(v, "host") != host || jint(v, "port") != port ||
-						(!secure && play.rfind("http://", 0) != 0) ||
-						(secure && !v.get("tls").is_true()))
-					continue;
-				return "About the server <a href=\""+html(jstr(v, "play"))+
-						"/?server="+html(hp)+"\" rel=\"nofollow noopener\">"+
-						html(jstr(v, "name"))+"</a>, played in your browser";
+				if(jstr(v, "host") == host && jint(v, "port") == port &&
+						!play_link(v).empty())
+					return "About the server "+play_link(v)+
+							", played in your browser";
 			}
 			return "About the server "+html(hp);
 		}
@@ -1523,7 +1516,8 @@ struct Module: public interface::Module
 			if(is_package(pkg))
 				return "About the game <a href=\"https://content.luanti.org/"
 						"packages/"+html(pkg)+"/\" rel=\"nofollow noopener\">"+
-						html(pkg)+"</a> on ContentDB";
+						html(pkg)+"</a> on ContentDB"+played_on("game",
+						"contentdb:"+pkg);
 		}
 		if(subject.rfind("game:", 0) == 0)
 			return "About the game "+html(subject.substr(
@@ -1540,7 +1534,47 @@ struct Module: public interface::Module
 		}
 		return "About <a href=\"/p/"+html(pkg)+"\">"+html(pkg)+"</a>"+
 				(aitta.empty() ? ss_() : ", <a href=\""+html(aitta)+"/p/"+
-				html(pkg)+"\">its page on Aitta</a>");
+				html(pkg)+"\">its page on Aitta</a>")+played_on("package", pkg);
+	}
+
+	// A listed server as a link to its Starport's play page, "" where that
+	// page cannot join it: a page over https opens only a secure
+	// WebSocket, one over http (a local Starport's) a plain one too.
+	// Under m_rmutex.
+	static ss_ play_link(const json::Value &v)
+	{
+		const ss_ play = jstr(v, "play");
+		const bool secure = play.rfind("https://", 0) == 0;
+		if((!secure && play.rfind("http://", 0) != 0) ||
+				(secure && !v.get("tls").is_true()))
+			return "";
+		return "<a href=\""+html(play)+"/?server="+html(jstr(v, "host"))+":"+
+				itos(jint(v, "port"))+"\" rel=\"nofollow noopener\">"+
+				html(jstr(v, "name"))+"</a>";
+	}
+
+	// Up to three listed servers whose `key` is `value`, most players first
+	ss_ played_on(const char *key, const ss_ &value)
+	{
+		std::lock_guard<std::mutex> lock(m_rmutex);
+		sv_<const json::Value*> on;
+		std::set<ss_> seen; // listed on two Starports, once
+		for(unsigned i = 0; i < m_slist.size(); i++){
+			const json::Value &v = m_slist.at(i);
+			if(jstr(v, key) == value && !play_link(v).empty() &&
+					seen.insert(jstr(v, "host")+":"+
+					itos(jint(v, "port"))).second)
+				on.push_back(&v);
+		}
+		std::stable_sort(on.begin(), on.end(),
+				[](const json::Value *a, const json::Value *b){
+			return jint(*a, "players") > jint(*b, "players");
+		});
+		ss_ out;
+		for(size_t i = 0; i < on.size() && i < 3; i++)
+			out += (i ? ", " : "<br>Play it on ")+play_link(*on[i])+" ("+
+					itos(jint(*on[i], "players"))+" playing)";
+		return out;
 	}
 
 	// The thread page a message is on: the `after` its link takes, 0 for

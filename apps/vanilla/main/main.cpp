@@ -23,6 +23,7 @@
 #include "client_file/api.h"
 #include "storage/api.h"
 #include "accounts/api.h"
+#include "starport_announce/api.h"
 #include <cstdlib>
 #include <sys/stat.h>
 #include <ctime>
@@ -3134,6 +3135,19 @@ struct Module: public interface::Module
 		}
 		m_starting = true;
 		m_world_name = world_name;
+		// [HEARTH_VISITOR_FLOW] The game where it came from, for the
+		// listing: what the ContentDB install wrote beside it
+		ss_ source;
+		std::getline(std::ifstream(game_path+"/.buildat_source"), source);
+		const size_t slash = source.find('/');
+		if(source.compare(0, 10, "contentdb:") != 0 || slash == ss_::npos ||
+				slash <= 10 || slash + 1 >= source.size() ||
+				source.find_first_not_of("abcdefghijklmnopqrstuvwxyz"
+				"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-/", 10) != ss_::npos ||
+				source.find('/', slash + 1) != ss_::npos)
+			source.clear();
+		starport_announce::access(m_server,
+				[&](starport_announce::Interface *a){ a->set_game(source); });
 		// A world is left by stopping the server, as a dedicated one's is
 		if(peer != 0){
 			network::access(m_server, [&](network::Interface *inetwork){

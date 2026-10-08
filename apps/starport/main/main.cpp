@@ -1181,7 +1181,8 @@ struct Module: public interface::Module
 				l.get("tls").is_true() != tls;
 		l.set("tls", tls);
 		for(const char *k : {"name", "description", "kind", "audience",
-				"access", "region", "app", "version", "signup_url"})
+				"access", "region", "app", "version", "signup_url",
+				"package", "game"})
 			l.set(k, b.get(k).is_string() ? b.get(k) : json::Value(""));
 		// Left out by an unlisted one (check_categories)
 		for(const char *k : {"kind", "audience"})
@@ -1534,7 +1535,7 @@ struct Module: public interface::Module
 			json::Value s = json::object();
 			for(const char *k : {"id", "name", "description", "host", "port",
 					"app", "version", "tags", "languages", "region", "signup_url",
-					"login", "tls",
+					"login", "tls", "package", "game",
 					"players", "players_max"})
 				s.set(k, l.get(k));
 			if(!jstr(l, "icon").empty())
