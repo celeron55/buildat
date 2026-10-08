@@ -2237,10 +2237,7 @@ struct Module: public interface::Module
 
 	static int64_t this_year()
 	{
-		const time_t t = now_s();
-		struct tm tm;
-		gmtime_r(&t, &tm);
-		return tm.tm_year + 1900;
+		return interface::os::utc_tm(now_s()).tm_year + 1900;
 	}
 
 	// 10b: the lowest the age can be, from the year alone; 18 for "18 or

@@ -241,13 +241,7 @@ static ss_ blob(int64_t last)
 
 static ss_ time_text(int64_t t)
 {
-	time_t tt = (time_t)t;
-	struct tm tmv = {};
-#ifdef _WIN32
-	gmtime_s(&tmv, &tt);
-#else
-	gmtime_r(&tt, &tmv);
-#endif
+	const struct tm tmv = interface::os::utc_tm(t);
 	char buf[32];
 	strftime(buf, sizeof buf, "%Y-%m-%d %H:%M UTC", &tmv);
 	return buf;

@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #pragma once
 #include "core/types.h"
+#include <ctime>
 
 namespace interface
 {
@@ -13,6 +14,18 @@ namespace interface
 		// limits per hour or day; time_us() for timeouts and budgets
 		int64_t wall_us();
 		void set_wall_offset_us(int64_t offset_us);
+		// Seconds since the epoch as a UTC calendar
+		inline struct tm utc_tm(int64_t t)
+		{
+			const time_t tt = (time_t)t;
+			struct tm tmv = {};
+#ifdef _WIN32
+			gmtime_s(&tmv, &tt);
+#else
+			gmtime_r(&tt, &tmv);
+#endif
+			return tmv;
+		}
 		void sleep_us(int us);
 		ss_ get_current_exe_path();
 		// name without extension; looks next to the current executable

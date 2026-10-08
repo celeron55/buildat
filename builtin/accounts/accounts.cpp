@@ -38,6 +38,8 @@ using json::jstr;
 #define MODULE "accounts"
 
 using interface::Event;
+using storage::pack;
+using storage::unpack;
 
 namespace accounts {
 
@@ -45,30 +47,6 @@ static const int PBKDF2_ITERATIONS = 10000;
 // Failed logins on one connection before it has to reconnect
 static const int MAX_LOGIN_FAILURES = 5;
 static const size_t MIN_PASSWORD = 6;
-
-template<typename T>
-static ss_ pack(const T &value)
-{
-	std::ostringstream os(std::ios::binary);
-	{
-		cereal::PortableBinaryOutputArchive ar(os);
-		ar(value);
-	}
-	return os.str();
-}
-
-template<typename T>
-static bool unpack(const ss_ &data, T &value)
-{
-	try {
-		std::istringstream is(data, std::ios::binary);
-		cereal::PortableBinaryInputArchive ar(is);
-		ar(value);
-		return true;
-	} catch(std::exception &e){
-		return false;
-	}
-}
 
 // PBKDF2-HMAC-SHA256 with one 32-byte block
 static ss_ hmac_sha256(const ss_ &key_in, const ss_ &msg)
@@ -2050,13 +2028,8 @@ struct Module: public interface::Module, public Interface
 			return;
 		}
 		char date[64];
-		const time_t t = interface::os::wall_us() / 1000000;
-		struct tm tm;
-#ifdef _WIN32
-		gmtime_s(&tm, &t);
-#else
-		gmtime_r(&t, &tm);
-#endif
+		const struct tm tm = interface::os::utc_tm(
+				interface::os::wall_us() / 1000000);
 		// RFC 5322's names: strftime's %a and %b are the locale's
 		static const char *days[] = {"Sun", "Mon", "Tue", "Wed", "Thu",
 				"Fri", "Sat"};

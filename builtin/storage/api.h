@@ -5,6 +5,8 @@
 #include "interface/server.h"
 #include "interface/module.h"
 #include <functional>
+#include <sstream>
+#include <cereal/archives/portable_binary.hpp>
 
 namespace storage
 {
@@ -70,6 +72,31 @@ namespace storage
 			auto *iface = (storage::Interface*)module->check_interface();
 			cb(iface);
 		});
+	}
+
+	// A value as a store holds it, and back: cereal's portable binary.
+	// unpack() is false for data that does not read as a T
+	template<typename T>
+	ss_ pack(const T &value)
+	{
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(value);
+		}
+		return os.str();
+	}
+	template<typename T>
+	bool unpack(const ss_ &data, T &value)
+	{
+		try {
+			std::istringstream is(data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(value);
+			return true;
+		} catch(std::exception &e){
+			return false;
+		}
 	}
 }
 

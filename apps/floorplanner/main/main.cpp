@@ -37,6 +37,8 @@
 #define MODULE "main"
 
 using interface::Event;
+using storage::pack;
+using storage::unpack;
 
 namespace floorplanner {
 
@@ -523,30 +525,6 @@ struct Peer
 	// ([SECURITY_RUN_1]). Taken by spend_msg().
 	double msg_budget = 0;
 };
-
-template<typename T>
-static ss_ pack(const T &value)
-{
-	std::ostringstream os(std::ios::binary);
-	{
-		cereal::PortableBinaryOutputArchive ar(os);
-		ar(value);
-	}
-	return os.str();
-}
-
-template<typename T>
-static bool unpack(const ss_ &data, T &value)
-{
-	try {
-		std::istringstream is(data, std::ios::binary);
-		cereal::PortableBinaryInputArchive ar(is);
-		ar(value);
-		return true;
-	} catch(std::exception &e){
-		return false;
-	}
-}
 
 static const double OPS_PER_SECOND = 400;
 static const double OPS_BURST = 4000;

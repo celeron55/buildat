@@ -356,9 +356,7 @@ struct Module: public interface::Module
 
 	static ss_ date(int64_t t)
 	{
-		const time_t tt = (time_t)t;
-		struct tm tm;
-		gmtime_r(&tt, &tm);
+		const struct tm tm = interface::os::utc_tm(t);
 		char b[16];
 		strftime(b, sizeof b, "%Y-%m-%d", &tm);
 		return b;
