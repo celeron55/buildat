@@ -41,8 +41,9 @@ local page = api.get_env("BUILDAT_PAGE_HTTPS")
 local web = page ~= nil
 
 local CONTINUE_MAX = 10
-local SEARCH_MIN = 2
+local SEARCH_MIN = 1
 local SEARCH_CAP = 20
+local SHORT_CAP = 5
 local ROW_HEIGHT = 28
 local PANEL_WIDTH = 300
 local GAME_RUNNING = "empty (game is running)"
@@ -517,8 +518,6 @@ local function home(query)
 				run()
 			end}
 	end
-	-- One character matches nearly everything, and drawing that many
-	-- rows stalls each keypress: the search starts at two
 	if #query < SEARCH_MIN then
 		local cont = recent(entries, CONTINUE_MAX)
 		if #cont > 0 then
@@ -544,11 +543,15 @@ local function home(query)
 				"Display and sound, the keys, Luanti's, the developer's."},
 				nil, function() settings() end)
 	else
-		-- At most SEARCH_CAP a kind, the best first; Browse has the rest
+		-- At most SEARCH_CAP a kind, the best first; Browse has the rest.
+		-- One character matches nearly everything, and a row is ~0.6 ms
+		-- to make: a screenful then, SHORT_CAP a kind ([FRAME_WORK]: 68
+		-- rows were 41 ms a keypress)
+		local cap = #query < 2 and SHORT_CAP or SEARCH_CAP
 		for _, group in ipairs(search(entries, query)) do
-			view:header(KIND_TITLE[group.kind] .. (#group > SEARCH_CAP and
-					", " .. SEARCH_CAP .. " of " .. #group or ""))
-			for i = 1, math.min(#group, SEARCH_CAP) do
+			view:header(KIND_TITLE[group.kind] .. (#group > cap and
+					", " .. cap .. " of " .. #group or ""))
+			for i = 1, math.min(#group, cap) do
 				local e = group[i]
 				row(e, nil, e.run)
 			end
