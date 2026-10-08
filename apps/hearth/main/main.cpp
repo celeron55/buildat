@@ -15,6 +15,8 @@
 //   /f/<id>          an uploaded file ([FORUM] step 5), kept by its use
 //   /p/<author>/<name>  a package's place: the threads about it
 //   /brand/<file>    the pages' font and logo ([HTML_BRAND])
+//   /api/discussed   one recent message as JSON, open to any site
+//                    ([HEARTH_DISCUSSED_API]); see discussed()
 // **To take part**: the buildat client, joined by builtin/accounts (a local
 // account or a Starport ID, as the admin set up its logins). "hr:req"
 // carries a JSON {id, cmd, ...} and "hr:res" the answer {id, ok, result |
@@ -69,6 +71,8 @@
 #include <chrono>
 #include <mutex>
 #include <condition_variable>
+#include <random>
+#include <map>
 #include "interface/http.h"
 #include <vector>
 // [FORUM] step 5: an upload is read and written again. stb_image reads only
@@ -619,7 +623,7 @@ static bool is_patch(const ss_ &name, const ss_ &data)
 	return false;
 }
 static const char *CLAIMED[] = {"/topic/", "/t/", "/m/", "/search", "/f/",
-		"/robots.txt", "/p/", "/brand/", "/u/", "/unseen"};
+		"/robots.txt", "/p/", "/brand/", "/u/", "/unseen", "/api/discussed"};
 
 // Trust ([HEARTH_MVP] step 6, [TRUST_LADDER]): accounts' levels, spaced so
 // one added later goes between two; compared with >=, never ==. Saved as
@@ -683,6 +687,9 @@ struct Module: public interface::Module
 	// Searches and pages per address (or account) in the current minute
 	sm_<ss_, int> m_searches;
 	int64_t m_searches_minute = 0;
+	// /api/discussed's pick and when it was made
+	json::Value m_discussed;
+	int64_t m_discussed_at = -1;
 	// When the files were last held to their budget (sweep_files)
 	int64_t m_files_swept = 0;
 	// What a request changed, sent once it is committed
@@ -1683,6 +1690,17 @@ struct Module: public interface::Module
 				!allowed("page "+from, PAGES_A_MINUTE))
 			return respond(r, 429, page("Hearth", "<p>Too many requests "
 					"from this address; try again in a minute.</p>"));
+		if(r.path == "/api/discussed"){
+			if(r.method != "GET")
+				return respond(r, 405, "{}", "application/json");
+			const ss_ body = discussed(r.host).stringify();
+			network::access(m_server, [&](network::Interface *iface){
+				iface->http_respond(r.peer, 200, "application/json", body,
+						"Access-Control-Allow-Origin: *\r\n"
+						"Cache-Control: max-age=600\r\n");
+			});
+			return;
+		}
 		// **The launcher's mark** ([FORUM] 4): a POST of {name, token}, the
 		// client's kept login for this Hearth, answers {unseen} without a
 		// join
@@ -2126,6 +2144,165 @@ struct Module: public interface::Module
 			t.set("unread", unread.count(jint(t, "id")) != 0);
 			list.set_at(i, t);
 		}
+	}
+
+	// A message as plain text for another site's line ([HEARTH_DISCUSSED_API]):
+	// the Markdown's HTML without its tags (a link its text, code as is, a
+	// spoiler "[spoiler]"), whitespace folded, cut on a word near `max`
+	// simplified: the five entities the escaping writes are read back; one
+	// the author typed ("&copy;") stays as typed
+	static ss_ plain_text(const ss_ &md, size_t max = 200)
+	{
+		const ss_ h = interface::markup::to_html(md);
+		ss_ t;
+		int spoiler = 0;
+		for(size_t i = 0; i < h.size();){
+			if(h[i] == '<'){
+				const size_t end = h.find('>', i);
+				if(end == ss_::npos)
+					break;
+				const ss_ tag = h.substr(i, end + 1 - i);
+				if(tag.compare(0, 20, "<span class=\"spoiler") == 0 ||
+						(spoiler && tag.compare(0, 5, "<span") == 0)){
+					if(spoiler++ == 0)
+						t += " [spoiler] ";
+				} else if(spoiler && tag == "</span>"){
+					spoiler--;
+				} else {
+					t += ' ';
+				}
+				i = end + 1;
+				continue;
+			}
+			if(!spoiler){
+				static const char *ent[][2] = {{"&amp;", "&"}, {"&lt;", "<"},
+						{"&gt;", ">"}, {"&quot;", "\""}, {"&#39;", "'"}};
+				bool done = false;
+				for(auto &e : ent)
+					if(h.compare(i, strlen(e[0]), e[0]) == 0){
+						t += e[1];
+						i += strlen(e[0]);
+						done = true;
+						break;
+					}
+				if(done)
+					continue;
+				t += h[i];
+			}
+			i++;
+		}
+		ss_ out;
+		for(char c : t){
+			const bool space = c == ' ' || c == '\n' || c == '\t' || c == '\r';
+			if(space && (out.empty() || out.back() == ' '))
+				continue;
+			out += space ? ' ' : c;
+		}
+		while(!out.empty() && out.back() == ' ')
+			out.pop_back();
+		if(out.size() <= max)
+			return out;
+		size_t cut = out.rfind(' ', max);
+		if(cut == ss_::npos || cut < max / 2){
+			cut = max;
+			// Not inside a UTF-8 sequence
+			while(cut > 0 && ((unsigned char)out[cut] & 0xC0) == 0x80)
+				cut--;
+		}
+		return out.substr(0, cut)+"\u2026";
+	}
+
+	// [HEARTH_DISCUSSED_API] GET /api/discussed, for www.buildat.org's
+	// "Discussed today" line: of the shortest of a day, a week and a month
+	// that has two or more, one message at random -- visible, in a visible
+	// thread, not empty as text, by a member (LV_MEMBER, the trust ladder)
+	// that is not banned. {} when a month has fewer. The pick is kept ten
+	// minutes, so the site's visitors cost one query in that time and a
+	// reload shows the same one.
+	// simplified: uniform; weighting by replies is the upgrade. The last
+	// 2000 messages are what is looked at.
+	// The links' base is the admin's "public_url" setting, else the
+	// request's Host over https (http for a loopback Host).
+	json::Value discussed(const ss_ &host)
+	{
+		const int64_t now = now_s();
+		if(m_discussed_at < 0 || now - m_discussed_at >= 600 ||
+				now < m_discussed_at){
+			m_discussed_at = now;
+			m_discussed = json::object();
+			std::set<ss_> banned;
+			accounts::access(m_server, [&](accounts::Interface *a){
+				for(const ss_ &b : a->ban_list())
+					banned.insert(b.substr(0, b.find('|')));
+			});
+			std::map<ss_, bool> member;
+			struct Pick { int64_t age; json::Value v; };
+			sv_<Pick> picks;
+			Q q(m_db, "SELECT m.id, m.author, m.body, m.created, t.id, "
+					"t.title, p.id, p.name FROM messages m "
+					"JOIN threads t ON t.id = m.thread "
+					"JOIN topics p ON p.id = t.topic "
+					"WHERE m.hidden = 0 AND t.hidden = 0 AND m.created > ? "
+					"ORDER BY m.id DESC LIMIT 2000");
+			q.b(now - 30 * 86400);
+			while(q.step()){
+				const ss_ who = q.s(1);
+				if(!member.count(who))
+					member[who] = !banned.count(who) &&
+							level(who) >= LV_MEMBER;
+				const ss_ excerpt = plain_text(q.s(2));
+				if(!member[who] || excerpt.empty())
+					continue;
+				json::Value v = json::object();
+				v.set("id", q.i(0));
+				v.set("author", who);
+				v.set("created", q.i(3));
+				v.set("excerpt", excerpt);
+				json::Value t = json::object();
+				t.set("id", q.i(4));
+				t.set("title", q.s(5));
+				v.set("thread", t);
+				json::Value p = json::object();
+				p.set("id", q.i(6));
+				p.set("name", q.s(7));
+				v.set("topic", p);
+				picks.push_back({now - q.i(3), v});
+			}
+			static std::mt19937_64 rng(std::random_device{}());
+			const std::pair<int64_t, const char*> spans[] = {
+					{86400, "today"}, {7 * 86400, "this week"},
+					{30 * 86400, "this month"}};
+			for(const auto &span : spans){
+				sv_<const json::Value*> in;
+				for(const Pick &p : picks)
+					if(p.age <= span.first)
+						in.push_back(&p.v);
+				if(in.size() < 2)
+					continue;
+				m_discussed.set("span", span.second);
+				m_discussed.set("message", *in[rng() % in.size()]);
+				break;
+			}
+		}
+		if(!m_discussed.get("message").is_object())
+			return json::object();
+		ss_ base = jstr(setting("public_url"), "url");
+		if(base.empty()){
+			const bool local = host.compare(0, 9, "127.0.0.1") == 0 ||
+					host.compare(0, 9, "localhost") == 0 ||
+					host.compare(0, 5, "[::1]") == 0;
+			base = (local ? "http://" : "https://")+host;
+		}
+		json::Value out = m_discussed;
+		json::Value m = out.get("message");
+		json::Value t = m.get("thread"), p = m.get("topic");
+		m.set("url", base+"/m/"+itos(jint(m, "id")));
+		t.set("url", base+"/t/"+itos(jint(t, "id")));
+		p.set("url", base+"/topic/"+itos(jint(p, "id")));
+		m.set("thread", t);
+		m.set("topic", p);
+		out.set("message", m);
+		return out;
 	}
 
 	// `who`: an address, "@" and an account, or "page " and an address
@@ -2707,6 +2884,26 @@ struct Module: public interface::Module
 			if(sqlite3_changes(m_db) == 0)
 				throw Exception("no such file");
 			return json::Value(true);
+		}
+		if(cmd == "public_url"){
+			// [HEARTH_DISCUSSED_API]: the base of /api/discussed's links,
+			// as the public reaches this Hearth; "" for the request's Host
+			if(!admin)
+				throw Exception("only the "+level_name(LV_ADMIN)+" sets the public address");
+			ss_ u = jstr(q, "url");
+			while(!u.empty() && u.back() == '/')
+				u.pop_back();
+			if(u.size() > 200 || (!u.empty() && u.compare(0, 7, "http://") != 0 &&
+					u.compare(0, 8, "https://") != 0) ||
+					u.find_first_of(" \"<>\\") != ss_::npos)
+				throw Exception("not an http(s) address: "+u);
+			json::Value v = json::object();
+			v.set("url", u);
+			Q i(m_db, "INSERT OR REPLACE INTO settings(key, value) "
+					"VALUES('public_url', ?)");
+			i.b(v.stringify()).step();
+			m_discussed_at = -1;
+			return v;
 		}
 		if(cmd == "release_sources"){
 			// [PACKAGE_SUBJECT]: the Aittas read and this Hearth's own

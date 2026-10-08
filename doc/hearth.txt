@@ -72,6 +72,22 @@ prefix. A hidden message shows "Hidden by a moderator: <statement>" and
 not its text; a thread whose first message is hidden is hidden with it,
 title too, and gone from the portal, its topic and search.
 
+/api/discussed is for another site's "Discussed today" line (the
+project's front page): JSON {span: "today" | "this week" | "this month",
+message: {id, author, created, excerpt, url, thread: {id, title, url},
+topic: {id, name, url}}}, or {} when a month has fewer than two to pick
+from. The span is the shortest of 24 hours, 7 days and 30 days with two
+or more messages that are visible, in a visible thread, not empty as
+text, and by a member that is not banned; one of them at random, kept
+ten minutes. The excerpt is plain text (the markup taken out, a link
+as its text, a spoiler "[spoiler]"), about 200 characters cut on a
+word; put it in a page as text, never as HTML. Answered with
+"Access-Control-Allow-Origin: *", under the pages' rate. The links are
+absolute: their base is the admin's public address, set from the client
+with {"cmd":"public_url","url":"https://forum.example.org"} ("" to
+clear), or else the request's Host over https (http for 127.0.0.1 and
+localhost).
+
 Taking part: the client
 -----------------------
 The client's pages: the topics and the latest threads, a topic (its
