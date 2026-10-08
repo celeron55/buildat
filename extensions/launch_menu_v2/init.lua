@@ -225,7 +225,7 @@ local function gather()
 		table.insert(e.actions, 1, {label = PRIMARY[e.kind], run = e.run})
 		-- A server with no icon of its own ([GLYPH_ICONS])
 		if e.kind == "server" and not e.icon then
-			e.glyph = "\u{1F310}"
+			e.glyph = "🌐"
 		end
 		entries[#entries + 1] = e
 		return e
@@ -513,7 +513,7 @@ local function home(query)
 			end
 			if n > 0 then
 				row({label = KIND_TITLE[kind], kind = "browse",
-					glyph = kind == "server" and "\u{1F310}" or nil,
+					glyph = kind == "server" and "🌐" or nil,
 					description = n .. " to choose from"}, tostring(n),
 					function() browse(kind, "", "recent") end)
 			end
@@ -870,7 +870,7 @@ settings = function()
 			"Developer"}) do
 		if section == "Controls" then
 			view:header(section)
-			row({label = "Keys", glyph = "\u{2328}", description = "Every app's keys, the " ..
+			row({label = "Keys", glyph = "⌨", description = "Every app's keys, the " ..
 					"shared ones that bind them all at once, and the " ..
 					"client's own."}, function() controls(1) end)
 		elseif by_section[section] then
@@ -912,9 +912,9 @@ local CLIENT_KEY_LABEL = {overlay = "Trusted overlay on and off",
 	fullscreen = "Fullscreen on and off",
 	screenshot = "A screenshot (Ctrl: the sandbox scan)"}
 -- A shared name's glyph, and so an app's action under it ([GLYPH_ICONS])
-local KEY_GLYPH = {["move.forward"] = "\u{2191}", ["move.back"] = "\u{2193}",
-	["move.left"] = "\u{2190}", ["move.right"] = "\u{2192}",
-	jump = "\u{2B9D}", sneak = "\u{2B9F}", sprint = "\u{21DB}"}
+local KEY_GLYPH = {["move.forward"] = "↑", ["move.back"] = "↓",
+	["move.left"] = "←", ["move.right"] = "→",
+	jump = "⮝", sneak = "⮟", sprint = "⇛"}
 controls = function(focus)
 	local store = api.key_store()
 	local width = math.min(magic.ui.root.width - 40, 760)
