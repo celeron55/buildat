@@ -76,22 +76,6 @@ static ss_ jstr(const json::Value &v, const char *k)
 	return x.is_string() ? x.as_string() : "";
 }
 
-static ss_ query_value(const ss_ &query, const ss_ &key)
-{
-	size_t at = 0;
-	while(at <= query.size()){
-		size_t amp = query.find('&', at);
-		if(amp == ss_::npos)
-			amp = query.size();
-		const ss_ part = query.substr(at, amp - at);
-		const size_t eq = part.find('=');
-		if(eq != ss_::npos && part.substr(0, eq) == key)
-			return part.substr(eq + 1); // simplified: hex, digits and a release id here
-		at = amp + 1;
-	}
-	return "";
-}
-
 static bool is_hex(const ss_ &s, size_t len)
 {
 	if(s.size() != len)
@@ -350,7 +334,7 @@ struct Module: public interface::Module
 		json::Value v = json::object();
 		v.set("ok", true);
 		v.set("licences", m_settings.get("licences"));
-		const ss_ key = query_value(r.query, "key");
+		const ss_ key = r.param("key");
 		v.set("author", is_hex(key, 130) ? get("keys", key) : "");
 		respond(r, v);
 	}
@@ -498,7 +482,7 @@ struct Module: public interface::Module
 
 	void http_release(const network::HttpRequest &r)
 	{
-		const ss_ id = query_value(r.query, "id");
+		const ss_ id = r.param("id");
 		const json::Value rel = load("releases", id);
 		if(!rel.is_object() || rel.get("delisted").is_true())
 			return refuse(r, "no such release");
@@ -537,7 +521,7 @@ struct Module: public interface::Module
 	{
 		const json::Value sig = json::load_string(r.body.c_str());
 		const ss_ sha = jstr(sig, "sha256"), key = jstr(sig, "key");
-		const int64_t size = atoll(query_value(r.query, "size").c_str());
+		const int64_t size = atoll(r.param("size").c_str());
 		if(jstr(sig, "format") != "aitta-release-1" || !is_hex(sha, 64))
 			return refuse(r, "the body is not a release's .sig");
 		const ss_ author = get("keys", key);
@@ -574,11 +558,11 @@ struct Module: public interface::Module
 
 	void http_upload_part(const network::HttpRequest &r)
 	{
-		auto it = m_uploads.find(query_value(r.query, "sha256"));
+		auto it = m_uploads.find(r.param("sha256"));
 		if(it == m_uploads.end())
 			return refuse(r, "no upload of that hash: upload_begin first");
 		Upload &u = it->second;
-		if((size_t)atoll(query_value(r.query, "offset").c_str()) != u.data.size())
+		if((size_t)atoll(r.param("offset").c_str()) != u.data.size())
 			return refuse(r, "the next piece is at offset "+
 					itos((int64_t)u.data.size()));
 		if(u.data.size() + r.body.size() > u.size)
@@ -589,7 +573,7 @@ struct Module: public interface::Module
 
 	void http_upload_end(const network::HttpRequest &r)
 	{
-		const ss_ sha = query_value(r.query, "sha256");
+		const ss_ sha = r.param("sha256");
 		auto it = m_uploads.find(sha);
 		if(it == m_uploads.end())
 			return refuse(r, "no upload of that hash");

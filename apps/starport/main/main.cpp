@@ -96,33 +96,6 @@ static bool is_hex(const ss_ &s, size_t len)
 			s.find_first_not_of("0123456789abcdef") == ss_::npos;
 }
 
-static ss_ query_value(const ss_ &query, const ss_ &key)
-{
-	size_t at = 0;
-	while(at <= query.size()){
-		size_t amp = query.find('&', at);
-		if(amp == ss_::npos)
-			amp = query.size();
-		const ss_ part = query.substr(at, amp - at);
-		const size_t eq = part.find('=');
-		if(eq != ss_::npos && part.substr(0, eq) == key){
-			ss_ v, raw = part.substr(eq + 1);
-			for(size_t i = 0; i < raw.size(); i++){
-				if(raw[i] == '+')
-					v += ' ';
-				else if(raw[i] == '%' && i + 2 < raw.size()){
-					v += (char)strtol(raw.substr(i + 1, 2).c_str(), nullptr, 16);
-					i += 2;
-				} else
-					v += raw[i];
-			}
-			return v;
-		}
-		at = amp + 1;
-	}
-	return "";
-}
-
 // One address counts once: an IPv4 address's /24, an IPv6 one's /48 (the
 // first three groups)
 static ss_ subnet_of(const ss_ &addr)
@@ -2157,8 +2130,8 @@ struct Module: public interface::Module
 			return;
 		}
 		const ss_ name = jstr(m_settings, "name");
-		ss_ kind = query_value(r.query, "kind");
-		ss_ audience = query_value(r.query, "audience");
+		ss_ kind = r.param("kind");
+		ss_ audience = r.param("audience");
 		if(!in_set(kind, KINDS))
 			kind = "";
 		if(audience != "everyone" && audience != "teen")

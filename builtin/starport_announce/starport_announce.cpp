@@ -79,34 +79,6 @@ static void write_file(const ss_ &path, const ss_ &data)
 	f<<data;
 }
 
-// "a=1&b=2" -> a value; percent-decoded, '+' a space
-static ss_ query_value(const ss_ &query, const ss_ &key)
-{
-	size_t at = 0;
-	while(at <= query.size()){
-		size_t amp = query.find('&', at);
-		if(amp == ss_::npos)
-			amp = query.size();
-		const ss_ part = query.substr(at, amp - at);
-		const size_t eq = part.find('=');
-		if(eq != ss_::npos && part.substr(0, eq) == key){
-			ss_ v, raw = part.substr(eq + 1);
-			for(size_t i = 0; i < raw.size(); i++){
-				if(raw[i] == '+')
-					v += ' ';
-				else if(raw[i] == '%' && i + 2 < raw.size()){
-					v += (char)strtol(raw.substr(i + 1, 2).c_str(), nullptr, 16);
-					i += 2;
-				} else
-					v += raw[i];
-			}
-			return v;
-		}
-		at = amp + 1;
-	}
-	return "";
-}
-
 struct Listing {
 	ss_ id;
 	ss_ secret; // raw bytes, as the Starport gave them (hex in the file)
@@ -1099,8 +1071,8 @@ struct Module: public interface::Module, public Interface
 	{
 		if(r.path != "/api/starport/challenge")
 			return;
-		const ss_ id = query_value(r.query, "listing");
-		const ss_ nonce = query_value(r.query, "nonce");
+		const ss_ id = r.param("listing");
+		const ss_ nonce = r.param("nonce");
 		// Only the nonce a Starport sends: 32 lowercase hex digits. The
 		// same secret signs the claim code (HMAC of "claim") and Starport
 		// ID tokens (HMAC of a base64url payload), and neither is ever

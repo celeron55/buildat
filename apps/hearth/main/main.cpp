@@ -141,40 +141,6 @@ static ss_ text_ok(const ss_ &s, size_t max, bool lines, const char *what)
 
 using interface::web_brand::html;
 
-static ss_ url_decode(const ss_ &s)
-{
-	ss_ r;
-	for(size_t i = 0; i < s.size(); i++){
-		if(s[i] == '+'){
-			r += ' ';
-		} else if(s[i] == '%' && i + 2 < s.size() &&
-				isxdigit((unsigned char)s[i + 1]) &&
-				isxdigit((unsigned char)s[i + 2])){
-			r += (char)strtol(s.substr(i + 1, 2).c_str(), nullptr, 16);
-			i += 2;
-		} else {
-			r += s[i];
-		}
-	}
-	return r;
-}
-
-static ss_ query_value(const ss_ &query, const ss_ &key)
-{
-	size_t at = 0;
-	while(at <= query.size()){
-		size_t amp = query.find('&', at);
-		if(amp == ss_::npos)
-			amp = query.size();
-		const ss_ part = query.substr(at, amp - at);
-		const size_t eq = part.find('=');
-		if(eq != ss_::npos && part.substr(0, eq) == key)
-			return url_decode(part.substr(eq + 1));
-		at = amp + 1;
-	}
-	return "";
-}
-
 // A search as FTS5 reads it: each word a quoted string, so nothing a user
 // types is the query language; the last one a prefix
 static ss_ fts_query(const ss_ &q)
@@ -722,6 +688,7 @@ struct Module: public interface::Module
 
 	void init()
 	{
+		network::query_value_self_check();
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("network:http_request"));
 		m_server->sub_event(this, Event::t("network:packet_received/hr:req"));
@@ -1997,7 +1964,7 @@ struct Module: public interface::Module
 			body += lines.empty() ? ss_("<p>Nothing about it here yet.</p>\n") :
 					"<ul class=\"list\">\n"+lines+"</ul>\n";
 		} else if((id = path_id(path, "/t/")) >= 0){
-			const ss_ after = query_value(query, "after");
+			const ss_ after = network::query_value(query, "after");
 			if(after.size() > 15 || after.find_first_not_of("0123456789") !=
 					ss_::npos)
 				return;
@@ -2100,7 +2067,7 @@ struct Module: public interface::Module
 				body += "<li>Nothing written here.</li>\n";
 			body += "</ul>\n";
 		} else if(path == "/search"){
-			const ss_ text = query_value(query, "q").substr(0, 200);
+			const ss_ text = network::query_value(query, "q").substr(0, 200);
 			title = text+" - Hearth search";
 			body = "<h1>Search: "+html(text)+"</h1>\n<ul class=\"list\">\n";
 			const json::Value list = search(text);

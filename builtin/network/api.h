@@ -127,7 +127,57 @@ namespace network
 				const ss_ &origin = "", const ss_ &host = ""):
 			peer(peer), method(method), path(path), query(query), body(body),
 			address(address), origin(origin), host(host){}
+		ss_ param(const ss_ &key) const;
 	};
+
+	// A value from "a=1&b=2", '+' a space and %XX decoded; a '%' not
+	// followed by two hex digits is kept as it is. "" when absent.
+	inline ss_ query_value(const ss_ &query, const ss_ &key)
+	{
+		auto nib = [](char c){
+			return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ?
+					c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+		};
+		size_t at = 0;
+		while(at <= query.size()){
+			size_t amp = query.find('&', at);
+			if(amp == ss_::npos)
+				amp = query.size();
+			const size_t eq = query.find('=', at);
+			if(eq < amp && query.compare(at, eq - at, key) == 0){
+				ss_ v;
+				for(size_t i = eq + 1; i < amp; i++){
+					int a, b;
+					if(query[i] == '+'){
+						v += ' ';
+					} else if(query[i] == '%' && i + 2 < amp &&
+							(a = nib(query[i + 1])) >= 0 &&
+							(b = nib(query[i + 2])) >= 0){
+						v += (char)(a << 4 | b);
+						i += 2;
+					} else {
+						v += query[i];
+					}
+				}
+				return v;
+			}
+			at = amp + 1;
+		}
+		return "";
+	}
+	inline void query_value_self_check()
+	{
+		if(query_value("xa=1&a=2", "a") != "2" ||
+				query_value("a=x+y%41%4g%", "a") != "x yA%4g%" ||
+				query_value("a&b=1", "a") != "" ||
+				query_value("b=1=2&a=%2", "b") != "1=2" ||
+				query_value("a=%2", "a") != "%2")
+			throw Exception("query_value self-check");
+	}
+	inline ss_ HttpRequest::param(const ss_ &key) const
+	{
+		return query_value(query, key);
+	}
 
 	// What a server does about a peer that will not read what it is sent.
 	// A peer's socket does not block any more, so what cannot go right away
