@@ -446,6 +446,19 @@ buildat.sub_packet("fp:privs", function(data)
 		doc.privs[p] = true
 	end
 	log:info("Privileges: " .. table.concat(list, " "))
+	-- A check's edit, once: editing on, then one palette entry made
+	-- ([FP_ABUSE]'s check)
+	if buildat.get_env("BUILDAT_FP_EDIT") and not doc.edit_script_done then
+		if doc.privs.edit then
+			doc.edit_script_done = true
+			doc.send({{op = "create", ent = {id = doc.placeholder(),
+					type = "palette"}}}, function(err)
+				log:info("Scripted edit: " .. (err == "" and "done" or err))
+			end)
+		elseif doc.privs.can_edit then
+			doc.set_editing(true)
+		end
+	end
 	if doc.privs_changed then
 		doc.privs_changed()
 	end
@@ -917,8 +930,12 @@ show_plans = function(message)
 				magic.Color(1.0, 0.8, 0.4))
 		local r = w:CreateChild("UIElement")
 		r:SetLayout(magic.LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
-		for _, a in ipairs({{"Accept", "accept"}, {"Decline", "decline"}}) do
-			local b = r:CreateChild("Button")
+		-- [FP_ABUSE] 2: the block on a row of its own, under the two
+		local r2 = w:CreateChild("UIElement")
+		r2:SetLayout(magic.LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
+		for i, a in ipairs({{"Accept", "accept"}, {"Decline", "decline"},
+				{"No invites from this group", "block"}}) do
+			local b = (i < 3 and r or r2):CreateChild("Button")
 			b:SetStyleAuto()
 			b.minHeight = 28
 			local bt = b:CreateChild("Text")
@@ -1059,6 +1076,8 @@ local GROUPS = {"object",
 		{"invites", {"array", "string"}},
 		{"shares", {"array", {"object", {"plan", "string"},
 			{"rest", {"object", {"owner", "string"}, {"role", "string"}}}}}},
+		-- [FP_ABUSE] 1: whether the group is trusted, and who in it is not
+		{"trusted", "byte"}, {"untrusted", {"array", "string"}},
 	}}},
 	{"invites", {"array", {"object", {"id", "int32_t"}, {"name", "string"},
 		{"by", "string"}}}},
@@ -1197,6 +1216,15 @@ local function show_group(id)
 	end
 	local me = accounts.name
 	local admin = g.role == "admin"
+	-- [FP_ABUSE] 1: trust comes through a trusted group only
+	local new = {}
+	for _, n in ipairs(g.untrusted) do
+		new[n] = true
+	end
+	text(g.trusted == 1 and "A trusted group: a new member who edits on " ..
+			"3 days here is trusted, or when an admin vouches for them." or
+			"Not a trusted group: it leads to no trust until every admin " ..
+			"of it is trusted.")
 	text("Members:")
 	local names = {}
 	for n in pairs(g.members) do
@@ -1205,7 +1233,11 @@ local function show_group(id)
 	table.sort(names)
 	for _, n in ipairs(names) do
 		local r = hrow(w)
-		row_text(r, n .. (g.members[n] == "admin" and " (admin)" or ""))
+		row_text(r, n .. (g.members[n] == "admin" and " (admin)" or "") ..
+				(new[n] and " (new)" or ""))
+		if admin and g.trusted == 1 and new[n] and n ~= me then
+			small_button(r, "Vouch", function() group_cmd("vouch", id, n) end)
+		end
 		if admin and n ~= me then
 			if g.members[n] == "admin" then
 				small_button(r, "Not admin", function() group_cmd("admin", id, n, "0") end)
@@ -1298,7 +1330,8 @@ function doc.show_groups()
 			n = n + 1
 		end
 		button(g.name .. "  (" .. n .. (n == 1 and " member" or " members") ..
-				(g.role == "admin" and ", admin" or "") .. ")", function()
+				(g.role == "admin" and ", admin" or "") ..
+				(g.trusted == 1 and ", trusted" or "") .. ")", function()
 			show_group(g.id)
 		end)
 	end

@@ -1224,6 +1224,24 @@ static const float PLAN_IDLE_S = 60;
 // owns, with their pictures, at most this; the server's admin uncounted
 static const uint64_t USER_BYTES = 5 * 1024 * 1024;
 
+// [FP_ABUSE] (user, 2026-10-08) open registration made safe. Per account:
+// plans owned and groups made; per group, invites pending; per inviter,
+// invites a calendar day; after a decline, no invite from the group for
+// DECLINE_WAIT_S. Trust: edits on TRUST_DAYS calendar days while a member
+// of a trusted group, a group whose admins are all trusted.
+static const size_t MAX_PLANS = 50;
+static const size_t MAX_MADE_GROUPS = 10;
+static const size_t MAX_PENDING_INVITES = 20;
+static const int MAX_INVITES_A_DAY = 50;
+static const int64_t DECLINE_WAIT_S = 7 * 86400;
+static const int TRUST_DAYS = 3;
+
+// The calendar, in seconds, which --sim-clock moves ([SIM_CLOCK])
+static int64_t calendar_s()
+{
+	return interface::os::wall_us() / 1000000;
+}
+
 // **A group** ([FP_GROUPS]; user, 2026-10-07): members (admins are
 // members with that role), the invites it has out and the plans its
 // members shared into it. Seen by its members only; an invitee sees its
@@ -1238,6 +1256,23 @@ struct Group
 	template<class Archive>
 	void serialize(Archive &archive){
 		archive(name, members, invites, shares);
+	}
+};
+
+// [FP_ABUSE] What a group keeps beside that, under a key of its own so
+// the groups saved before it load as they are: who made it, when each
+// member joined (calendar s; 0 before this), who declined an invite and
+// when, and who takes no invites from it
+struct GroupMore
+{
+	ss_ creator;
+	std::map<ss_, int64_t> joined;
+	std::map<ss_, int64_t> declined;
+	std::map<ss_, int64_t> blocked;
+
+	template<class Archive>
+	void serialize(Archive &archive){
+		archive(creator, joined, declined, blocked);
 	}
 };
 
@@ -1274,6 +1309,9 @@ struct Module: public interface::Module
 
 	// [FP_GROUPS] by id, and where they are kept
 	std::map<int32_t, Group> m_groups;
+	std::map<int32_t, GroupMore> m_more;
+	// [FP_ABUSE] the calendar day each user's last edit was noted on
+	std::map<ss_, int64_t> m_edit_day;
 	int32_t m_next_group = 1;
 	storage::Save *m_groups_save = nullptr;
 	// [FP_GROUP_CHAT] each group's last lines, for a member who comes
@@ -1299,6 +1337,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 		m_server->sub_event(this, Event::t("accounts:login"));
 		m_server->sub_event(this, Event::t("accounts:privs"));
+		m_server->sub_event(this, Event::t("accounts:deleted"));
 		for(const char *name : {"fp:open", "fp:leave_plan",
 				"fp:copy_plan", "fp:plan_admin", "fp:batch", "fp:chat",
 				"fp:voxels", "fp:lock", "fp:unlock",
@@ -1322,6 +1361,7 @@ struct Module: public interface::Module
 				network::OldClient)
 		EVENT_TYPEN("accounts:login", on_accounts_login, accounts::Login)
 		EVENT_TYPEN("accounts:privs", on_accounts_privs, accounts::Login)
+		EVENT_TYPEN("accounts:deleted", on_accounts_deleted, accounts::Login)
 		EVENT_TYPEN("network:packet_received/fp:open", on_open,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:leave_plan", on_leave_plan,
@@ -1410,6 +1450,8 @@ struct Module: public interface::Module
 			throw Exception("floorplanner: could not open or create _groups");
 		load_groups();
 		end_public();
+		// The Server window's Accounts page has what each keeps
+		usage_all();
 	}
 
 	// **No public plans** ([FP_GROUPS]; user, 2026-10-07): a plan's
@@ -1929,8 +1971,8 @@ struct Module: public interface::Module
 			return refuse("There is no plan called "+req.name);
 		if(exists && role_in(plan_meta(req.name), user).empty())
 			return refuse("The plan "+req.name+" is not open to you");
-		if(req.create && !over_limit(user).empty())
-			return refuse(over_limit(user));
+		if(req.create && !plan_refusal(user).empty())
+			return refuse(plan_refusal(user));
 		Plan *plan = open_plan(req.name, req.create);
 		if(!plan)
 			return refuse("Could not open the plan "+req.name);
@@ -1980,7 +2022,7 @@ struct Module: public interface::Module
 			return refuse("\""+name+"\" is not a name a plan can have");
 		if(name_taken(name))
 			return refuse("There is a plan called \""+name+"\" already");
-		const ss_ full = over_limit(user, from_plan->bytes());
+		const ss_ full = plan_refusal(user, from_plan->bytes());
 		if(!full.empty())
 			return refuse(full);
 		namespace fs = interface::fs;
@@ -2272,7 +2314,7 @@ struct Module: public interface::Module
 			return refuse("\""+req.name+"\" is not a name a plan can have");
 		if(name_taken(req.name))
 			return refuse("There is a plan called \""+req.name+"\" already");
-		const ss_ full = over_limit(user, req.file.size());
+		const ss_ full = plan_refusal(user, req.file.size());
 		if(!full.empty())
 			return refuse(full);
 		PlanFile f;
@@ -2566,25 +2608,65 @@ struct Module: public interface::Module
 
 	// Storage ([FP_GROUPS]): what a user's plans take, against USER_BYTES
 
+	// What the plans take, by owner, and how many each owns; with the
+	// server's total, which [FP_ABUSE]'s budget is of.
 	// simplified: kept for USAGE_KEEP_S, so that a stream of edits does
 	// not open every closed plan each time; a user can go that much over
 	static constexpr int64_t USAGE_KEEP_S = 10;
-	std::map<ss_, std::pair<int64_t, uint64_t>> m_usage; // user -> time, bytes
+	struct Usage
+	{
+		int64_t at = -USAGE_KEEP_S;
+		std::map<ss_, uint64_t> bytes;
+		std::map<ss_, size_t> plans;
+		uint64_t total = 0;
+	} m_usage;
+
+	const Usage& usage_all()
+	{
+		const int64_t now = (int64_t)time(nullptr);
+		if(now - m_usage.at < USAGE_KEEP_S)
+			return m_usage;
+		Usage u;
+		u.at = now;
+		for(const ss_ &name : plan_names()){
+			PlanMeta m = plan_meta(name);
+			u.bytes[m.owner] += m.bytes;
+			u.plans[m.owner]++;
+			u.total += m.bytes;
+		}
+		u.bytes.erase("");
+		m_usage = u;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			i->report_storage("floorplanner", m_usage.bytes);
+		});
+		return m_usage;
+	}
 
 	uint64_t usage(const ss_ &user)
 	{
-		const int64_t now = (int64_t)time(nullptr);
-		auto it = m_usage.find(user);
-		if(it != m_usage.end() && now - it->second.first < USAGE_KEEP_S)
-			return it->second.second;
-		uint64_t n = 0;
-		for(const ss_ &name : plan_names()){
-			PlanMeta m = plan_meta(name);
-			if(m.owner == user)
-				n += m.bytes;
+		auto it = usage_all().bytes.find(user);
+		return it == m_usage.bytes.end() ? 0 : it->second;
+	}
+
+	int level_of(const ss_ &user)
+	{
+		int lv = accounts::LV_NEW;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			lv = i->level(user);
+		});
+		return lv;
+	}
+
+	// [FP_ABUSE] 3: why `user` may not make another plan, "" when they may
+	ss_ plan_refusal(const ss_ &user, uint64_t more = 0)
+	{
+		if(!is_admin(user)){
+			auto it = usage_all().plans.find(user);
+			if(it != m_usage.plans.end() && it->second >= MAX_PLANS)
+				return "You have "+itos((int)MAX_PLANS)+" plans, as many as "
+						"anyone has: delete one first";
 		}
-		m_usage[user] = std::make_pair(now, n);
-		return n;
+		return over_limit(user, more);
 	}
 
 	// Why `user` may not take `more` bytes: "" when they may
@@ -2592,6 +2674,16 @@ struct Module: public interface::Module
 	{
 		if(is_admin(user))
 			return "";
+		// [FP_ABUSE] 3: the server's budget, for an untrusted account
+		if(level_of(user) < accounts::LV_MEMBER){
+			uint64_t budget = 0;
+			accounts::access(m_server, [&](accounts::Interface *i){
+				budget = i->storage_budget();
+			});
+			if(usage_all().total + more > budget)
+				return "This server's storage for new accounts is full: "
+						"nothing more can be kept for one until it is trusted";
+		}
 		const uint64_t used = usage(user);
 		if(used + more <= USER_BYTES)
 			return "";
@@ -2616,9 +2708,8 @@ struct Module: public interface::Module
 		const ss_ why = over_limit(owner);
 		if(why.empty())
 			return "";
-		return "The plan's owner "+owner+" is past the "+mb_text(USER_BYTES)+
-				" each user has ("+mb_text(usage(owner))+"): nothing more can "
-				"be added, only changed or deleted";
+		return "Nothing more can be added to "+owner+"'s plan, only changed "
+				"or deleted: "+why;
 	}
 
 	// Groups ([FP_GROUPS])
@@ -2634,6 +2725,11 @@ struct Module: public interface::Module
 			if(store->get(key, v) && unpack(v, g))
 				m_groups[atoi(key.substr(2).c_str())] = g;
 		}
+		for(auto &pair : m_groups){
+			GroupMore more;
+			if(store->get("m/"+itos(pair.first), v) && unpack(v, more))
+				m_more[pair.first] = more;
+		}
 		log_i(MODULE, "%zu groups", m_groups.size());
 	}
 
@@ -2641,10 +2737,85 @@ struct Module: public interface::Module
 	{
 		storage::Store *store = m_groups_save->store("main");
 		auto it = m_groups.find(id);
-		if(it == m_groups.end())
+		if(it == m_groups.end()){
 			store->remove("g/"+itos(id));
-		else
+			store->remove("m/"+itos(id));
+			m_more.erase(id);
+		} else {
 			store->set("g/"+itos(id), pack(it->second));
+			store->set("m/"+itos(id), pack(m_more[id]));
+		}
+	}
+
+	// [FP_ABUSE] 1: a group is trusted when every admin of it is
+	bool group_trusted(const Group &g)
+	{
+		for(auto &m : g.members)
+			if(m.second == "admin" && level_of(m.first) < accounts::LV_MEMBER)
+				return false;
+		return true;
+	}
+
+	// An edit saved by `user`: a calendar day of TRUST_DAYS, while they
+	// are in a trusted group, and on the last of them they are trusted
+	void note_edit(const ss_ &user)
+	{
+		const int64_t day = calendar_s() / 86400;
+		auto it = m_edit_day.find(user);
+		if(it != m_edit_day.end() && it->second == day)
+			return;
+		m_edit_day[user] = day;
+		if(level_of(user) >= accounts::LV_MEMBER)
+			return;
+		bool in_trusted = false;
+		for(auto &pair : m_groups)
+			if(pair.second.members.count(user) && group_trusted(pair.second))
+				in_trusted = true;
+		if(!in_trusted)
+			return;
+		storage::Store *store = m_groups_save->store("main");
+		ss_ v;
+		int64_t last = -1;
+		int days = 0;
+		if(store->get("days/"+user, v))
+			sscanf(v.c_str(), "%lld %d", (long long*)&last, &days);
+		if(last == day)
+			return;
+		days++;
+		store->set("days/"+user, itos(day)+" "+itos(days));
+		log_i(MODULE, "%s edited on a day in a trusted group (%i of %i)",
+				cs(user), days, TRUST_DAYS);
+		if(days < TRUST_DAYS)
+			return;
+		ss_ why;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			why = i->set_level(user, accounts::LV_MEMBER);
+		});
+		if(!why.empty()){
+			log_w(MODULE, "%s could not be trusted: %s", cs(user), cs(why));
+			return;
+		}
+		store->remove("days/"+user);
+		log_i(MODULE, "%s is trusted: edits on %i days in a trusted group",
+				cs(user), TRUST_DAYS);
+		send_groups_all();
+	}
+
+	// Invites made by `user` this calendar day, and one more counted
+	int invites_today(const ss_ &user, bool count)
+	{
+		storage::Store *store = m_groups_save->store("main");
+		const int64_t day = calendar_s() / 86400;
+		ss_ v;
+		long long last = -1;
+		int n = 0;
+		if(store->get("invday/"+user, v))
+			sscanf(v.c_str(), "%lld %d", &last, &n);
+		if(last != day)
+			n = 0;
+		if(count)
+			store->set("invday/"+user, itos(day)+" "+itos(++n));
+		return n;
 	}
 
 	struct GroupRow
@@ -2655,9 +2826,13 @@ struct Module: public interface::Module
 		std::map<ss_, ss_> members;
 		sv_<ss_> invites; // for its admins
 		sv_<std::pair<ss_, std::pair<ss_, ss_>>> shares; // plan, owner, role
+		// [FP_ABUSE] 1: whether it is, and its members who are not
+		uint8_t trusted = 0;
+		sv_<ss_> untrusted;
 		template<class Archive>
 		void serialize(Archive &archive){
-			archive(id, name, role, members, invites, shares);
+			archive(id, name, role, members, invites, shares, trusted,
+					untrusted);
 		}
 	};
 	struct InviteRow
@@ -2722,10 +2897,14 @@ struct Module: public interface::Module
 			for(auto &sh : g.shares)
 				row.shares.push_back(std::make_pair(sh.first,
 						std::make_pair(owners[sh.first], sh.second)));
+			row.trusted = group_trusted(g);
+			for(auto &m : g.members)
+				if(level_of(m.first) < accounts::LV_MEMBER)
+					row.untrusted.push_back(m.first);
 			info.groups.push_back(row);
 		}
 		const bool admin = is_admin(user);
-		m_usage.erase(user);
+		m_usage.at = -USAGE_KEEP_S;
 		info.used_kib = (int32_t)std::min<uint64_t>(usage(user) / 1024,
 				INT32_MAX);
 		info.limit_kib = admin ? 0 : (int32_t)(USER_BYTES / 1024);
@@ -2784,10 +2963,18 @@ struct Module: public interface::Module
 		if(r.cmd == "create"){
 			if(r.name.empty() || r.name.size() > 40 || !valid_text(r.name))
 				return result("A group's name is 1 to 40 characters");
+			size_t made = 0;
+			for(auto &m : m_more)
+				made += m.second.creator == user;
+			if(made >= MAX_MADE_GROUPS && !is_admin(user))
+				return result("You have made "+itos((int)MAX_MADE_GROUPS)+
+						" groups, as many as anyone makes: delete one first");
 			const int32_t id = m_next_group++;
 			m_groups_save->store("main")->set("next", itos(m_next_group));
 			m_groups[id].name = r.name;
 			m_groups[id].members[user] = "admin";
+			m_more[id].creator = user;
+			m_more[id].joined[user] = calendar_s();
 			save_group(id);
 			log_i(MODULE, "%s made the group %i (%s)", cs(user), id, cs(r.name));
 			result("");
@@ -2798,6 +2985,7 @@ struct Module: public interface::Module
 			return result("There is no such group");
 		Group &g = git->second;
 		const int32_t id = git->first;
+		GroupMore &more = m_more[id];
 		auto me = g.members.find(user);
 		const bool member = me != g.members.end();
 		const bool admin = member && me->second == "admin";
@@ -2807,6 +2995,7 @@ struct Module: public interface::Module
 		// A member out: their plans' shares go with them
 		auto drop_member = [&](const ss_ &who){
 			g.members.erase(who);
+			more.joined.erase(who);
 			for(auto it = g.shares.begin(); it != g.shares.end();){
 				if(plan_meta(it->first).owner == who)
 					it = g.shares.erase(it);
@@ -2814,13 +3003,20 @@ struct Module: public interface::Module
 					++it;
 			}
 		};
-		if(r.cmd == "accept" || r.cmd == "decline"){
+		if(r.cmd == "accept" || r.cmd == "decline" || r.cmd == "block"){
 			if(!g.invites.erase(user))
 				return result("There is no invite to that group");
-			if(r.cmd == "accept")
+			if(r.cmd == "accept"){
 				g.members[user] = "member";
+				more.joined[user] = calendar_s();
+			} else {
+				more.declined[user] = calendar_s();
+			}
+			if(r.cmd == "block")
+				more.blocked[user] = calendar_s();
 			log_i(MODULE, "%s %s the invite to the group %i", cs(user),
-					r.cmd == "accept" ? "accepted" : "declined", id);
+					r.cmd == "accept" ? "accepted" : r.cmd == "decline" ?
+					"declined" : "declined, and takes no more from", id);
 		} else if(!member){
 			return result("You are not in that group");
 		} else if(r.cmd == "leave"){
@@ -2860,11 +3056,53 @@ struct Module: public interface::Module
 			// A member, or one invited already: nothing
 			if(g.members.count(r.name) || g.invites.count(r.name))
 				return result("");
+			// [FP_ABUSE] 2
+			auto refused = [&](const ss_ &why){
+				log_i(MODULE, "%s's invite of %s to the group %i refused: %s",
+						cs(user), cs(r.name), id, cs(why));
+				return result(why);
+			};
+			if(more.blocked.count(r.name))
+				return refused(r.name+" takes no invites from this group");
+			auto dec = more.declined.find(r.name);
+			if(dec != more.declined.end() &&
+					calendar_s() - dec->second < DECLINE_WAIT_S)
+				return refused(r.name+" declined an invite to this group "
+						"less than "+itos((int)(DECLINE_WAIT_S / 86400))+
+						" days ago");
+			if(g.invites.size() >= MAX_PENDING_INVITES)
+				return refused("This group has "+
+						itos((int)MAX_PENDING_INVITES)+" invites waiting "
+						"already");
+			if(invites_today(user, false) >= MAX_INVITES_A_DAY &&
+					!is_admin(user))
+				return refused("You have invited "+itos(MAX_INVITES_A_DAY)+
+						" today, as many as anyone does in a day");
+			invites_today(user, true);
+			more.declined.erase(r.name);
 			g.invites[r.name] = user;
 			log_i(MODULE, "%s invited %s to the group %i", cs(user),
 					cs(r.name), id);
 		} else if(r.cmd == "cancel"){
 			g.invites.erase(r.name);
+		} else if(r.cmd == "vouch"){
+			// [FP_ABUSE] 1: an admin of a trusted group trusts a member
+			if(!g.members.count(r.name))
+				return result("No member "+r.name);
+			if(!group_trusted(g))
+				return result("Only a trusted group's admins vouch: every "
+						"admin of it is trusted first");
+			if(level_of(r.name) >= accounts::LV_MEMBER)
+				return result(r.name+" is trusted already");
+			ss_ why;
+			accounts::access(m_server, [&](accounts::Interface *i){
+				why = i->set_level(r.name, accounts::LV_MEMBER);
+			});
+			if(!why.empty())
+				return result(why);
+			m_groups_save->store("main")->remove("days/"+r.name);
+			log_i(MODULE, "%s vouched for %s in the group %i", cs(user),
+					cs(r.name), id);
 		} else if(r.cmd == "remove"){
 			if(r.name == user || !g.members.count(r.name))
 				return result("Leave the group instead");
@@ -3009,6 +3247,7 @@ struct Module: public interface::Module
 					voxels[pair.first] = pair.second;
 			}
 			plan->m_voxels_dirty.insert(edit.def);
+			note_edit(peer.name);
 			// The sender's copy carries its number, as with fp:changes
 			for(auto &pair : m_peers){
 				if(pair.second.plan != plan->m_name || pair.second.name.empty())
@@ -3209,6 +3448,93 @@ struct Module: public interface::Module
 		send_group_backlog(login.peer);
 	}
 
+	// [FP_ABUSE] 4: an account deleted. Its plans go, with their
+	// pictures and backups; its invites, made and had; and each group it
+	// was the last admin of goes to another member -- the highest trust
+	// level, then the one in it longest -- or, with none left, is deleted
+	void on_accounts_deleted(const accounts::Login &login)
+	{
+		const ss_ &gone = login.name;
+		for(const ss_ &name : plan_names()){
+			if(plan_meta(name).owner != gone)
+				continue;
+			for(auto &pair : m_peers)
+				if(pair.second.plan == name)
+					to_plans(pair.first, "The plan's owner's account was deleted");
+			close_plan(name);
+			storage::access(m_server, [&](storage::Interface *istorage){
+				istorage->remove(name);
+			});
+			for(auto &pair : m_groups)
+				pair.second.shares.erase(name);
+			log_i(MODULE, "The plan %s of the deleted account %s deleted",
+					cs(name), cs(gone));
+		}
+		sv_<int32_t> ids;
+		for(auto &pair : m_groups)
+			ids.push_back(pair.first);
+		for(int32_t id : ids){
+			Group &g = m_groups[id];
+			GroupMore &more = m_more[id];
+			for(auto it = g.invites.begin(); it != g.invites.end();){
+				if(it->first == gone || it->second == gone)
+					it = g.invites.erase(it);
+				else
+					++it;
+			}
+			more.declined.erase(gone);
+			more.blocked.erase(gone);
+			const bool was_admin = g.members.count(gone) &&
+					g.members[gone] == "admin";
+			g.members.erase(gone);
+			more.joined.erase(gone);
+			if(g.members.empty()){
+				log_i(MODULE, "The group %i (%s) deleted with its last "
+						"member %s", id, cs(g.name), cs(gone));
+				m_groups.erase(id);
+				m_group_chat.erase(id);
+				save_group(id);
+				continue;
+			}
+			ss_ heir;
+			bool has_admin = false;
+			for(auto &m : g.members)
+				has_admin |= m.second == "admin";
+			if(was_admin && !has_admin){
+				int best_lv = -1;
+				int64_t best_joined = 0;
+				for(auto &m : g.members){
+					const int lv = level_of(m.first);
+					const int64_t j = more.joined.count(m.first) ?
+							more.joined[m.first] : 0;
+					if(lv > best_lv || (lv == best_lv && j < best_joined)){
+						heir = m.first;
+						best_lv = lv;
+						best_joined = j;
+					}
+				}
+				g.members[heir] = "admin";
+				log_i(MODULE, "The group %i (%s) of the deleted account %s "
+						"goes to %s", id, cs(g.name), cs(gone), cs(heir));
+			}
+			if(more.creator == gone){
+				for(auto &m : g.members)
+					if(heir.empty() && m.second == "admin")
+						heir = m.first;
+				more.creator = heir;
+			}
+			save_group(id);
+		}
+		storage::Store *store = m_groups_save->store("main");
+		store->remove("days/"+gone);
+		store->remove("invday/"+gone);
+		m_edit_day.erase(gone);
+		m_usage.at = -USAGE_KEEP_S;
+		usage_all();
+		send_groups_all();
+		send_plans_to_idle();
+	}
+
 	void on_accounts_privs(const accounts::Login &login)
 	{
 		if(m_peers.count(login.peer))
@@ -3352,9 +3678,11 @@ struct Module: public interface::Module
 			set_<int32_t> changed, deleted;
 			result.error = plan->apply(batch.ops, result.placeholders, changed,
 					deleted);
-			if(result.error.empty())
+			if(result.error.empty()){
 				broadcast_changes(*plan, batch.seq, packet.sender, changed,
 						deleted);
+				note_edit(peer.name);
+			}
 		}
 		result.seq = batch.seq;
 		if(!result.error.empty())

@@ -62,7 +62,7 @@ last d1.log "Plans:" | grep -q "Plans: $" || fail "d sees plans: $(last d1.log P
 echo "ok: a new account sees no plans"
 
 # b online: the invite's dialog at once, accepted; c offline
-printf 'wait_log 30000 Invited to the group friends\ndelay 500\nmouse_pos 283 160\nmouse_click left\ndelay 2000\nquit\n' > "$tmp/cb"
+printf 'wait_log 30000 Invited to the group friends\ndelay 500\nmouse_pos 283 154\nmouse_click left\ndelay 2000\nquit\n' > "$tmp/cb"
 CMDS="$tmp/cb" client b b1.log 0 &
 cb=$!
 sleep 6
@@ -70,7 +70,7 @@ client a a2.log 5 "BUILDAT_FP_GROUP=$(printf 'invite 1 b\ninvite 1 c\nshare 1 pa
 wait $cb
 grep -q "b accepted the invite to the group 1" "$tmp/fp.log" || fail "b did not accept ($tmp/b1.log)"
 echo "ok: b, online, accepted at once"
-printf 'wait_log 30000 Invited to the group friends\ndelay 500\nmouse_pos 356 160\nmouse_click left\ndelay 2000\nquit\n' > "$tmp/cc"
+printf 'wait_log 30000 Invited to the group friends\ndelay 500\nmouse_pos 356 154\nmouse_click left\ndelay 2000\nquit\n' > "$tmp/cc"
 CMDS="$tmp/cc" client c c1.log 0
 grep -q "c declined the invite to the group 1" "$tmp/fp.log" || fail "c did not decline ($tmp/c1.log)"
 echo "ok: c, at the next join, declined"

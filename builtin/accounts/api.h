@@ -6,6 +6,7 @@
 #include "interface/module.h"
 #include "network/api.h"
 #include <functional>
+#include <map>
 
 // **The server's accounts** ([VANILLA_PUBLIC] 2, from the floorplanner's
 // [FP_ACCESS]): who may join and as whom, and who is an admin, for every
@@ -37,7 +38,9 @@ namespace accounts
 
 	// accounts:login: a peer has joined as `name`. accounts:privs: a user's
 	// admin changed; their game says so to their client. A peer leaves as
-	// network:client_disconnected says.
+	// network:client_disconnected says. accounts:deleted: the account
+	// `name` is gone (peer 0), and an app drops what was the account's
+	// ([FP_ABUSE] 4).
 	struct Login: public interface::Event::Private
 	{
 		PeerId peer = 0;
@@ -149,6 +152,15 @@ namespace accounts
 		// below one's own level, and from LV_MODERATOR. LV_ADMIN is made in
 		// the Server window only.
 		virtual ss_ set_level(const ss_ &name, int lv, const ss_ &by = "") = 0;
+		// [FP_ABUSE] 5: what an app keeps for each account, in bytes, the
+		// whole of it each time (an account left out uses nothing); the
+		// Server window's Accounts page shows the sum and each app's
+		virtual void report_storage(const ss_ &app,
+				const std::map<ss_, uint64_t> &bytes) = 0;
+		// [FP_ABUSE] 3: the server-wide budget the admin sets in the
+		// Server window, 2 GB unless set: past it an app takes no more from
+		// an untrusted account (below LV_MEMBER)
+		virtual uint64_t storage_budget() = 0;
 	};
 
 	inline bool access(interface::Server *server,

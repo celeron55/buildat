@@ -68,7 +68,9 @@ local ADMIN = {"object", {"cmd", "string"}, {"name", "string"},
 local USERS = {"object",
 	{"users", {"array", {"object", {"name", "string"},
 			{"privs", {"array", "string"}}, {"here", "byte"},
-			{"id_only", "byte"}, {"level", "int32_t"}}}},
+			{"id_only", "byte"}, {"level", "int32_t"},
+			-- [FP_ABUSE] 5: what the apps keep for it
+			{"storage", "string"}}}},
 	{"invites", {"array", {"object", {"code", "string"},
 			{"privs", {"array", "string"}}, {"by", "string"}}}},
 	{"access", {"object", {"open_registration", "byte"}}},
@@ -78,6 +80,9 @@ local USERS = {"object",
 	{"approvals", {"array", "string"}},
 	-- [TRUST_LADDER] The viewer's level
 	{"level", "int32_t"},
+	-- [FP_ABUSE] 3: the storage budget in MB, and what all apps keep
+	{"budget_mb", "int32_t"},
+	{"storage", "string"},
 }
 
 -- [TRUST_LADDER] The trust levels' names, as builtin/accounts/api.h's
@@ -1196,7 +1201,8 @@ users_page = function(back)
 		local it = item()
 		page_text(it, user.name .. " - " .. M.level_name(user.level) ..
 				(user.here == 1 and " (here)" or "") ..
-				(user.id_only == 1 and " (Starport ID only)" or ""))
+				(user.id_only == 1 and " (Starport ID only)" or "") ..
+				(user.storage ~= "" and ", keeps " .. user.storage or ""))
 		local r = row(it)
 		lines = lines + 2
 		local below = user.level < u.level
@@ -1283,6 +1289,17 @@ users_page = function(back)
 			"Local accounts: invite only", function()
 		M.admin("setting", "open_registration", "", a.open_registration ~= 1)
 	end) end
+	-- [FP_ABUSE] 3: past the budget an app takes no more from an untrusted
+	-- account
+	if admin then
+		page_text(w, "Storage: " .. (u.storage ~= "" and u.storage or
+				"nothing kept") .. " of a budget of " .. u.budget_mb ..
+				" MB for untrusted accounts")
+		button(w, "Storage budget...", function()
+			ask_page("The storage budget in MB", {"MB"},
+					function(mb) M.admin("setting", "storage_budget", mb) end)
+		end)
+	end
 	if back then
 		button(w, "Back", go_back)
 	end

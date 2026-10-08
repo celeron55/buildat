@@ -20,6 +20,7 @@
 #include <cereal/types/vector.hpp>
 #include <cereal/types/utility.hpp>
 #include <random>
+#include <algorithm>
 #include <set>
 #include <sstream>
 #include <map>
@@ -389,9 +390,11 @@ struct UserRow
 	uint8_t id_only = 0;
 	// [TRUST_LADDER]
 	int32_t level = 0;
+	// [FP_ABUSE] 5: what the apps keep for it, "" for nothing
+	ss_ storage;
 	template<class Archive>
 	void serialize(Archive &archive){
-		archive(name, privs, here, id_only, level);
+		archive(name, privs, here, id_only, level, storage);
 	}
 };
 
@@ -407,11 +410,27 @@ struct UsersInfo
 	sv_<ss_> approvals;
 	// [TRUST_LADDER] The viewer's: a moderator's page has less on it
 	int32_t level = 0;
+	// [FP_ABUSE] 3: the storage budget in MB, and what all apps keep
+	int32_t budget_mb = 0;
+	ss_ storage;
 	template<class Archive>
 	void serialize(Archive &archive){
-		archive(users, invites, access, bans, starport_ids, approvals, level);
+		archive(users, invites, access, bans, starport_ids, approvals, level,
+				budget_mb, storage);
 	}
 };
+
+static const int64_t DEFAULT_BUDGET_MB = 2048;
+
+static ss_ size_text(uint64_t bytes)
+{
+	char buf[32];
+	if(bytes >= 1024 * 1024)
+		snprintf(buf, sizeof buf, "%.1f MB", bytes / (1024.0 * 1024.0));
+	else
+		snprintf(buf, sizeof buf, "%.0f kB", bytes / 1024.0);
+	return buf;
+}
 
 struct Peer
 {
@@ -983,7 +1002,57 @@ struct Module: public interface::Module, public Interface
 
 	void set_account(const ss_ &name, const Account &account)
 	{
+		// [FP_ABUSE] 5: when it was made, for the newest first
+		ss_ x;
+		if(!m_store->get("auth/"+name, x))
+			m_store->set("made/"+name, itos(interface::os::wall_us() / 1000000));
 		m_store->set("auth/"+name, pack(account));
+	}
+
+	// [FP_ABUSE] The apps' storage by app, then by account
+	std::map<ss_, std::map<ss_, uint64_t>> m_storage;
+
+	void report_storage(const ss_ &app, const std::map<ss_, uint64_t> &bytes)
+	{
+		m_storage[app] = bytes;
+	}
+
+	uint64_t storage_budget()
+	{
+		ss_ v;
+		const int64_t mb = m_store && m_store->get("storage_budget_mb", v) ?
+				atoll(v.c_str()) : DEFAULT_BUDGET_MB;
+		return (uint64_t)mb * 1024 * 1024;
+	}
+
+	// "1.2 MB (floorplanner 1.2 MB)", or "" when no app keeps anything
+	ss_ storage_text(const ss_ &name)
+	{
+		uint64_t sum = 0;
+		ss_ apps;
+		for(auto &app : m_storage){
+			auto it = name.empty() ? app.second.end() : app.second.find(name);
+			uint64_t n = 0;
+			if(name.empty())
+				for(auto &b : app.second)
+					n += b.second;
+			else if(it != app.second.end())
+				n = it->second;
+			if(!n)
+				continue;
+			sum += n;
+			apps += (apps.empty() ? "" : ", ")+app.first+" "+size_text(n);
+		}
+		return sum ? size_text(sum)+" ("+apps+")" : "";
+	}
+
+	// The account gone: what is kept of it here, and the apps told
+	void account_deleted(const ss_ &name)
+	{
+		m_store->remove("made/"+name);
+		for(auto &app : m_storage)
+			app.second.erase(name);
+		m_server->emit_event("accounts:deleted", new Login(0, name));
 	}
 
 	Account new_account(const ss_ &password, const sv_<ss_> &privs)
@@ -1363,6 +1432,14 @@ struct Module: public interface::Module, public Interface
 	void send_users(PeerId peer)
 	{
 		UsersInfo info;
+		// [FP_ABUSE] 5: the newest accounts first (one made before
+		// 0.6.75 has no time, and is last)
+		std::map<ss_, int64_t> made;
+		for(const ss_ &key : m_store->list("made/")){
+			ss_ v;
+			if(m_store->get(key, v))
+				made[key.substr(5)] = atoll(v.c_str());
+		}
 		for(const ss_ &key : m_store->list("auth/")){
 			UserRow row;
 			row.name = key.substr(5);
@@ -1374,8 +1451,15 @@ struct Module: public interface::Module, public Interface
 			row.id_only = m_store->get("starport_of/"+row.name, x) &&
 					!m_store->get("own_password/"+row.name, x);
 			row.level = level(row.name);
+			row.storage = storage_text(row.name);
 			info.users.push_back(row);
 		}
+		std::stable_sort(info.users.begin(), info.users.end(),
+				[&](const UserRow &a, const UserRow &b){
+			return made[a.name] > made[b.name];
+		});
+		info.budget_mb = (int32_t)(storage_budget() / (1024 * 1024));
+		info.storage = storage_text("");
 		for(const ss_ &key : m_store->list("invite/")){
 			Invite invite;
 			ss_ data;
@@ -1519,7 +1603,10 @@ struct Module: public interface::Module, public Interface
 			m_store->remove("ban_report/"+r.name);
 			m_store->remove("own_password/"+r.name);
 			m_store->remove("level/"+r.name);
+			m_store->remove("totp/"+r.name);
+			m_store->remove("totp_pending/"+r.name);
 			log_i(MODULE, "%s deleted the account %s", cs(by), cs(r.name));
+			account_deleted(r.name);
 			result("The account "+r.name+" was deleted");
 		} else if(r.cmd == "add"){
 			if(!valid_name(r.name) || reserved_name(r.name))
@@ -1589,6 +1676,16 @@ struct Module: public interface::Module, public Interface
 				why = "Announcing to the Starports now";
 			});
 			return result(why);
+		} else if(r.cmd == "setting" && r.name == "storage_budget"){
+			// [FP_ABUSE] 3: MB, 0 and up
+			const ss_ &a = r.arg;
+			if(a.empty() || a.size() > 9 ||
+					a.find_first_not_of("0123456789") != ss_::npos)
+				return result("The budget is a number of MB");
+			m_store->set("storage_budget_mb", a);
+			log_i(MODULE, "%s set the storage budget to %s MB", cs(by), cs(a));
+			send_users(packet.sender);
+			return result("The storage budget is "+a+" MB");
 		} else if(r.cmd == "setting"){
 			if(r.name != "open_registration")
 				return result("No such setting");
@@ -2150,6 +2247,7 @@ struct Module: public interface::Module, public Interface
 		m_store->remove("totp_pending/"+name);
 		m_store->remove("level/"+name);
 		log_i(MODULE, "Account %s deleted", cs(name));
+		account_deleted(name);
 		return "";
 	}
 
