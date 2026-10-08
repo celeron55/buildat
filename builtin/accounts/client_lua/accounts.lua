@@ -1059,22 +1059,20 @@ local BAN_REASONS = {
 ban_page = function(name, back)
 	local w = open_page("ask", "Ban " .. name, back)
 	local reason, report = nil, false
-	local buttons, rb = {}, nil
+	local rb = nil
 	local function draw()
-		for k, b in pairs(buttons) do
-			b:GetChild(0):SetColor(k == reason and WARN or
-					magic.Color(1, 1, 1))
-		end
 		rb:GetChild(0):SetText((report and "[x]" or "[ ]") ..
 				" Report to Starport (a Starport ID only)")
 	end
-	for _, x in ipairs(BAN_REASONS) do
-		buttons[x[1]] = button(w, x[2], function()
-			reason = x[1]
-			report = x[3]
-			draw()
-		end)
+	local choices = {}
+	for i, x in ipairs(BAN_REASONS) do
+		choices[i] = {x[2], i}
 	end
+	ui_utils.dropdown(w, choices, nil, function(i)
+		reason = BAN_REASONS[i][1]
+		report = BAN_REASONS[i][3]
+		draw()
+	end, {label = "Reason", none = "(choose)"})
 	rb = button(w, "", function()
 		report = not report
 		draw()
