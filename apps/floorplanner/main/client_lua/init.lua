@@ -776,26 +776,10 @@ local function page_window(width)
 	-- Not a groups page or the plans, until one says it is
 	doc.groups_page = nil
 	doc.on_plans = false
-	local w = magic.ui.root:CreateChild("Window")
-	w:SetStyleAuto()
-	w:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(16, 16, 16, 16))
-	w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-	w:SetFixedWidth(math.min(width, magic.ui.root.width - 16))
-	-- By the keyboard ([MENU_KEYS])
-	require("buildat/extension/ui_utils").keyboard_page(w)
-	return w
+	return accounts.page_window(width)
 end
 
-local function page_text(w, t, color)
-	local l = w:CreateChild("Text")
-	l:SetStyleAuto()
-	l:SetWordwrap(true)
-	l:SetText(t)
-	if color then
-		l:SetColor(color)
-	end
-	return l
-end
+local page_text = accounts.page_text
 
 -- The plans ([FP_PLANS] 4): after the join, the ones this user may read,
 -- to open one or make a new one, which is theirs
@@ -907,14 +891,7 @@ show_plans = function(message)
 		page_text(w, t, color)
 	end
 	local function button(t, f)
-		local b = w:CreateChild("Button")
-		b:SetStyleAuto()
-		b.minHeight = 28
-		local bt = b:CreateChild("Text")
-		bt:SetStyleAuto()
-		bt:SetText(t)
-		bt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-		magic.SubscribeToEvent(b, "Released", f)
+		accounts.page_button(w, t, f)
 	end
 	doc.on_plans = true
 	log:info("Plan picker: " .. #doc.plans .. " plans")
@@ -1003,14 +980,7 @@ local function page(title)
 		page_text(w, t, color)
 	end
 	local function button(t, f)
-		local b = w:CreateChild("Button")
-		b:SetStyleAuto()
-		b.minHeight = 28
-		local bt = b:CreateChild("Text")
-		bt:SetStyleAuto()
-		bt:SetText(t)
-		bt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-		magic.SubscribeToEvent(b, "Released", f)
+		accounts.page_button(w, t, f)
 	end
 	text(title)
 	return w, text, button
