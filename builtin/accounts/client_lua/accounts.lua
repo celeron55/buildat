@@ -454,6 +454,8 @@ end
 -- [WEB_ID_TRUST]: the Starports this server is listed on, for a web
 -- client's sign-in window (the extension takes them on the web only)
 buildat.sub_packet("starport:where", function(data)
+	-- The web checks wait for this line
+	log:info("starport:where: " .. #data .. " bytes")
 	local ok, starport = pcall(require, "buildat/extension/starport")
 	if ok and starport.set_web_starports then
 		starport.set_web_starports(buildat.parse_json(data))
