@@ -313,7 +313,9 @@ static const char *id_page_head = R"PAGE(<!doctype html>
 static const char *id_page_html = R"PAGE(
 body{max-width:34em}input{width:100%;box-sizing:border-box;margin:.2em 0}
 button{min-width:7em;margin:.4em .5em .2em 0}.hide{display:none}
-li{margin:.2em 0}
+li{margin:.2em 0}label{display:block}
+input[type=radio],input[type=checkbox]{width:auto}.yn>label{display:inline;
+margin-right:1.5em}
 </style></head><body>
 <header><span class="brand">LOGO<span id="title">Starport ID</span></span>
 </header>
@@ -332,11 +334,16 @@ li{margin:.2em 0}
 <label>ID <input id="rname" autocomplete="username" required></label>
 <label>Password <input id="rpassword" type="password"
  autocomplete="new-password" required></label>
-<label>The year you were born <input id="ryear" inputmode="numeric"
- required></label>
-<label><input id="rconsent" type="checkbox" style="width:auto"> Under 13:
- a parent consents</label>
-<button>Make the ID</button><button type="button" id="tologin">Back</button>
+<fieldset class="yn"><legend>Are you 18 or over?</legend>
+<label><input type="radio" name="radult" id="ryes" required> Yes</label>
+<label><input type="radio" name="radult" id="rno"> No</label>
+<div id="rminor" class="hide">
+<label>Your birth year <input id="ryear" inputmode="numeric"></label>
+<p>Kept only until you turn 18.</p>
+<label><input id="rconsent" type="checkbox"> Under 13: I have a
+ parent's consent</label></div></fieldset>
+<div><button>Make the ID</button><button type="button"
+ id="tologin">Back</button></div>
 </form>
 <form id="allow" class="hide">
 <p>Signed in as <b class="me"></b>.</p>
@@ -368,9 +375,14 @@ li{margin:.2em 0}
  autocomplete="new-password"></label>
 <button type="button" id="setpw">Change</button></fieldset>
 <fieldset><legend>Age</legend><p id="band"></p>
-<label>The year you were born <input id="year" inputmode="numeric"></label>
-<label><input id="consent" type="checkbox" style="width:auto"> Under 13: a
- parent consents</label>
+<div class="yn">Are you 18 or over?<br>
+<label><input type="radio" name="sadult" id="syes"> Yes</label>
+<label><input type="radio" name="sadult" id="sno"> No</label>
+<div id="sminor" class="hide">
+<label>Your birth year <input id="syear" inputmode="numeric"></label>
+<p>Kept only until you turn 18.</p>
+<label><input id="sconsent" type="checkbox"> Under 13: I have a
+ parent's consent</label></div></div>
 <button type="button" id="setage">Save</button></fieldset>
 <p>With TOTP on, a change of the e-mail, the password or TOTP takes a
 code: put it in TOTP's Code first.</p>
@@ -497,10 +509,24 @@ $("login").onsubmit = async ev => {
 };
 $("toreg").onclick = () => show("register");
 $("tologin").onclick = () => show("login");
+// [SP_AGE_FORM] The age as the client asks it: "18 or over?", and only a
+// No asks the birth year, which a Yes never sends
+for(const p of ["r", "s"])
+	for(const yn of ["yes", "no"])
+		$(p + yn).onchange = () => {
+			$(p + "minor").classList.toggle("hide", !$(p + "no").checked);
+			$(p + "year").required = $(p + "no").checked;
+		};
+function age(p){
+	if($(p + "yes").checked)
+		return {adult: true};
+	if(!$(p + "no").checked)
+		throw new Error("say whether you are 18 or over");
+	return {birth_year: +$(p + "year").value, consent: $(p + "consent").checked};
+}
 $("register").onsubmit = act(async () => {
-	const r = await call("register", {name: $("rname").value,
-		password: $("rpassword").value, birth_year: +$("ryear").value,
-		consent: $("rconsent").checked});
+	const r = await call("register", Object.assign({name: $("rname").value,
+		password: $("rpassword").value}, age("r")));
 	keep(r.session);
 	await signed_in();
 });
@@ -568,8 +594,7 @@ $("setpw").onclick = act(async () => {
 	done("Password changed");
 });
 $("setage").onclick = act(async () => {
-	await call("age", {session, birth_year: +$("year").value,
-		consent: $("consent").checked});
+	await call("age", Object.assign({session}, age("s")));
 	await signed_in();
 	done("Saved");
 });

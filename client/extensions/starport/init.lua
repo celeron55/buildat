@@ -1542,11 +1542,12 @@ local function age_rows(w)
 	local r = add_row(w)
 	add_label(r, "Are you 18 or over?", 200)
 	local yes, no
-	local year_row, consent_b
+	local year_row, kept, consent_b
 	local function draw()
 		yes:GetChild(0).text = (age.adult == true and "[x]" or "[ ]") .. " Yes"
 		no:GetChild(0).text = (age.adult == false and "[x]" or "[ ]") .. " No"
 		year_row.visible = age.adult == false
+		kept.visible = age.adult == false
 		consent_b.visible = age.adult == false
 		reseal(year_row)
 		consent_b:GetChild(0).text = (age.consent and "[x]" or "[ ]") ..
@@ -1555,8 +1556,10 @@ local function age_rows(w)
 	yes = add_button(r, "Yes", function() age.adult = true draw() end)
 	no = add_button(r, "No", function() age.adult = false draw() end)
 	year_row = add_row(w)
-	add_label(year_row, "Birth year", 200)
+	add_label(year_row, "Your birth year", 200)
 	local year = add_edit(year_row, "")
+	-- The same words as the ID's web page ([SP_AGE_FORM])
+	kept = add_text(w, "Kept only until you turn 18.", DIM)
 	consent_b = add_button(w, "", function()
 		age.consent = not age.consent
 		draw()
