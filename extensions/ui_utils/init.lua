@@ -1127,6 +1127,8 @@ function M.safe.dropdown(parent, choices, current, on_choose, options)
 	if options.label then
 		row = parent:CreateChild("UIElement")
 		row:SetLayout(magic.LM_HORIZONTAL, 10, magic.IntRect(0, 0, 0, 0))
+		-- Not stretched by a column it is put in
+		row:SetFixedHeight(h)
 		local t = row:CreateChild("Text")
 		t:SetStyleAuto()
 		t.text = options.label
@@ -1190,13 +1192,17 @@ function M.safe.dropdown(parent, choices, current, on_choose, options)
 		drop.listView:ClearSelection()
 	end
 	local w = options.width or
-			math.max(widest + 40, options.min_width or 0)
+			math.max(widest + 48, options.min_width or 0)
 	if options.fill then
 		drop:SetFixedHeight(h)
 		drop.minWidth = w
 		drop.maxWidth = 100000
 	else
 		drop:SetFixedSize(w, h)
+		-- Its label's and its own, not spread over a row it is put in
+		if row then
+			row:SetFixedWidth(row:GetChild(0).width + 10 + w)
+		end
 	end
 	-- The list lays its children out in a row, so the choice's text takes
 	-- all but the arrow's room (kept so as it grows: the Update below)
@@ -1235,7 +1241,7 @@ function M.safe.dropdown(parent, choices, current, on_choose, options)
 			index = i
 			on_choose(values[i], i)
 			-- Moved on purpose (a page drawn again, a field to fill)
-			if not drop:HasFocus() then
+			if gone(drop) or not drop:HasFocus() then
 				refocus = nil
 			end
 		end

@@ -292,21 +292,20 @@ local function edit(parent, label, multi, draft, width, on_change)
 	return e
 end
 
--- A button that cycles through `choices` ({value, label}); returns a
--- function giving the value picked
--- simplified: a cycle, not a dropdown; the lists are short
-local function cycle(parent, prefix, choices, at, on_change)
-	local b
+-- A choice of one from `choices` ({value, label}), as a dropdown with
+-- `prefix` before it; returns a function giving the value picked
+local function choice(parent, prefix, choices, at, on_change)
 	at = at or 1
-	b = button(parent, prefix .. choices[at][2], function()
-		at = at % #choices + 1
-		local t = b:GetChild(0)
-		t:SetText(prefix .. choices[at][2])
-		b:SetFixedWidth(t.width + 24)
+	local list = {}
+	for i, c in ipairs(choices) do
+		list[i] = {c[2], c[1]}
+	end
+	ui.dropdown(parent, list, choices[at][1], function(v, i)
+		at = i
 		if on_change then
-			on_change(choices[at][1])
+			on_change(v)
 		end
-	end)
+	end, {label = prefix ~= "" and prefix:gsub(" $", "") or nil})
 	return function() return choices[at][1] end
 end
 
@@ -836,6 +835,8 @@ show_topic = function(id)
 		button(bar, "New thread...", function()
 			go(function() show_compose({topic = id, tracker = t.tracker}) end)
 		end, true)
+		-- What is listed and how, a row of its own under the buttons
+		local view = row(w)
 		-- The kinds, or a tracker's statuses, that are there
 		local kinds, seen = {{"", "everything"}}, {}
 		for _, th in ipairs(t.threads) do
@@ -849,7 +850,7 @@ show_topic = function(id)
 		for i, k in ipairs(kinds) do
 			if k[1] == state.kind then at = i end
 		end
-		cycle(bar, "Showing: ", kinds, at, function(k)
+		choice(view, "Showing: ", kinds, at, function(k)
 			state.kind = k
 			redraw()
 		end)
@@ -857,7 +858,7 @@ show_topic = function(id)
 		for i, o in ipairs(ORDERS) do
 			if o[1] == state.order then oat = i end
 		end
-		cycle(bar, "Order: ", ORDERS, oat, function(o)
+		choice(view, "Order: ", ORDERS, oat, function(o)
 			state.order = o
 			redraw()
 		end)
@@ -978,7 +979,7 @@ show_thread = function(id, at, missing)
 				if s == t.status then sat = i end
 			end
 			local fixed_in
-			local pick = cycle(bar, "Status: ", choices, sat)
+			local pick = choice(bar, "Status: ", choices, sat)
 			fixed_in = bar:CreateChild("LineEdit")
 			fixed_in:SetStyleAuto()
 			fixed_in:SetFixedWidth(70)
@@ -1434,7 +1435,7 @@ show_compose = function(o)
 				end
 			end
 			if #choices > 0 then
-				topic_pick = cycle(bar, "In: ", choices, at)
+				topic_pick = choice(bar, "In: ", choices, at)
 			end
 		end
 		local kinds = {}
@@ -1443,7 +1444,7 @@ show_compose = function(o)
 				kinds[#kinds + 1] = {k[1], "It is " .. k[2]}
 			end
 		end
-		kind = cycle(bar, "", kinds, o.feedback and 3 or 1)
+		kind = choice(bar, "", kinds, o.feedback and 3 or 1)
 	end
 	-- The field the page's width; the preview under it once Preview is
 	-- pressed, as a reply's ([HEARTH_NEW_PREVIEW]: beside it, it halved
@@ -1915,9 +1916,9 @@ show_topic_edit = function(t)
 				parents[#parents + 1] = {x.id, x.name}
 			end
 		end
-		parent = cycle(w, "Under: ", parents, 1)
+		parent = choice(w, "Under: ", parents, 1)
 	end
-	button(w, t and "Save" or "Create", function()
+	button(row(w), t and "Save" or "Create", function()
 		local function done()
 			req("topics", nil, function(r)
 				topics = r.topics
