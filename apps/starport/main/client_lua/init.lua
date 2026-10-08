@@ -324,10 +324,6 @@ end
 local function refresh(draw)
 	req("me", {}, function(r)
 		me = r
-		-- [STARPORT_COPY_IDS]: the Starport server's version, the one an
-		-- operator asks about
-		accounts.server_footer = "Buildat v" .. (me.version == nil and "?" or
-				tostring(me.version))
 		if not accounts.frame then
 			accounts.server_window("overview")
 		else

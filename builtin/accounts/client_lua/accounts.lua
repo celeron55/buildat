@@ -62,7 +62,7 @@ local LOGIN_RESULT = {"object", {"r", {"object", {"error", "string"},
 		{"token", "string"}}}, {"name", "string"}}
 local HELLO = {"object", {"local", "byte"}, {"setup", "byte"},
 		{"open_registration", "byte"}, {"starport", "byte"},
-		{"announce", "byte"}}
+		{"announce", "byte"}, {"version", "string"}}
 local ADMIN = {"object", {"cmd", "string"}, {"name", "string"},
 		{"arg", "string"}, {"on", "byte"}}
 local USERS = {"object",
@@ -2061,11 +2061,9 @@ end
 -- M.close_page() closes it too; without, it is the app's own UI.
 -- M.server_open(title, back) is an app's page in it, M.server_show(key)
 -- an entry, M.server_sidebar() the sidebar drawn again, M.frame the
--- window (for a game's hit tests), M.server_footer a line under the
--- sidebar.
+-- window (for a game's hit tests).
 --
 M.server_menu = nil
-M.server_footer = nil
 
 local function show_sidebar()
 	drop_page()
@@ -2165,9 +2163,30 @@ draw_sidebar = function()
 	if sw.on_close then
 		side_button("Close", nil, function() server_close() end)
 	end
-	if M.server_footer then
-		page_text(sw.sidebar, M.server_footer, DIM)
+	-- [SERVER_VERSION]: the server's Buildat and this client's, read-only
+	-- fields to copy into a ticket
+	local version, hash = buildat.version()
+	for _, v in ipairs({{"Server", M.hello.version or "?"},
+			{"This client", tostring(version) ..
+				(hash and hash ~= "" and "-" .. hash or "")}}) do
+		page_text(sw.sidebar, v[1], DIM)
+		local e = sw.sidebar:CreateChild("LineEdit")
+		e:SetStyleAuto()
+		e:SetFixedHeight(22)
+		e.editable = false
+		e.textCopyable = true
+		e.textSelectable = true
+		-- Small enough for "0.6.75-ea7eb9e33-dirty" in the sidebar; a
+		-- client before textElement has the default size
+		pcall(function() e.textElement:SetFontSize(9) end)
+		e:SetText(v[2])
+		e.cursorPosition = 0
+		-- Once a window, for a check: the scan does not see this window
+		if not sw.versions_logged then
+			log:info("server window: " .. v[1] .. " Buildat " .. v[2])
+		end
 	end
+	sw.versions_logged = true
 end
 M.server_sidebar = function() draw_sidebar() end
 

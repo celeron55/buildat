@@ -1,13 +1,15 @@
 #!/bin/bash
 # tier: quick
 # cost: ~40 s (2026-10-08)
-# covers: apps/hearth/main/client_lua/init.lua builtin/accounts/client_lua/**
+# covers: apps/hearth/main/client_lua/init.lua builtin/accounts/**
 # [HEARTH_RESUME_2]: a client with BUILDAT_HEARTH_RESUME=1 opens a topic's
 # new-thread page, types a title and a two-line message and quits; started
 # again, it is on that page with both fields back.
 # simplified: native only; the kept state is client Lua, the same on the
 # web, whose storage ([HEARTH_RESUME]) is the one difference left undriven.
 # There is no new-thread page without a topic to keep.
+# [SERVER_VERSION]: the first client's Server window shows the server's
+# Buildat and the client's, the same build here.
 #
 #   apps/hearth/resume_check.sh
 set -u
@@ -37,8 +39,14 @@ client(){ # commands log [env...]
 }
 
 client 'delay 6000\nquit\n' "$t/topic.log" \
-	BUILDAT_HEARTH_REQS='{"cmd":"new_topic","name":"Help","about":"x"}'
+	BUILDAT_HEARTH_REQS='{"cmd":"new_topic","name":"Help","about":"x"}' \
+	BUILDAT_HEARTH_OPEN=server:account
 grep -aq 'hr: {"id":1001,"ok":true' "$t/topic.log" || fail "the topic"
+v=$(cat ../VERSION)
+for w in Server "This client"; do
+	grep -aq "server window: $w Buildat $v-[0-9a-f]" "$t/topic.log" ||
+		fail "the Server window's $w version: $(grep -a 'server window' "$t/topic.log")"
+done
 
 # The page's title field has the focus; the message field clicked
 client 'delay 5000\nclick Button "Help"\ndelay 2000
@@ -56,4 +64,4 @@ want='hearth: fields {"body":"first line\u000asecond line","title":"My title"}'
 alt='hearth: fields {"title":"My title","body":"first line\u000asecond line"}'
 [ "$fields" = "$want" ] || [ "$fields" = "$alt" ] ||
 	fail "the fields after a restart: $fields"
-echo "PASS: the new-thread page and its title and message come back after a restart"
+echo "PASS: the new-thread page and its title and message come back after a restart; the Server window has both versions"

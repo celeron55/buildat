@@ -6,6 +6,7 @@
 #include "starport_announce/api.h"
 #include "core/log.h"
 #include "core/json.h"
+#include "core/version.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/server_config.h"
@@ -305,9 +306,11 @@ struct Hello
 	// [SERVER_ADMIN_PAGE]: the server has starport_announce, so an admin's
 	// Server window has its Starport panels (never on a Starport)
 	uint8_t announce = 0;
+	// [SERVER_VERSION]: "0.6.75-ea7eb9e33", for the Server window
+	ss_ version;
 	template<class Archive>
 	void serialize(Archive &archive){
-		archive(local, setup, open_registration, starport, announce);
+		archive(local, setup, open_registration, starport, announce, version);
 	}
 };
 
@@ -1195,6 +1198,7 @@ struct Module: public interface::Module, public Interface
 		h.local = is_local(peer);
 		h.setup = !h.local && !m_setup_code.empty();
 		h.open_registration = m_access.open_registration;
+		h.version = ss_(BUILDAT_VERSION) + "-" + BUILDAT_GIT_HASH;
 		starport_announce::access(m_server,
 				[&](starport_announce::Interface *s){
 			h.starport = s->accepts_ids() ? 1 : 0;
