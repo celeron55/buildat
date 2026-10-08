@@ -242,6 +242,13 @@ static const int UNTRUSTED_A_NETWORK = 5;
 static const int UNTRUSTED_A_DAY = 50;
 static const int64_t UNTRUSTED_US = 30LL * 24 * 3600 * 1000000;
 static const int FAIL_LOCK = 10;
+// [REWORK_FIXES] A failure table's ceiling: past it the expired entries are
+// swept, and if it is still full the one whose wait ends first goes. A
+// key's entry is otherwise erased only when the key comes back, and spread
+// IPv6 /64s would grow it without bound. simplified: at the ceiling an
+// attacker's spray can push out a real lockout's entry (the soonest-ending
+// one); 100000 of them is ~10 MB.
+static const size_t FAIL_KEYS_MAX = 100000;
 
 // A code to type: no 0/O or 1/I to mistake for each other
 static ss_ random_code(size_t n)
@@ -527,6 +534,18 @@ struct Module: public interface::Module, public Interface
 		if(failure_wait(m2, "b", 601 * s) != 1 * s)
 			throw Exception("accounts: rate-limit self-check: the window did "
 					"not reset the count");
+		// The table stays under its ceiling, and expired keys are swept
+		// when it is reached
+		std::map<ss_, Failures> m3;
+		for(size_t i = 0; i <= FAIL_KEYS_MAX; i++)
+			note_failure(m3, itos((int)i), 0);
+		if(m3.size() != FAIL_KEYS_MAX)
+			throw Exception("accounts: rate-limit self-check: the table "
+					"grew past its ceiling");
+		note_failure(m3, "late", 700 * s);
+		if(m3.size() != 1)
+			throw Exception("accounts: rate-limit self-check: expired keys "
+					"not swept at the ceiling");
 	}
 
 	void init()
@@ -1128,6 +1147,21 @@ struct Module: public interface::Module, public Interface
 
 	void note_failure(std::map<ss_, Failures> &m, const ss_ &key, int64_t now)
 	{
+		if(m.size() >= FAIL_KEYS_MAX && !m.count(key)){
+			for(auto it = m.begin(); it != m.end();){
+				if(now - it->second.first_us > FAIL_WINDOW_US &&
+						now >= it->second.wait_until_us)
+					it = m.erase(it);
+				else
+					++it;
+			}
+			if(m.size() >= FAIL_KEYS_MAX)
+				m.erase(std::min_element(m.begin(), m.end(),
+						[](const std::pair<const ss_, Failures> &a,
+						const std::pair<const ss_, Failures> &b){
+					return a.second.wait_until_us < b.second.wait_until_us;
+				}));
+		}
 		Failures &f = m[key];
 		if(f.count == 0 || now - f.first_us > FAIL_WINDOW_US){
 			f.count = 0;
