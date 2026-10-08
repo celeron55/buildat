@@ -1491,6 +1491,7 @@ struct Module: public interface::Module
 		auto it = m_plans.find(name);
 		if(it != m_plans.end())
 			return it->second.get();
+		m_closed_meta.erase(name);
 		if(!valid_plan_name(name))
 			return nullptr;
 		up_<Plan> plan(new Plan(m_server, name));
@@ -1544,6 +1545,7 @@ struct Module: public interface::Module
 
 	void close_plan(const ss_ &name)
 	{
+		m_closed_meta.erase(name);
 		auto it = m_plans.find(name);
 		if(it == m_plans.end())
 			return;
@@ -1621,6 +1623,13 @@ struct Module: public interface::Module
 		return m;
 	}
 
+	// A closed plan's meta as last read: it changes only while the plan is
+	// open, and reading it opened the save each time -- every plan for each
+	// peer on the plans page, after each open, leave or group change, held
+	// the server for seconds ([SECURITY_RUN_3]). Dropped when the plan
+	// opens or closes, and when a closed one's store is written to.
+	std::map<ss_, PlanMeta> m_closed_meta;
+
 	PlanMeta plan_meta(const ss_ &name)
 	{
 		auto it = m_plans.find(name);
@@ -1629,6 +1638,9 @@ struct Module: public interface::Module
 			m.bytes = it->second->bytes();
 			return m;
 		}
+		auto cached = m_closed_meta.find(name);
+		if(cached != m_closed_meta.end())
+			return cached->second;
 		PlanMeta m;
 		m.name = name;
 		storage::access(m_server, [&](storage::Interface *istorage){
@@ -1652,6 +1664,7 @@ struct Module: public interface::Module
 						m.bytes += fs::file_size(path+"/images/"+n.name);
 			}
 			istorage->close(save);
+			m_closed_meta[name] = m;
 		});
 		return m;
 	}
@@ -1979,6 +1992,7 @@ struct Module: public interface::Module
 		if(req.create){
 			// Anyone can make a plan, and it is theirs
 			plan->m_store->set("meta/owner", user);
+			usage_add(req.name, user, plan->bytes());
 			log_i(MODULE, "%s made the plan %s", cs(user), cs(req.name));
 		}
 		refuse("");
@@ -2050,6 +2064,7 @@ struct Module: public interface::Module
 		copy->m_store->set("meta/owner", user);
 		for(const ss_ &key : copy->m_store->list("role/"))
 			copy->m_store->remove(key);
+		usage_add(name, user, copy->bytes());
 		log_i(MODULE, "%s copied the plan %s as %s", cs(user),
 				cs(from_plan->m_name), cs(name));
 		refuse("");
@@ -2470,6 +2485,7 @@ struct Module: public interface::Module
 		plan->find_images();
 		plan->m_store->set("meta/owner", user);
 		plan->flush();
+		usage_add(req.name, user, plan->bytes());
 		log_i(MODULE, "%s imported the plan %s: %zu entities, %zu voxel volumes,"
 				" %zu pictures", cs(user), cs(req.name), f.ents.size(),
 				f.voxels.size(), f.images.size());
@@ -2586,6 +2602,8 @@ struct Module: public interface::Module
 			result("");
 		} else if(r.cmd == "delete"){
 			const ss_ name = plan->m_name;
+			const PlanMeta gone = plan_meta(name);
+			usage_remove(name, gone.owner, gone.bytes);
 			for(auto &pair : m_peers)
 				if(pair.second.plan == name)
 					to_plans(pair.first, "The plan was deleted by "+by);
@@ -2619,6 +2637,7 @@ struct Module: public interface::Module
 		std::map<ss_, uint64_t> bytes;
 		std::map<ss_, size_t> plans;
 		uint64_t total = 0;
+		std::map<ss_, ss_> owner; // plan -> its owner
 	} m_usage;
 
 	const Usage& usage_all()
@@ -2633,6 +2652,7 @@ struct Module: public interface::Module
 			u.bytes[m.owner] += m.bytes;
 			u.plans[m.owner]++;
 			u.total += m.bytes;
+			u.owner[name] = m.owner;
 		}
 		u.bytes.erase("");
 		m_usage = u;
@@ -2640,6 +2660,31 @@ struct Module: public interface::Module
 			i->report_storage("floorplanner", m_usage.bytes);
 		});
 		return m_usage;
+	}
+
+	// A plan made or gone, in the cache at once: a burst inside
+	// USAGE_KEEP_S went past MAX_PLANS and USER_BYTES, and a refresh for
+	// each change is every plan opened again ([SECURITY_RUN_3])
+	void usage_add(const ss_ &plan, const ss_ &user, uint64_t bytes)
+	{
+		if((int64_t)time(nullptr) - m_usage.at >= USAGE_KEEP_S){
+			usage_all(); // read from the plans, the new one with them
+			return;
+		}
+		m_usage.plans[user]++;
+		m_usage.bytes[user] += bytes;
+		m_usage.total += bytes;
+		m_usage.owner[plan] = user;
+	}
+
+	void usage_remove(const ss_ &plan, const ss_ &user, uint64_t bytes)
+	{
+		if(!m_usage.owner.erase(plan))
+			return;
+		if(m_usage.plans[user])
+			m_usage.plans[user]--;
+		m_usage.bytes[user] -= std::min(m_usage.bytes[user], bytes);
+		m_usage.total -= std::min(m_usage.total, bytes);
 	}
 
 	uint64_t usage(const ss_ &user)
@@ -2749,9 +2794,17 @@ struct Module: public interface::Module
 		}
 	}
 
-	// [FP_ABUSE] 1: a group is trusted when every admin of it is
-	bool group_trusted(const Group &g)
+	// [FP_ABUSE] 1: a group is trusted when every admin of it is, and its
+	// maker: an untrusted maker made a trusted member an admin without
+	// asking them, stepped down, and its own edits counted
+	// ([SECURITY_RUN_3])
+	bool group_trusted(int32_t id)
 	{
+		const Group &g = m_groups[id];
+		auto more = m_more.find(id);
+		if(more != m_more.end() && !more->second.creator.empty() &&
+				level_of(more->second.creator) < accounts::LV_MEMBER)
+			return false;
 		for(auto &m : g.members)
 			if(m.second == "admin" && level_of(m.first) < accounts::LV_MEMBER)
 				return false;
@@ -2771,7 +2824,7 @@ struct Module: public interface::Module
 			return;
 		bool in_trusted = false;
 		for(auto &pair : m_groups)
-			if(pair.second.members.count(user) && group_trusted(pair.second))
+			if(pair.second.members.count(user) && group_trusted(pair.first))
 				in_trusted = true;
 		if(!in_trusted)
 			return;
@@ -2868,13 +2921,12 @@ struct Module: public interface::Module
 		if(user.empty())
 			return;
 		GroupsInfo info;
-		std::map<ss_, ss_> owners;
-		for(const ss_ &name : plan_names()){
-			PlanMeta m = plan_meta(name);
-			owners[name] = m.owner;
-			if(m.owner == user)
-				info.own_plans.push_back(name);
-		}
+		// From the usage cache: opening every plan for each peer after each
+		// group's change held the server for seconds ([SECURITY_RUN_3])
+		std::map<ss_, ss_> owners = usage_all().owner;
+		for(auto &pair : owners)
+			if(pair.second == user)
+				info.own_plans.push_back(pair.first);
 		for(auto &pair : m_groups){
 			const Group &g = pair.second;
 			auto inv = g.invites.find(user);
@@ -2899,14 +2951,13 @@ struct Module: public interface::Module
 			for(auto &sh : g.shares)
 				row.shares.push_back(std::make_pair(sh.first,
 						std::make_pair(owners[sh.first], sh.second)));
-			row.trusted = group_trusted(g);
+			row.trusted = group_trusted(pair.first);
 			for(auto &m : g.members)
 				if(level_of(m.first) < accounts::LV_MEMBER)
 					row.untrusted.push_back(m.first);
 			info.groups.push_back(row);
 		}
 		const bool admin = is_admin(user);
-		m_usage.at = -USAGE_KEEP_S;
 		info.used_kib = (int32_t)std::min<uint64_t>(usage(user) / 1024,
 				INT32_MAX);
 		info.limit_kib = admin ? 0 : (int32_t)(USER_BYTES / 1024);
@@ -3091,7 +3142,7 @@ struct Module: public interface::Module
 			// [FP_ABUSE] 1: an admin of a trusted group trusts a member
 			if(!g.members.count(r.name))
 				return result("No member "+r.name);
-			if(!group_trusted(g))
+			if(!group_trusted(id))
 				return result("Only a trusted group's admins vouch: every "
 						"admin of it is trusted first");
 			if(level_of(r.name) >= accounts::LV_MEMBER)
@@ -3471,6 +3522,23 @@ struct Module: public interface::Module
 				pair.second.shares.erase(name);
 			log_i(MODULE, "The plan %s of the deleted account %s deleted",
 					cs(name), cs(gone));
+		}
+		// Its roles in the others' plans: the name is free again, and a new
+		// account of it got them ([SECURITY_RUN_3])
+		for(const ss_ &name : plan_names()){
+			auto open = m_plans.find(name);
+			if(open != m_plans.end()){
+				open->second->m_store->remove("role/"+gone);
+				continue;
+			}
+			storage::access(m_server, [&](storage::Interface *istorage){
+				storage::Save *save = istorage->open(name);
+				if(!save)
+					return;
+				save->store("main")->remove("role/"+gone);
+				istorage->close(save);
+			});
+			m_closed_meta.erase(name);
 		}
 		sv_<int32_t> ids;
 		for(auto &pair : m_groups)
