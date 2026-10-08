@@ -584,45 +584,62 @@ function M.new(magic, buildat, log, options)
 		return v < 0 and 0 or (v > 1 and 1 or v)
 	end
 
-	-- 0 below low, 1 above high, and a smooth ride between them
-	local function smoothstep01(v, low, high)
-		local t = clamp01((v - low) / (high - low))
-		return t * t * (3 - 2 * t)
-	end
-
 	local function luminance(rgb)
 		return 0.2126 * rgb[1] + 0.7152 * rgb[2] + 0.0722 * rgb[3]
 	end
 
 
-	-- What the sky is worth as a light, against that. Two numbers, because
-	-- the sky's own colour is the wrong one to light a world with: it is the
-	-- colour of the zenith, and a surface sees the whole dome -- the pale
-	-- band along the horizon and the glare around the sun as much as the blue
-	-- overhead -- so what reaches it is far less blue than what is up there.
-	local AMBIENT_DESATURATE = 0.55
-	local AMBIENT_FROM_SKY = 0.6
-	-- And a floor under it while the sun is down. The sky is the only ambient
-	-- there is on this path, and a game's night sky can be black -- VoxeLibre
-	-- paints one -- which leaves a moon shadow with nothing in it at all now
-	-- that the moon casts one. This is what is in it: the moon's own cold
-	-- colour, at little enough that what the moon lights is still brighter
-	-- than what it does not.
-	local AMBIENT_NIGHT_FLOOR = 0.015
-	local AMBIENT_NIGHT_COLOR = {0.55, 0.68, 1.0}
+	-- **The pbr path's light model is vanilla's** ([LC_PBR_PARITY]): the
+	-- sun, the sky, the moon and the clouds out of res/sky_model.lua's PHYS,
+	-- the path-traced reference's units. This client's are those over
+	-- PHYS.lamp: its mesher bakes a lamp at full as one in the vertex colour,
+	-- where vanilla's lamp is PHYS.lamp, so a torch-lit room keeps its place
+	-- against the day. SUN_BRIGHTNESS and MOON_BRIGHTNESS above are what the
+	-- lights start at; the shadows mode reads neither.
+	local PHYS = sky_model.PHYS
+	local UNITS = 1 / PHYS.lamp
+	-- The render's moon, a 4100 K lamp; the cold blue is the other modes'
+	local PBR_MOON_COLOR = magic.Color(1.0, 0.86, 0.70)
 
-	-- night is 1 while the sun is down and 0 while it is up, across its own
-	-- hour at each end
-	local function ambient_from_sky(sky, night)
-		local luma = 0.2126 * sky.r + 0.7152 * sky.g + 0.0722 * sky.b
-		local k = AMBIENT_DESATURATE
-		local floor = AMBIENT_NIGHT_FLOOR * (night or 0)
-		local function channel(v, i)
-			return math.max((v * (1 - k) + luma * k) * AMBIENT_FROM_SKY,
-					AMBIENT_NIGHT_COLOR[i] * floor)
+	-- The sky of the hour in those units, out of the band's colours, which
+	-- are display sRGB: Luanti's hue at the reference's radiance, the zenith
+	-- and the horizon on their own curves (vanilla's apply_sky_of_hour), and
+	-- the ambient the dome's mean, five parts zenith to one horizon -- what
+	-- a face lit by the sky alone receives, which the shader multiplies by
+	-- how much sky the face sees. height is the sine of the sun's elevation.
+	-- simplified: none of vanilla's dawn glow, bounce or ground terms; the
+	-- plain path's shader takes none of them.
+	local function physical_sky(top, horizon, height)
+		local function at(c, radiance)
+			local r, g, b = c.r ^ 2.2, c.g ^ 2.2, c.b ^ 2.2
+			local lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+			if lum <= 1e-6 then
+				return magic.Color(radiance, radiance, radiance)
+			end
+			local k = radiance / lum
+			return magic.Color(r * k, g * k, b * k)
 		end
-		return magic.Color(channel(sky.r, 1), channel(sky.g, 2),
-				channel(sky.b, 3))
+		local f = PHYS.sky(height)
+		local z = at(top, UNITS * (PHYS.night_sky +
+				(PHYS.sky_zenith - PHYS.night_sky) * f))
+		local h = at(horizon, UNITS * (PHYS.night_sky +
+				(PHYS.sky_horizon - PHYS.night_sky) * PHYS.horizon(height)))
+		local dome = {r = (5 * z.r + h.r) / 6, g = (5 * z.g + h.g) / 6,
+				b = (5 * z.b + h.b) / 6}
+		local lum = 0.2126 * dome.r + 0.7152 * dome.g + 0.0722 * dome.b
+		local k = UNITS * (PHYS.night_sky +
+				(PHYS.sky_zenith * PHYS.dome - PHYS.night_sky) * f) /
+				math.max(lum, 1e-9)
+		return z, h, magic.Color(dome.r * k, dome.g * k, dome.b * k)
+	end
+	do
+		local blue = magic.Color(0.38, 0.71, 0.96)
+		local _, _, noon = physical_sky(blue, blue, 1)
+		local _, _, night = physical_sky(blue, blue, -0.5)
+		assert(math.abs(0.2126 * noon.r + 0.7152 * noon.g + 0.0722 * noon.b -
+				UNITS * PHYS.sky_zenith * PHYS.dome) < 1e-6,
+				"noon's ambient is the dome's radiance")
+		assert(night.b < noon.b * 1e-3, "and the night's is the floor")
 	end
 	local sun_node = nil
 	local sun_light = nil
@@ -834,12 +851,9 @@ function M.new(magic, buildat, log, options)
 		rp:SetEnabled("TonemapReinhardEq3", false)
 		rp:SetEnabled("TonemapUncharted2", true)
 		rp:SetShaderParameter("AutoExposureAdaptRate", 0.6)
-		-- The floor is vanilla's 0.003 in vanilla's units, which are about
-		-- sixty times these (its sun is 195 against 3): at 0.003 the night
-		-- metered up to day, and 0.15 puts the pair's night and torch-lit
-		-- room either side of vanilla's (builtin/luanti/test/pbr_pair.sh)
+		-- The floor and the ceiling are vanilla's in these units (UNITS)
 		rp:SetShaderParameter("AutoExposureLumRange",
-				magic.Vector2(0.15, 7.0))
+				magic.Vector2(0.015 * UNITS, 7.0 * UNITS))
 		rp:SetShaderParameter("AutoExposureMiddleGrey", 0.18)
 		rp:SetShaderParameter("BloomHDRThreshold", 1.2)
 		rp:SetShaderParameter("BloomHDRMix", magic.Vector2(1.0, 0.03))
@@ -2685,15 +2699,6 @@ function M.new(magic, buildat, log, options)
 	-- lit by nothing else and the sun is lighting it from below, where the
 	-- ground is lit by the sky as well.
 	local CLOUD_SUN_TINT = 0.75
-	-- How far past white a cloud in full sun is drawn, and the band of the
-	-- game's own cloud colour over which that is given: a white cloud gets
-	-- all of it, a rain cloud none, and nothing in between jumps
-	-- Enough room to come out white rather than grey, and not so much that a
-	-- cloud is as bright as the sun is: the disc is drawn at six times its
-	-- colour, and after the tone curve this lands about a tenth under it
-	local CLOUD_DAY_GAIN = 1.4
-	local CLOUD_WHITE_LOW = 0.5
-	local CLOUD_WHITE_HIGH = 0.9
 
 	-- One of the game's colours, or Luanti's default for it, as 0...1
 	local function sky_color(name, brightness)
@@ -2761,18 +2766,6 @@ function M.new(magic, buildat, log, options)
 				"a sky full of cloud covers it whatever colour the cloud is")
 		assert(cloud_cover_of(0.0, {0, 0, 0}) == 0,
 				"a cloud that is not there covers nothing")
-
-		-- And which of those the sun is allowed to whiten
-		local function white_of(c)
-			return smoothstep01(luminance({c[1] / 255, c[2] / 255,
-					c[3] / 255}), CLOUD_WHITE_LOW, CLOUD_WHITE_HIGH)
-		end
-		assert(white_of({255, 240, 240}) == 1, "a white cloud takes the sun")
-		assert(white_of({93, 93, 95}) == 0, "a rain cloud is left grey")
-		assert(white_of({61, 61, 63}) == 0, "and a thunderhead darker still")
-		assert(white_of({173, 173, 173}) > 0.1 and
-				white_of({173, 173, 173}) < 0.9,
-				"and what is between them is between them")
 	end
 
 	local function cloud_cover()
@@ -2914,6 +2907,14 @@ function M.new(magic, buildat, log, options)
 		end
 		local top = sky_color(band.."_sky", 1)
 		local horizon = sky_color(band.."_horizon", 1)
+		if pbr and band == "day" then
+			-- The day's hue is the render's on pbr, a game's own day colours
+			-- being display colours for Luanti's sky (vanilla does the same)
+			top = magic.Color(PHYS.day_zenith.r, PHYS.day_zenith.g,
+					PHYS.day_zenith.b)
+			horizon = magic.Color(PHYS.day_horizon.r, PHYS.day_horizon.g,
+					PHYS.day_horizon.b)
+		end
 		if sky and sky.type == "skybox" then
 			-- A game that gave its own textures gets its bgcolor, which is
 			-- the one thing of its sky that is understood here
@@ -2935,25 +2936,27 @@ function M.new(magic, buildat, log, options)
 		-- the sky is drawn with, so the two meet
 		zone.fogColor = horizon
 
-		-- On the PBR path the ambient light is the sky itself rather than the
-		-- colour of sunlight. The shader's ambient is
+		-- On the PBR path the sky is drawn at its radiance and the ambient
+		-- light is that sky (physical_sky above). The shader's ambient is
 		-- cAmbientColor.rgb * color.a + color.rgb, so what a surface gets is
-		-- the sky in proportion to how much of it it can see: open ground is
-		-- sky-blue-white, under an overhang is the same blue but dimmer, and a
-		-- cave is only the warm rgb the torches baked in. That is the three
-		-- tints -- sun, shade, cave -- and it costs this one line.
+		-- the sky in proportion to how much of it it can see, and a cave is
+		-- only the warm rgb the torches baked in. The fog is the horizon the
+		-- sky meets the ground with.
+		local _, height = sun_direction(daylight_time)
+		local sky_top, sky_horizon = top, horizon
 		if pbr then
-			zone.ambientColor = ambient_from_sky(top,
-					1 - sun_amount(daylight_time))
+			local ambient
+			sky_top, sky_horizon, ambient =
+					physical_sky(top, horizon, height)
+			zone.ambientColor = ambient
+			zone.fogColor = sky_horizon
 		end
 
-		-- What the PBR path's reflections are worth now: the cube map beside
-		-- the shader is one static noon gradient and this is the colour it is
-		-- multiplied by, so a sunset reflects orange and a night reflects
-		-- almost nothing. The sky's own top colour, which is most of what a
-		-- surface pointed upwards reflects.
+		-- What the PBR path's reflections are multiplied by: one, the cube
+		-- map being the sky drawn at this hour already (sky_cube), which
+		-- carries the night itself
 		if vis then
-			vis:set_param("SkyColor", magic.Vector3(top.r, top.g, top.b))
+			vis:set_param("SkyColor", magic.Vector3(1, 1, 1))
 		end
 
 		if sun_light then
@@ -2974,9 +2977,16 @@ function M.new(magic, buildat, log, options)
 					through_cloud * body_is_up(sky_bodies.sun)
 			sun_node.enabled = up > 0
 			local sun_color = sun_light_color(daylight_time)
+			if pbr then
+				-- The sun's irradiance and colour from its elevation; the
+				-- fade is in PHYS.sun, the clouds and a hidden sun as above
+				sun_color = magic.Color(PHYS.sun_rgb(smooth_sy))
+			end
 			if up > 0 then
 				sun_node.direction = magic.Vector3(-sx, -sy, -sz)
-				sun_light.brightness = SUN_BRIGHTNESS * up
+				sun_light.brightness = pbr and UNITS * PHYS.sun(smooth_sy) *
+						through_cloud * body_is_up(sky_bodies.sun) or
+						SUN_BRIGHTNESS * up
 				sun_light.color = sun_color
 			end
 			local moon_up = moon_amount(daylight_time) *
@@ -2985,7 +2995,8 @@ function M.new(magic, buildat, log, options)
 			moon_node.enabled = moon_up > 0
 			if moon_up > 0 then
 				moon_node.direction = magic.Vector3(sx, sy, sz)
-				moon_light.brightness = MOON_BRIGHTNESS * moon_up
+				moon_light.brightness = (pbr and UNITS * PHYS.moon_e or
+						MOON_BRIGHTNESS) * moon_up
 				-- And the moon takes the horizon's colour the way the sun
 				-- does, on the other side of the sky and at the same hours:
 				-- it is crossing the horizon whenever the sun is. Luanti's
@@ -2994,7 +3005,7 @@ function M.new(magic, buildat, log, options)
 				-- [SKY_KNOBS] in doc/plan/rendering_plan.md.
 				local tint = sky_color("moon_tint", 1)
 				local low = sky_model.sun_tint_share(daylight_time)
-				moon_light.color = magic.Color(
+				moon_light.color = pbr and PBR_MOON_COLOR or magic.Color(
 						MOON_COLOR[1] * (1 - low) + tint.r * low,
 						MOON_COLOR[2] * (1 - low) + tint.g * low,
 						MOON_COLOR[3] * (1 - low) + tint.b * low)
@@ -3010,8 +3021,9 @@ function M.new(magic, buildat, log, options)
 
 		if sky_material then
 			local sx, sy, sz = sun_direction(daylight_time)
-			sky_material:SetShaderParameter("SkyTop", top)
-			sky_material:SetShaderParameter("SkyHorizon", horizon)
+			sky_material:SetShaderParameter("SkyTop", sky_top)
+			sky_material:SetShaderParameter("SkyHorizon", sky_horizon)
+			sky_material:SetShaderParameter("SkyPhysical", pbr and 1 or 0)
 			sky_material:SetShaderParameter("SunDirection",
 					magic.Vector3(sx, sy, sz))
 			-- The tint the sun paints the horizon with, at its own strength
@@ -3053,23 +3065,8 @@ function M.new(magic, buildat, log, options)
 			local own = cloud and
 					{cloud[1] / 255, cloud[2] / 255, cloud[3] / 255} or
 					{0.9, 0.92, 0.95}
-			-- A cloud in the sun is not a light grey thing, it is a white
-			-- one, and on the PBR path the tone curve is between it and the
-			-- screen: a colour that arrives at one leaves it at about nine
-			-- tenths and reads as grey. So it is given some room to be
-			-- clipped out of, while the sun is up to do it -- ramped with the
-			-- sun's own hour at each end of the day -- and only as far as the
-			-- game's own colour says it is a white cloud. A game that wants
-			-- grey clouds, which is how VoxeLibre says it is raining, is
-			-- taken at its word and left alone.
-			local day = pbr and sun_amount(daylight_time) * above_horizon(sy) *
-					body_is_up(sky_bodies.sun) or 0
-			local white = smoothstep01(luminance(own), CLOUD_WHITE_LOW,
-					CLOUD_WHITE_HIGH)
-			local gain = 1 + (CLOUD_DAY_GAIN - 1) * day * white
 			local function cloud_channel(i, from_sun)
-				return (own[i] * (1 - lit) + from_sun * lit) *
-						brightness * gain
+				return (own[i] * (1 - lit) + from_sun * lit) * brightness
 			end
 			if cloud then
 				sky_material:SetShaderParameter("CloudColor", magic.Color(
@@ -3081,6 +3078,37 @@ function M.new(magic, buildat, log, options)
 						cloud_channel(1, sun_now.r) + 0.05,
 						cloud_channel(2, sun_now.g) + 0.05,
 						cloud_channel(3, sun_now.b) + 0.06))
+			end
+			if pbr then
+				-- pbr draws the cloud as a reflectance lit by the sun and the
+				-- sky, vanilla's ([CLOUD_LIGHT], [DUSK_CLOUD]): the game's
+				-- colour the albedo, the sky's share the dome's mean, the
+				-- sun's E of the hour times how high it is times k_sun, which
+				-- makes a thin noon cloud PHYS.cloud_n times the zenith. The
+				-- clouds see the sun PHYS.cloud_dip longer. simplified: no
+				-- dusk glow term.
+				local lum = math.max(luminance(own), 1e-6)
+				local noon_mean = (5 * PHYS.sky_zenith + PHYS.sky_horizon) / 6
+				local k_sun = math.max(0, (PHYS.cloud_n * PHYS.sky_zenith /
+						lum - noon_mean) * math.pi / PHYS.sun(1))
+				local h = height + PHYS.cloud_dip
+				local e = UNITS * PHYS.sun(h) * math.max(h, 0) * k_sun /
+						math.pi * body_is_up(sky_bodies.sun)
+				local r, g, b = PHYS.sun_rgb(h)
+				sky_material:SetShaderParameter("CloudSun", magic.Color(
+						own[1] * e * r, own[2] * e * g, own[3] * e * b))
+				sky_material:SetShaderParameter("CloudSky", magic.Color(
+						own[1] * (5 * sky_top.r + sky_horizon.r) / 6,
+						own[2] * (5 * sky_top.g + sky_horizon.g) / 6,
+						own[3] * (5 * sky_top.b + sky_horizon.b) / 6))
+				-- And the sun's disc at its radiance: E of the hour over
+				-- the disc's solid angle, in its colour, inside rgba16f
+				local half = SUN_HALF * (sky_bodies.sun.scale or 1)
+				local disc = math.min(UNITS * PHYS.sun(height) /
+						(math.pi * half * half), 65504)
+				local sr, sg, sb = PHYS.sun_rgb(height)
+				sky_material:SetShaderParameter("SunRadiance",
+						magic.Vector3(disc * sr, disc * sg, disc * sb))
 			end
 			-- The stars come out as the sky goes dark, and a game can say
 			-- they are out in the day as well

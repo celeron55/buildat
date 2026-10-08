@@ -194,101 +194,12 @@ local SUN_BRIGHTNESS = 28.0
 -- lit coldly from where the moon is, far enough above the sky's own light
 -- that the moon casts a shadow. See [LIGHT_SHAPE].
 local MOON_BRIGHTNESS = 1.0
--- [PBR_FIT] term 1: on the pbr path the sun and the sky are in the
--- path-traced reference's units, read off its EXRs (doc/plan/
--- rendering_plan.md, the fit's first term), and SUN_BRIGHTNESS, MOON_-
--- BRIGHTNESS, SKY_AMBIENT and NIGHT_AMBIENT above are the parity modes'
--- alone. The metering takes the absolute scale; what these set is the
--- ratio of sun to sky to moon, which is what contrast is made of.
---   sun_e0, sun_tau  the sun's irradiance normal to it, E0 * exp(-tau /
---                    sin(elevation)): 170 at 64 degrees, which puts the
---                    render's sky patch over its sunlit snow at 10:00
---                    (sky_to_sun 0.25) once the snow's albedo is read
---                    decoded, and 93 at ten degrees, which is
---                    what its block top at 05:45 reads (1.9, 1.4, 1.0)
---                    off an albedo of 0.3 with the Rayleigh sun and a
---                    dome of 1.5 solved together (dawn_sun_dirt)
---   sky_zenith,      the sky's radiance at the zenith and the horizon
---   sky_horizon      by day: the render's 13:00 reads 4.9 near the
---                    zenith, 7.7 thirty degrees up, 12 at the horizon;
---                    fading over the last twelve degrees of the sun's
---                    elevation
---   bounce           light off the surroundings where the sky does not
---                    reach, as a share of the sky's mean (term 2)
---   ground           the ground's albedo, for what the lower hemisphere
---                    of a face outdoors sees: dirt and grass, warm
---   moon_e           the moon lamp's irradiance, the render's own
---   night_sky        what the sky is with the sun down: a floor for
---                    airglow, since Nishita gives none and the night's
---                    target is a sky under a fortieth of moonlit snow
--- simplified: the sky keeps Luanti's hue at this radiance, and the sun
--- its colour below; the colours are the terms after this one.
-local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
-		-- the moon at three times lunar irradiance, the user's pick off
-		-- the x1 | x3 | x5 sheet (2026-09-20, [NIGHT_LIGHT]); the render's
-		-- MOON_FACTOR is the same 3
-		sky_horizon = 12.0, moon_e = 0.0025 * 3,
-		-- the night sky at the user's pick off the 0.00002 | 0.00005 | 0.0002
-		-- ladder (2026-09-20, [NIGHT_LIGHT]); the render's NIGHT_SKY is the same
-		night_sky = 0.0001,
-		-- dome 0.9 -> 1.2 (2026-09-21, [PBR_FIT] a): the open-sky contrast
-		-- read 4.5 against the render's 2.8 and snow's 13.6 against 11.2;
-		-- at 1.2 snow's is 10.7 and its shade reads 1.0, dirt's 4.0; 1.5
-		-- overshot snow's shade (1.13) and the pit (1.73). The tables are
-		-- under local/options_for_PBR_FIT_viewport/probes_dome_*.txt
-		-- ground x1.5 (2026-09-21 22:15, [PBR_FIT] a): the open-sky
-		-- contrast 4.0 -> 3.19 against 2.81, the open shaded dirt face
-		-- 0.53 -> 0.66 of the render's, the small cave's lit wall 0.38 ->
-		-- 0.47 and both falloffs nearer; snow untouched. The shade's blue
-		-- lags its red (0.5 against 0.66): the ground's hue is the next
-		-- rung. probes_ground_075_kept.txt beside the dome tables.
-		bounce = 0.15, lamp = 8, dome = 1.2, ground = {r = 0.75, g = 0.66, b = 0.45}, -- doubled 2026-09-19 with groundSeen cubed,
-		-- the transmitted light through a leaf, over Lambert through its
-		-- colour ([PBR_FIT] 3b, canopy_dawn)
-		translucency = 1.0,
-		-- how bright a thin noon cloud is against the sky's zenith patch:
-		-- picked by the user off a ladder of 1.5 to 20 ([CLOUD_LIGHT],
-		-- 2026-09-19); BUILDAT_LUANTI_CLOUD_N overrides
-		cloud_n = 8,
-		day_zenith = {r = 0.57, g = 0.76, b = 1.0},
-		-- the horizon just over the sea at 13:00 reads (14.7, 14.9, 15.0)
-		-- in the render: white, not Luanti's pale blue
-		day_horizon = {r = 0.99, g = 0.995, b = 1.0}}
--- The sky's radiance factor at a sun height (sin elevation): full by
--- day, gone over the last twelve degrees, the floor below
--- The zenith and the dome go first: at ten degrees the render's block
--- top is lit by a sun of about 74 over a dome of about 1.5, a third of
--- noon's, while its horizon band is still 9. The horizon keeps the old
--- short fade.
-function PHYS.sky(height)
-	return math.max(0, math.min(1, (height + 0.02) / 0.55))
-end
-function PHYS.horizon(height)
-	return math.max(0, math.min(1, (height + 0.05) / 0.21))
-end
-function PHYS.sun(height)
-	if height <= 0 then
-		return 0
-	end
-	return PHYS.sun_e0 * math.exp(-PHYS.sun_tau / math.max(height, 0.05))
-end
--- The sun's colour at a height, its luminance one: Rayleigh transmittance
--- through an air mass of 1 / sin(elevation), the optical depths sea
--- level's at 680, 550 and 440 nm ([PBR_FIT] term 3)
+-- [PBR_FIT] term 1: the pbr path's sun, sky and moon in the path-traced
+-- reference's units, one copy for both Luanti clients: PHYS in
+-- res/sky_model.lua ([LC_PBR_PARITY]). What is vanilla's alone is below.
+local PHYS = luanti_sky.PHYS
 function PHYS.sun_color(height)
-	local m = 1 / math.max(height, 0.05)
-	local r, g, b = math.exp(-0.05 * m), math.exp(-0.10 * m),
-			math.exp(-0.24 * m)
-	local lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
-	return magic.Color(r / lum, g / lum, b / lum)
-end
--- How far under our horizon the sun still lights the clouds: the dip of
--- the horizon from 7 km up, acos(R / (R + h)), in sine
-PHYS.cloud_dip = 0.047
-do
-	local hi, lo = PHYS.sun_color(1), PHYS.sun_color(0)
-	assert(hi.b / hi.r > 0.75 and lo.b / lo.r < 0.05,
-			"white overhead, red on the horizon")
+	return magic.Color(PHYS.sun_rgb(height))
 end
 PHYS.SUN_COLOR = magic.Color(1.0, 0.96, 0.88)
 PHYS.MOON_COLOR = magic.Color(0.55, 0.68, 1.0)
