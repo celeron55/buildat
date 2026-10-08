@@ -1551,12 +1551,27 @@ function M.new(magic, buildat, log, ctx)
 						text, above = above, ""
 					end
 					if text ~= "" then
-						local t = label(window, x, y, w,
-								formspec.strip_escapes(text), 13,
-								markup_color(text) or color)
-						-- The width after the wrap, or it is the line's
-						t:SetWordwrap(true)
-						t:SetFixedWidth(math.floor(w))
+						-- A read-only multi-line edit with no box, so text
+						-- longer than the box scrolls by the wheel as
+						-- Luanti's does ([TEXTAREA_WHEEL]); it wraps at its
+						-- width itself
+						local t = window:CreateChild("LineEdit")
+						t:SetStyleAuto()
+						t.multiLine = true
+						t.editable = false
+						t.textSelectable = true
+						t.textCopyable = true
+						t:SetPosition(math.floor(x), math.floor(y))
+						t.size = magic.IntVector2(math.floor(w), math.floor(h))
+						t.enabled = true
+						t.priority = next_priority()
+						t.color = magic.Color(0, 0, 0, 0)
+						t.cursor.color = magic.Color(0, 0, 0, 0)
+						t.textElement:SetFontSize(13)
+						t.textElement.color = markup_color(text) or color or
+								magic.Color(1, 1, 1)
+						t:SetText(formspec.strip_escapes(text))
+						t.cursorPosition = 0
 					end
 					if above ~= "" then
 						label(window, x, y - 15, nil,

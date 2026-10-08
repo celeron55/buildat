@@ -843,8 +843,11 @@ function M.safe.list_view(parent, width, height, options)
 		if options.wheel then
 			on("MouseWheel", function(d)
 				local p = magic.input:GetMousePosition()
-				if over(p.x, p.y) then
-					view:scroll(-d:GetInt("Wheel") * options.wheel)
+				local w = d:GetInt("Wheel")
+				-- A text area in the list with more to show that way
+				-- scrolls itself ([TEXTAREA_WHEEL]); the list at its end
+				if over(p.x, p.y) and not list:WheelTakenAt(p.x, p.y, w) then
+					view:scroll(-w * options.wheel)
 				end
 			end)
 		end

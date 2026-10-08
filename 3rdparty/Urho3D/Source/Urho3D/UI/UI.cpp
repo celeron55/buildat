@@ -1636,6 +1636,10 @@ void UI::HandleMouseWheel(StringHash eventType, VariantMap& eventData)
                     if (element->GetType() == ListView::GetTypeStatic() ||
                         element->GetType() == ScrollView::GetTypeStatic())
                         break;
+                    // buildat: and a multi-line edit, which scrolls its text
+                    if (element->GetType() == LineEdit::GetTypeStatic() &&
+                        static_cast<LineEdit*>(element)->IsMultiLine())
+                        break;
                     element = element->GetParent();
                 }
             }

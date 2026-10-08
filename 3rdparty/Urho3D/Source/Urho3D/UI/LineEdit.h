@@ -68,6 +68,8 @@ public:
     virtual void OnKey(int key, int buttons, int qualifiers);
     /// React to text input event.
     virtual void OnTextInput(const String& text);
+    /// buildat: react to the mouse wheel; a multi-line edit scrolls its text.
+    virtual void OnWheel(int delta, int buttons, int qualifiers);
 
     /// Set text.
     void SetText(const String& text);
@@ -114,6 +116,9 @@ public:
 
     /// buildat: return whether multi-line.
     bool IsMultiLine() const { return multiLine_; }
+    /// buildat: return whether a wheel of delta would scroll the text: a
+    /// multi-line edit with more to show that way.
+    bool WheelScrolls(int delta) const;
 
     /// Return text element.
     Text* GetTextElement() const { return text_; }
@@ -126,8 +131,10 @@ protected:
     virtual bool FilterImplicitAttributes(XMLElement& dest) const;
     /// Update displayed text.
     void UpdateText();
-    /// Update cursor position and restart cursor blinking.
-    void UpdateCursor();
+    /// Update cursor position and restart cursor blinking. buildat: follow
+    /// false keeps a multi-line edit's vertical scroll (a layout update,
+    /// not the cursor moving, so the wheel's scroll stays).
+    void UpdateCursor(bool follow = true);
     /// Return char index corresponding to position within element, or M_MAX_UNSIGNED if not found.
     unsigned GetCharIndex(const IntVector2& position);
     /// buildat: the character nearest a position in the text's own coordinates, on its row.

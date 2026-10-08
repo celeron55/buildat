@@ -25,6 +25,7 @@ class LineEdit : public BorderImage
     bool IsTextSelectable() const;
     bool IsTextCopyable() const;
     bool IsMultiLine() const;
+    bool WheelScrolls(int delta) const;
     Text* GetTextElement() const;
     BorderImage* GetCursor() const;
 

@@ -648,7 +648,7 @@ void LineEdit::UpdateText()
     SendEvent(E_TEXTCHANGED, eventData);
 }
 
-void LineEdit::UpdateCursor()
+void LineEdit::UpdateCursor(bool follow)
 {
     // buildat: the text wraps at the edit's width, so it is set before
     // the cursor's place is read
@@ -683,10 +683,12 @@ void LineEdit::UpdateCursor()
     {
         sy = -GetChildOffset().y_;
         int bottom = GetHeight() - clipBorder_.top_ - clipBorder_.bottom_ - text_->GetRowHeight();
-        if (y - sy > bottom)
+        if (follow && y - sy > bottom)
             sy = y - bottom;
-        if (y - sy < 0)
+        if (follow && y - sy < 0)
             sy = y;
+        if (!follow)
+            sy = Min(sy, Max(text_->GetHeight() - (GetHeight() - clipBorder_.top_ - clipBorder_.bottom_), 0));
         if (sy < 0)
             sy = 0;
     }
@@ -694,6 +696,40 @@ void LineEdit::UpdateCursor()
 
     // Restart blinking
     cursorBlinkTimer_ = 0.0f;
+}
+
+// buildat: the text's vertical scroll, from nought to the text's height less
+// the edit's
+static int MaxScrollY(const LineEdit* edit, const Text* text, const IntRect& clip)
+{
+    return Max(text->GetHeight() - (edit->GetHeight() - clip.top_ - clip.bottom_), 0);
+}
+
+bool LineEdit::WheelScrolls(int delta) const
+{
+    if (!multiLine_ || delta == 0)
+        return false;
+    int sy = -GetChildOffset().y_;
+    return delta > 0 ? sy > 0 : sy < MaxScrollY(this, text_, clipBorder_);
+}
+
+void LineEdit::OnWheel(int delta, int buttons, int qualifiers)
+{
+    // Over the edit only: the UI hands the wheel to the focus wherever the
+    // mouse is, and the page under the mouse is then the one to scroll
+    UI* ui = GetSubsystem<UI>();
+    Input* input = GetSubsystem<Input>();
+    if (!WheelScrolls(delta) || !ui || !input)
+        return;
+    IntVector2 mouse = input->GetMousePosition();
+    IntVector2 at((int)(mouse.x_ / ui->GetScale()), (int)(mouse.y_ / ui->GetScale()));
+    if (!IsInside(at, true))
+        return;
+    // Three rows a click, the cursor left where it is; UpdateCursor()
+    // brings it back into view at the next key
+    int sy = -GetChildOffset().y_ - delta * 3 * text_->GetRowHeight();
+    sy = Clamp(sy, 0, MaxScrollY(this, text_, clipBorder_));
+    SetChildOffset(IntVector2(GetChildOffset().x_, -sy));
 }
 
 unsigned LineEdit::GetCharIndex(const IntVector2& position)
@@ -755,7 +791,7 @@ void LineEdit::HandleDefocused(StringHash /*eventType*/, VariantMap& /*eventData
 
 void LineEdit::HandleLayoutUpdated(StringHash /*eventType*/, VariantMap& /*eventData*/)
 {
-    UpdateCursor();
+    UpdateCursor(false);
 }
 
 }

@@ -2085,6 +2085,29 @@ function M.define(dst, util)
 				end
 				return raw:GetTypeName() == "LineEdit" and raw:IsMultiLine()
 			end,
+			-- Whether the wheel at window pixel (x, y), a click of delta, is
+			-- a multi-line edit's under this element, one with more text to
+			-- show that way ([TEXTAREA_WHEEL]): a page that scrolls by the
+			-- wheel steps aside for it, and takes it at the text's end
+			WheelTakenAt = util.wrap_function(
+				{"UIElement", "number", "number", "number"},
+				function(self, x, y, delta)
+					local sc = ui:GetScale()
+					local e = ui:GetElementAt(math.floor(x / sc),
+							math.floor(y / sc))
+					local edit = nil
+					for _ = 1, 64 do
+						if e == nil then return false end
+						if edit == nil and e:GetTypeName() == "LineEdit" then
+							edit = e
+						end
+						if e == self then
+							return edit ~= nil and edit:WheelScrolls(delta)
+						end
+						e = e:GetParent()
+					end
+					return false
+				end),
 			GetText = function(self)
 				local m = getmetatable(self)
 				local raw = m and m.unsafe
