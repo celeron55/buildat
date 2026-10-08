@@ -577,16 +577,15 @@ local function model_element(parent, w, h, mesh, textures, rot_x, rot_y)
 	end
 	local view = parent:CreateChild("View3D")
 	view.size = magic.IntVector2(math.floor(w), math.floor(h))
+	-- Cleared to nothing around the model, the form showing through: a
+	-- target with alpha, the clear's alpha 0, drawn blended
+	view.format = magic.Graphics.GetRGBAFormat()
+	view.blendMode = magic.BLEND_ALPHA
 	local scene = magic.Scene.new()
 	scene:CreateComponent("Octree")
-	-- What the picture is cleared to, which is what shows around the model:
-	-- the render target has no alpha channel for the element to be
-	-- transparent through, so it is the colour a form's own background is
-	-- drawn in. A game that draws a picture of its own behind the model
-	-- sees this square over it.
 	local zone = scene:CreateChild("zone"):CreateComponent("Zone")
 	zone.boundingBox = magic.BoundingBox(-1000, 1000)
-	zone.fogColor = magic.Color(0.12, 0.12, 0.14)
+	zone.fogColor = magic.Color(0, 0, 0, 0)
 	zone.fogStart = 10000
 	zone.fogEnd = 10000
 	zone.ambientColor = magic.Color(1, 1, 1)

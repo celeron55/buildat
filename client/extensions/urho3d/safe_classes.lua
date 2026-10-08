@@ -2268,6 +2268,9 @@ function M.define(dst, util)
 		},
 		properties = {
 			autoUpdate = util.simple_property("boolean"),
+			-- The render target's texture format; Graphics.GetRGBAFormat()
+			-- gives it an alpha channel to be transparent through
+			format = util.simple_property("number"),
 		},
 	})
 
