@@ -752,8 +752,42 @@ struct Module: public interface::Module
 
 	storage::Store* store(const char *name){ return m_save->store(name); }
 
+	// [DB_INDEXES]: the listings parsed once and kept, as /api/list, the
+	// front page and every announce read all of them. Written through put()
+	// and listing_remove() only.
+	std::map<ss_, json::Value> m_listings;
+	bool m_listings_read = false;
+	const std::map<ss_, json::Value>& listings()
+	{
+		if(!m_listings_read){
+			for(const ss_ &id : store("listings")->list("")){
+				ss_ text;
+				if(store("listings")->get(id, text))
+					m_listings[id] = json::load_string(text.c_str());
+			}
+			m_listings_read = true;
+		}
+		return m_listings;
+	}
+	sv_<ss_> listing_ids()
+	{
+		sv_<ss_> ids;
+		for(auto &pair : listings())
+			ids.push_back(pair.first);
+		return ids;
+	}
+	void listing_remove(const ss_ &id)
+	{
+		store("listings")->remove(id);
+		m_listings.erase(id);
+	}
+
 	json::Value load(const char *store_name, const ss_ &key)
 	{
+		if(ss_(store_name) == "listings"){
+			auto it = listings().find(key);
+			return it == m_listings.end() ? json::Value() : it->second;
+		}
 		ss_ text;
 		if(!store(store_name)->get(key, text))
 			return json::Value();
@@ -762,6 +796,8 @@ struct Module: public interface::Module
 	void put(const char *store_name, const ss_ &key, const json::Value &v)
 	{
 		store(store_name)->set(key, v.stringify());
+		if(ss_(store_name) == "listings" && m_listings_read)
+			m_listings[key] = v;
 	}
 
 	const json::Value& setting(const char *k)
@@ -855,7 +891,7 @@ struct Module: public interface::Module
 		// Starport down at midnight still clears what the retention ends
 		m_vthread = std::thread([this](){ verifier(); });
 		log_i(MODULE, "Starport \"%s\": %zu listings", cs(jstr(m_settings,
-				"name")), store("listings")->list("").size());
+				"name")), listing_ids().size());
 	}
 
 	// -----------------------------------------------------------------------
@@ -1229,7 +1265,7 @@ struct Module: public interface::Module
 		if(jstr(l, "pool").empty())
 			return;
 		const json::Value mine = effective(l);
-		for(const ss_ &id : store("listings")->list("")){
+		for(const ss_ &id : listing_ids()){
 			if(id == jstr(l, "id"))
 				continue;
 			const json::Value o = load("listings", id);
@@ -1259,7 +1295,7 @@ struct Module: public interface::Module
 		if(fid.empty())
 			return {jstr(g, "listing")};
 		sv_<ss_> out;
-		for(const ss_ &id : store("listings")->list(""))
+		for(const ss_ &id : listing_ids())
 			if(jstr(load("listings", id), "fleet") == fid)
 				out.push_back(id);
 		return out;
@@ -1463,8 +1499,8 @@ struct Module: public interface::Module
 	json::Value listed_servers()
 	{
 		json::Value servers = json::array();
-		for(const ss_ &id : store("listings")->list("")){
-			const json::Value l = load("listings", id);
+		for(auto &pair : listings()){
+			const json::Value &l = pair.second;
 			if(!l.is_object())
 				continue;
 			const ss_ st = served_status(l);
@@ -2804,7 +2840,7 @@ struct Module: public interface::Module
 		json::Value l = load("listings", jstr(b, "listing"));
 		const ss_ address = jstr(b, "address");
 		if(!l.is_object() && !address.empty()){
-			for(const ss_ &lid : store("listings")->list("")){
+			for(const ss_ &lid : listing_ids()){
 				const json::Value o = load("listings", lid);
 				if(jstr(o, "verify") == "ok" && jstr(o, "status") != "banned" &&
 						jstr(o, "host")+":"+itos(jint(o, "port")) == address){
@@ -2868,7 +2904,7 @@ struct Module: public interface::Module
 		const int64_t t = now_s();
 		if(t >= m_next_reverify){
 			m_next_reverify = t + 6 * 3600;
-			for(const ss_ &id : store("listings")->list("")){
+			for(const ss_ &id : listing_ids()){
 				const json::Value l = load("listings", id);
 				if(l.is_object() && t - jint(l, "last_announce") < 900)
 					queue_verify(l);
@@ -2905,13 +2941,13 @@ struct Module: public interface::Module
 		// while its owner is in good standing, unless moderation has a
 		// record of them
 		int gone = 0;
-		for(const ss_ &id : store("listings")->list("")){
+		for(const ss_ &id : listing_ids()){
 			const json::Value l = load("listings", id);
 			if(t - jint(l, "last_announce") >
 					(good_standing(jstr(l, "owner")) ? 365 : 30) * 86400 &&
 					jstr(l, "status") == "active" &&
 					l.get("strikes").size() == 0){
-				store("listings")->remove(id);
+				listing_remove(id);
 				gone++;
 			}
 		}
@@ -2950,7 +2986,7 @@ struct Module: public interface::Module
 				put("sessions", k, s);
 		}
 		// A delisting for a time runs out
-		for(const ss_ &id : store("listings")->list("")){
+		for(const ss_ &id : listing_ids()){
 			json::Value l = load("listings", id);
 			const int64_t until = jint(l, "status_until");
 			if(until > 0 && until <= t){
@@ -3122,7 +3158,7 @@ struct Module: public interface::Module
 				ss_());
 		r.set("email_confirmation", setting("email_confirmation").is_true());
 		json::Value ls = json::array();
-		for(const ss_ &id : store("listings")->list("")){
+		for(const ss_ &id : listing_ids()){
 			const json::Value l = load("listings", id);
 			if(jstr(l, "owner") == name)
 				ls.append(listing_summary(l));
@@ -3305,7 +3341,7 @@ struct Module: public interface::Module
 					"relabel", "strikes", "first_seen", "claimed"})
 				if(!ol.get(k).is_undefined())
 					l.set(k, ol.get(k));
-			store("listings")->remove(old);
+			listing_remove(old);
 			audit(name, jstr(l, "id"), "replace", "", "replaces "+old, false);
 		}
 		l.set("owner", name);
@@ -3820,7 +3856,7 @@ struct Module: public interface::Module
 			return;
 		int n = 0;
 		const int64_t t = now_s();
-		for(const ss_ &id : store("listings")->list("")){
+		for(const ss_ &id : listing_ids()){
 			const json::Value o = load("listings", id);
 			if(jstr(o, "owner") != owner)
 				continue;
@@ -3934,7 +3970,7 @@ struct Module: public interface::Module
 		json::Value out = json::array();
 		ss_ s = search;
 		std::transform(s.begin(), s.end(), s.begin(), ::tolower);
-		for(const ss_ &id : store("listings")->list("")){
+		for(const ss_ &id : listing_ids()){
 			const json::Value l = load("listings", id);
 			ss_ hay = jstr(l, "name")+" "+jstr(l, "id")+" "+jstr(l, "owner")+
 					" "+jstr(l, "host");
