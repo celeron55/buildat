@@ -34,8 +34,8 @@
 local objects = {}      -- id -> the object's own state
 local next_id = 1
 
-local __show_objects = __luanti_show_objects
-local __show_object_props = __luanti_show_object_props
+local __show_objects_to = __luanti_show_objects_to
+local __show_object_props_to = __luanti_show_object_props_to
 local __send_inventory = __luanti_send_inventory
 local __send_player_pos = __luanti_send_player_pos
 
@@ -3789,10 +3789,6 @@ end
 -- being sent. A box the size of the collision box, because what an object
 -- looks like is the client half's and this is what says where they are
 -- until then.
--- Whether anything was on screen last time, so that a world with no objects
--- in it -- which is most of a step -- does not cross into the module and
--- out to the scene twenty times a second to say so
-local anything_shown = false
 
 -- What an object looks like, as much of it as the client half draws: a shape
 -- and one texture. Luanti's visuals are more than these three, and the ones
@@ -3981,7 +3977,6 @@ end
 -- often is the half of (2) that does not need a second channel.
 local OBJECTS_INTERVAL = 0.1
 local objects_due = 0
-local objects_last = nil
 
 local function same_list(a, b)
 	if b == nil or #a ~= #b then
@@ -3995,14 +3990,37 @@ local function same_list(a, b)
 	return true
 end
 
+-- **Each client gets the objects within its send range** ([SERVER_PRESETS]
+-- 1): Luanti's active_object_send_range_blocks, in sections of 64 nodes
+-- as the world's two ranges are (luanti.cpp read_range_settings), 1 to
+-- 16; Luanti's default of 8 blocks is 2 sections. A herd on the far side of the world costs a client
+-- nothing, and the server a distance per object and player. Each list is
+-- still whole for its range, so LatestOnly stays safe. A client forgets
+-- the look of an object that leaves its list, so one coming back into
+-- range is sent its look again.
+local send_range = nil
+local function object_send_range()
+	if not send_range then
+		local blocks = tonumber(core.settings:get(
+				"active_object_send_range_blocks")) or 8
+		local sections = math.max(1, math.min(16, math.floor(blocks * 16 / 64)))
+		send_range = sections * 64
+		core.log("action", "objects sent within " .. send_range ..
+				" nodes (active_object_send_range_blocks)")
+	end
+	return send_range
+end
+-- player name -> {last = the list last sent, looks = id -> look sent}
+local sent_to = {}
+
 local function show_objects(dtime)
 	objects_due = objects_due - (dtime or 0)
 	if objects_due > 0 then
 		return
 	end
 	objects_due = OBJECTS_INTERVAL
-	local v = {}
-	local props_changed = {}
+	-- Every object's record and look once, then each player's share
+	local recs = {}
 	for id, o in pairs(objects) do
 		local box = o.props.collisionbox or DEFAULT_PROPERTIES.collisionbox
 		if o.props.is_visible == false then
@@ -4015,47 +4033,43 @@ local function show_objects(dtime)
 			local sy = math.max(box[5] - box[2], 0.05)
 			local sz = math.max(box[6] - box[3], 0.05)
 			local at = drawn_pos_of(o, 0)
-			v[#v + 1] = id
-			v[#v + 1] = at.x + (box[1] + box[4]) / 2
-			v[#v + 1] = at.y + (box[2] + box[5]) / 2
-			v[#v + 1] = at.z + (box[3] + box[6]) / 2
-			v[#v + 1] = sx
-			v[#v + 1] = sy
-			v[#v + 1] = sz
-			v[#v + 1] = o.rot and o.rot.y or 0
-			-- Pitch and roll too: a minecart shakes, a fish tilts, a
-			-- dead mob lies down (lua_api.md "Coordinate System")
-			v[#v + 1] = o.rot and o.rot.x or 0
-			v[#v + 1] = o.rot and o.rot.z or 0
-			-- Which object it rides and whether forced visible
-			-- ([WIELD_AT_FEET] (1)): the client leaves a thing attached to
-			-- its own player out of the first-person view unless forced.
-			-- In the per-step list, not the props, so the client re-reads
-			-- it every packet rather than missing it once the list settles.
 			local a = o.attached_to
-			v[#v + 1] = a and (ref_ids[a.ref] or 0) or 0
-			v[#v + 1] = (a and a.forced_visible) and 1 or 0
-			-- The yaw a bone attachment was turned by, -1000 for none: the
-			-- client turns it on to its own player's yaw every frame
-			-- ([WIELD_AT_FEET])
-			v[#v + 1] = bone_yaw_of(o) or -1000
 			local kind, texture, detail = appearance_of(o)
-			detail = detail or ""
 			-- Whether a ray may hit it: Luanti's pointable. VoxeLibre's
 			-- wieldview rides at its player's feet with pointable false,
 			-- and a client that did not know stood punching it instead of
 			-- digging the ground (2026-09-19)
-			local pointable = (o.props.pointable ~= false) and "1" or "0"
+			local look = {kind, texture, detail or "",
+				(o.props.pointable ~= false) and "1" or "0"}
 			local was = sent_appearance[id]
-			if not was or was[1] ~= kind or was[2] ~= texture or
-					was[3] ~= detail or was[4] ~= pointable then
-				sent_appearance[id] = {kind, texture, detail, pointable}
-				props_changed[#props_changed + 1] = tostring(id)
-				props_changed[#props_changed + 1] = kind
-				props_changed[#props_changed + 1] = texture
-				props_changed[#props_changed + 1] = detail
-				props_changed[#props_changed + 1] = pointable
+			if not was or was[1] ~= look[1] or was[2] ~= look[2] or
+					was[3] ~= look[3] or was[4] ~= look[4] then
+				sent_appearance[id] = look
+			else
+				look = was
 			end
+			recs[#recs + 1] = {id = id, at = at, look = look, v = {id,
+				at.x + (box[1] + box[4]) / 2,
+				at.y + (box[2] + box[5]) / 2,
+				at.z + (box[3] + box[6]) / 2,
+				sx, sy, sz,
+				o.rot and o.rot.y or 0,
+				-- Pitch and roll too: a minecart shakes, a fish tilts, a
+				-- dead mob lies down (lua_api.md "Coordinate System")
+				o.rot and o.rot.x or 0,
+				o.rot and o.rot.z or 0,
+				-- Which object it rides and whether forced visible
+				-- ([WIELD_AT_FEET] (1)): the client leaves a thing attached
+				-- to its own player out of the first-person view unless
+				-- forced. In the per-step list, not the props, so the
+				-- client re-reads it every packet rather than missing it
+				-- once the list settles.
+				a and (ref_ids[a.ref] or 0) or 0,
+				(a and a.forced_visible) and 1 or 0,
+				-- The yaw a bone attachment was turned by, -1000 for none:
+				-- the client turns it on to its own player's yaw every
+				-- frame ([WIELD_AT_FEET])
+				bone_yaw_of(o) or -1000}}
 		end
 	end
 	for id, _ in pairs(sent_appearance) do
@@ -4063,19 +4077,59 @@ local function show_objects(dtime)
 			sent_appearance[id] = nil
 		end
 	end
-	if #props_changed > 0 then
-		__show_object_props(props_changed)
+	local range = object_send_range()
+	local here = {}
+	for _, o in pairs(objects) do
+		if o.player_name then
+			here[o.player_name] = o.pos
+		end
 	end
-	if #v == 0 and not anything_shown then
-		return
+	for name in pairs(sent_to) do
+		if not here[name] then
+			sent_to[name] = nil
+		end
 	end
-	-- Nothing moved, grew, turned or went: the client has this list
-	if same_list(v, objects_last) then
-		return
+	for name, p in pairs(here) do
+		local st = sent_to[name]
+		if not st then
+			st = {looks = {}}
+			sent_to[name] = st
+		end
+		local v, props, seen = {}, {}, {}
+		for _, rec in ipairs(recs) do
+			local dx, dy, dz = rec.at.x - p.x, rec.at.y - p.y, rec.at.z - p.z
+			if dx * dx + dy * dy + dz * dz <= range * range then
+				local rv = rec.v
+				for i = 1, #rv do
+					v[#v + 1] = rv[i]
+				end
+				seen[rec.id] = true
+				if st.looks[rec.id] ~= rec.look then
+					st.looks[rec.id] = rec.look
+					local look = rec.look
+					props[#props + 1] = tostring(rec.id)
+					props[#props + 1] = look[1]
+					props[#props + 1] = look[2]
+					props[#props + 1] = look[3]
+					props[#props + 1] = look[4]
+				end
+			end
+		end
+		-- Out of range or gone: the client forgot its look with it
+		for id in pairs(st.looks) do
+			if not seen[id] then
+				st.looks[id] = nil
+			end
+		end
+		if #props > 0 then
+			__show_object_props_to(name, props)
+		end
+		-- Nothing moved, grew, turned or went: the client has this list
+		if not (#v == 0 and not st.last) and not same_list(v, st.last) then
+			st.last = #v > 0 and v or nil
+			__show_objects_to(name, v)
+		end
 	end
-	objects_last = v
-	anything_shown = #v > 0
-	__show_objects(v)
 end
 
 -- What a player is carrying, to their own client and nobody else's. The

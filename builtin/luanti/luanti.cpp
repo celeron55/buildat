@@ -6477,69 +6477,58 @@ struct Module: public interface::Module, public luanti::Interface
 		return 1;
 	}
 
-	// __luanti_show_objects{id, x, y, z, sx, sy, sz, yaw, ...}: where every
-	// object is and how big it is, once per step, to every client. What one
-	// looks like is the client half's, and __luanti_show_object_props says
-	// which look it wears; this is only where they are.
-	static int l_show_objects(lua_State *L)
+	// __luanti_show_objects_to(player_name, {id, x, y, z, sx, sy, sz, yaw,
+	// ...}): where the objects within the player's send range are and how
+	// big, to that player's client ([SERVER_PRESETS] 1). What one looks
+	// like is the client half's, and __luanti_show_object_props_to says
+	// which look it wears (kind, the shape the client half draws; see
+	// appearance_of() in lua/entity.lua), sent when it changes or comes
+	// into range rather than every step.
+	static int l_show_objects_to(lua_State *L)
 	{
 		Module *self = module_of(L);
-		luaL_checktype(L, 1, LUA_TTABLE);
-		size_t n = lua_objlen(L, 1);
+		size_t name_len = 0;
+		const char *name_p = luaL_checklstring(L, 1, &name_len);
+		luaL_checktype(L, 2, LUA_TTABLE);
+		size_t n = lua_objlen(L, 2);
 		sv_<double> v(n, 0.0);
 		for(size_t i = 0; i < n; i++){
-			lua_rawgeti(L, 1, (int)i + 1);
+			lua_rawgeti(L, 2, (int)i + 1);
 			v[i] = lua_tonumber(L, -1);
 			lua_pop(L, 1);
 		}
-		self->show_objects(v);
-		return 0;
-	}
-
-	// __luanti_show_object_props{id, kind, texture, ...}: what an object
-	// looks like, sent when it changes rather than every step. kind is the
-	// shape the client half draws; see appearance_of() in lua/entity.lua.
-	static int l_show_object_props(lua_State *L)
-	{
-		Module *self = module_of(L);
-		luaL_checktype(L, 1, LUA_TTABLE);
-		sv_<ss_> flat;
-		size_t n = lua_objlen(L, 1);
-		flat.reserve(n);
-		for(size_t i = 0; i < n; i++){
-			lua_rawgeti(L, 1, (int)i + 1);
-			size_t len = 0;
-			const char *p = lua_tolstring(L, -1, &len);
-			flat.push_back(ss_(p ? p : "", p ? len : 0));
-			lua_pop(L, 1);
-		}
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(flat);
-		}
-		self->broadcast("luanti:object_props", os.str());
-		return 0;
-	}
-
-	// To every client there is: what the objects look like and where they
-	// are is everybody's, unlike an inventory or a form
-	void broadcast(const ss_ &name, const ss_ &data)
-	{
-		network::access(m_server, [&](network::Interface *inetwork){
-			for(network::PeerInfo::Id peer : inetwork->list_peers())
-				inetwork->send(peer, name, data);
-		});
-	}
-
-	void show_objects(const sv_<double> &v)
-	{
+		auto it = self->m_player_peers.find(ss_(name_p, name_len));
+		if(it == self->m_player_peers.end())
+			return 0;
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar(v);
 		}
-		broadcast("luanti:objects", os.str());
+		network::access(self->m_server, [&](network::Interface *inetwork){
+			inetwork->send(it->second, "luanti:objects", os.str());
+		});
+		return 0;
+	}
+	static int l_show_object_props_to(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t name_len = 0;
+		const char *name_p = luaL_checklstring(L, 1, &name_len);
+		luaL_checktype(L, 2, LUA_TTABLE);
+		sv_<ss_> flat;
+		size_t n = lua_objlen(L, 2);
+		flat.reserve(n);
+		for(size_t i = 0; i < n; i++){
+			lua_rawgeti(L, 2, (int)i + 1);
+			size_t len = 0;
+			const char *p = lua_tolstring(L, -1, &len);
+			flat.push_back(ss_(p ? p : "", p ? len : 0));
+			lua_pop(L, 1);
+		}
+		self->send_to_player(ss_(name_p, name_len), "luanti:object_props",
+				flat);
+		return 0;
 	}
 
 	// __luanti_send_inventory(player_name, {list, size, item, item, ...}):
@@ -8945,9 +8934,9 @@ struct Module: public interface::Module, public luanti::Interface
 		// read is of a global that does not exist, which the module's own
 		// strict-global guard warns about, once, for nothing.
 		set_global_string("__luanti_section_size", "64");
-		set_global_cfunction("__luanti_show_objects", l_show_objects);
-		set_global_cfunction("__luanti_show_object_props",
-				l_show_object_props);
+		set_global_cfunction("__luanti_show_objects_to", l_show_objects_to);
+		set_global_cfunction("__luanti_show_object_props_to",
+				l_show_object_props_to);
 		set_global_cfunction("__luanti_send_inventory", l_send_inventory);
 		set_global_cfunction("__luanti_send_player_pos", l_send_player_pos);
 		set_global_cfunction("__luanti_spawn_level", l_spawn_level);
