@@ -368,8 +368,8 @@ function M.new(env)
 		for _, b in ipairs(form.drawn.buttons or {}) do
 			if inside(b) then
 				local fields = form_fields()
-				-- A hypertext's action says which one it was; a button says
-				-- only that it was pressed ([FORMSPEC_SCROLL])
+				-- A hypertext's action says which one it was; a button sends its
+				-- label ([FORMSPEC_SCROLL])
 				fields[b.name] = b.value or ""
 				if b.exit then
 					fields.quit = "true"

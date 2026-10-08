@@ -27,6 +27,8 @@ M.HEIGHT = 1.75
 -- air it is 0.2 (LocalPlayer::move: touching_ground ? stepheight : 0.2*BS)
 M.STEP_HEIGHT = 0.6
 M.AIR_STEP_HEIGHT = 0.2
+-- How high autojump looks for a way through (LocalPlayer::handleAutojump)
+M.AUTOJUMP_HEIGHT = 1.1
 -- ClientEnvironment::step() cuts a frame into steps of at most this long,
 -- and of at most STEP_MAX_MOVE nodes of travel, so that what a jump does
 -- is the same at any frame rate ([PLAYER_PHYSICS]); a frame over
@@ -307,10 +309,18 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 	-- table of what matches and what does not is [PLAYER_PHYSICS] in
 	-- doc/plan/luanti_module_plan.md.
 	--
-	-- simplified: sneak_glitch (the sneak ladder), autojump, pitch move
-	-- and object collisions are not here.
+	-- simplified: sneak_glitch (the sneak ladder), pitch move and object
+	-- collisions are not here.
 	local function step(dtime, wish)
 		local m = self.movement
+		-- **Autojump** (LocalPlayer::handleAutojump; on by default in
+		-- Luanti's Android client, here with the touch controls):
+		-- self.autojump says it is on, and a jump it chose is held for
+		-- autojump_t more seconds. See the end of the horizontal move.
+		if (self.autojump_t or 0) > 0 then
+			self.autojump_t = self.autojump_t - dtime
+			wish.jump = true
+		end
 		-- Going through walls is the collision test answering no to
 		-- everything, which is also how a player who ended up inside
 		-- something gets out
@@ -580,10 +590,28 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		-- that just misses the top of a node land on it.
 		local step_height = self.on_ground and M.STEP_HEIGHT or
 				M.AIR_STEP_HEIGHT
+		local p0 = {p[1], p[2], p[3]}
 		local hit_x = move_horizontal(p, 1, self.vx * dtime, stops,
 				step_height)
 		local hit_z = move_horizontal(p, 3, self.vz * dtime, stops,
 				step_height)
+		-- Autojump: walking on the ground into something the step does not
+		-- take, with room over the head, jumps when the same move from a
+		-- jump's height (Luanti's 1.1) would get further
+		if self.autojump and self.on_ground and (hit_x or hit_z) and
+				not wish.jump and not wish.sneak and not fly and
+				((wish.x or 0) ~= 0 or (wish.z or 0) ~= 0) then
+			local q = {p0[1], p0[2], p0[3]}
+			if not move_axis(q, 2, M.AUTOJUMP_HEIGHT, stops) then
+				move_horizontal(q, 1, self.vx * dtime, stops, nil)
+				move_horizontal(q, 3, self.vz * dtime, stops, nil)
+				local jx, jz = q[1] - p0[1], q[3] - p0[3]
+				local rx, rz = p[1] - p0[1], p[3] - p0[3]
+				if jx * jx + jz * jz > (rx * rx + rz * rz) * 1.01 then
+					self.autojump_t = 0.1
+				end
+			end
+		end
 		if hit_x then
 			self.vx = 0
 		end
@@ -755,6 +783,31 @@ do
 			"player: sneaking walked off the edge, x = " .. sneaker.x ..
 			" y = " .. sneaker.y)
 	assert(walker.y < 0, "player: walking did not fall off the edge")
+
+	-- Autojump walks up a whole node, and needs the room over it: a player
+	-- without it stops at the node, and so does one under a ceiling
+	local steps = function(x, y, z) return y <= 0 or (y == 1 and x >= 3) end
+	local roofed = function(x, y, z)
+		return y <= 0 or (y == 1 and x >= 3) or y == 3
+	end
+	local jumper = M.new(steps)
+	local plain = M.new(steps)
+	local ducked = M.new(roofed)
+	jumper.autojump, ducked.autojump = true, true
+	for _, pl in ipairs({jumper, plain, ducked}) do
+		pl:set_position(1, 0.5, 0)
+	end
+	for _ = 1, 60 do
+		for _, pl in ipairs({jumper, plain, ducked}) do
+			pl:update(0.05, {x = 1, z = 0})
+		end
+	end
+	assert(jumper.x > 3 and jumper.y > 1.4,
+			"player: autojump did not walk up the node, x = " .. jumper.x ..
+			" y = " .. jumper.y)
+	assert(plain.x < 2.7 and plain.y < 1,
+			"player: a node was walked up without autojump")
+	assert(ducked.x < 2.7, "player: autojump jumped into a ceiling")
 
 	-- And what a mod has multiplied the movement by: no gravity is no
 	-- falling at all, and twice the speed is twice as fast once the

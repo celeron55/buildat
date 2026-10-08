@@ -1,5 +1,4 @@
--- Buildat: apps/vanilla/main/client_lua/touch.lua
--- http://www.apache.org/licenses/LICENSE-2.0
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
 -- **Touch controls** (user, 2026-09-30), official Luanti's
@@ -12,19 +11,21 @@
 -- - Menu, Inventory, Chat and More along the top, More opening the rest:
 --   drop, fly, fast, noclip, the camera and the minimap;
 -- - a tap on the hotbar picks the slot.
--- init.lua reads what this holds: held[action] is key_down()'s, dig is the
+-- One copy for both Luanti clients ([LC_TOUCH]): luanti_client loads it
+-- from its res/, vanilla as luanti/touch.lua (serve_shared_lua). The client
+-- reads what this holds: held[action] is key_down()'s, dig is the
 -- left button's, and yaw and pitch are degrees to turn, taken each frame.
 --
 -- simplified: the stick is digital (the four walk keys), where Luanti's is
 -- analog; the dig and place are at the crosshair rather than at the tapped
 -- point; a hotbar of more than one row is tapped as one.
 --
---   keys.touch = run_script_file("main/touch.lua")(o)
+--   touch = <this file>(o)
 -- o: on_key(key), BIND, pause(), place(), set_wield(i), inventory(),
---    chat(), hotbar() -> count, slot_size, margin
+--    chat(), hotbar() -> count, slot_size, margin, form_open(),
+--    form_click(x, y) (a tap on an open form, in UI pixels)
 local magic = require("buildat/extension/urho3d")
-local luanti = require("buildat/module/luanti")
-local log = buildat.Logger("vanilla/touch")
+local log = buildat.Logger("luanti/touch")
 
 -- How long a finger is held still before it digs, and how far it may move
 -- and still be a tap: Luanti's touch_long_tap_delay and its tap slop
@@ -181,18 +182,18 @@ return function(o)
 		return x / sc - rp.x, y / sc - rp.y
 	end
 
-	magic.SubscribeToEvent("TouchBegin", function(_, data)
+	local on_touchbegin = magic.SubscribeToEvent("TouchBegin", function(_, data)
 		local id = data:GetInt("TouchID")
 		local ux, uy = ui_point(data:GetInt("X"), data:GetInt("Y"))
 		local f = {ux0 = ux, uy0 = uy, t0 = buildat.get_time_us()}
 		fingers[id] = f
-		if luanti.form_open() or over_buttons(ux, uy) then
+		if o.form_open() or over_buttons(ux, uy) then
 			f.ui = true
 			-- A form of Luanti's is clicked where the finger lands: the UI
 			-- sends no click of a finger's (UIMouseClick is the mouse's),
 			-- and a tap outside the form closes it
-			if luanti.form_window() then
-				luanti.click(ux, uy, "left")
+			if o.form_open() then
+				o.form_click(ux, uy)
 			end
 			return
 		end
@@ -217,7 +218,7 @@ return function(o)
 		f.look = true
 	end)
 
-	magic.SubscribeToEvent("TouchMove", function(_, data)
+	local on_touchmove = magic.SubscribeToEvent("TouchMove", function(_, data)
 		local f = fingers[data:GetInt("TouchID")]
 		if not f or f.ui then
 			return
@@ -235,7 +236,7 @@ return function(o)
 		end
 	end)
 
-	magic.SubscribeToEvent("TouchEnd", function(_, data)
+	local on_touchend = magic.SubscribeToEvent("TouchEnd", function(_, data)
 		local id = data:GetInt("TouchID")
 		local f = fingers[id]
 		fingers[id] = nil
@@ -249,7 +250,7 @@ return function(o)
 		elseif f.look then
 			if f.digging then
 				T.dig = false
-			elseif not f.moved and not luanti.form_open() then
+			elseif not f.moved and not o.form_open() then
 				o.place()
 			end
 		end
@@ -264,7 +265,7 @@ return function(o)
 	-- A finger held still digs, and goes on digging when it then moves;
 	-- the controls hide while a form or the pause menu is up
 	local shown = true
-	magic.SubscribeToEvent("Update", function()
+	local on_update = magic.SubscribeToEvent("Update", function()
 		local now = buildat.get_time_us()
 		for _, f in pairs(fingers) do
 			if f.look and not f.moved and not f.digging and
@@ -273,7 +274,7 @@ return function(o)
 				T.dig = true
 			end
 		end
-		local want = not luanti.form_open()
+		local want = not o.form_open()
 		if want ~= shown then
 			shown = want
 			for _, b in ipairs(buttons) do
@@ -285,6 +286,20 @@ return function(o)
 			end
 		end
 	end)
+
+	-- The controls taken down, for a client whose session ends while it
+	-- runs (luanti_client's back to its connect dialog)
+	function T.destroy()
+		magic.UnsubscribeFromEvent("TouchBegin", on_touchbegin)
+		magic.UnsubscribeFromEvent("TouchMove", on_touchmove)
+		magic.UnsubscribeFromEvent("TouchEnd", on_touchend)
+		magic.UnsubscribeFromEvent("Update", on_update)
+		for _, b in ipairs(buttons) do
+			b:Remove()
+		end
+		base:Remove()
+		knob:Remove()
+	end
 
 	return T
 end

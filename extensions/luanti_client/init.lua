@@ -885,10 +885,14 @@ local function show_client(host, port, name, password, mode, origin)
 		-- as vanilla's keys.web_lock.
 		local web = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
 		local function mouse_look(enable, reason)
-			magic.input:SetMouseVisible(not enable, reason)
+			-- A touchscreen's pointer stays: the UI takes a finger's taps
+			-- only while it is shown, and the touch controls are UI
+			magic.input:SetMouseVisible(not enable or settings.touch ~= nil,
+					reason)
 			if web then
-				magic.input:SetMouseMode(enable and magic.MM_RELATIVE or
-						magic.MM_ABSOLUTE)
+				-- A grabbed pointer is one the UI takes no taps from
+				magic.input:SetMouseMode((enable and not settings.touch) and
+						magic.MM_RELATIVE or magic.MM_ABSOLUTE)
 			end
 		end
 		-- Whether the form was drawn with a texture that had not arrived
@@ -972,6 +976,7 @@ local function show_client(host, port, name, password, mode, origin)
 			redraw_form()
 			if loading then
 				loading = false
+				log:info("loading done")
 				if loading_panel then
 					loading_panel:Remove()
 					loading_panel = nil
@@ -2623,15 +2628,28 @@ local function show_client(host, port, name, password, mode, origin)
 			if form_on() or chat_input or screen_above then
 				client:set_position(avatar.x, avatar.y, avatar.z)
 				client:set_motion(0, 0, 0, 0)
+				-- A drag on what is over the game turns nothing later
+				if settings.touch then
+					settings.touch.yaw, settings.touch.pitch = 0, 0
+				end
 				return
 			end
 			local dmouse = magic.input:GetMouseMove()
+			-- A touchscreen's finger turns the head (res/touch.lua), in
+			-- degrees; the mouse SDL makes of it does not
+			local touch = settings.touch
+			local tyaw, tpitch = 0, 0
+			if touch then
+				dmouse = {x = 0, y = 0}
+				tyaw, tpitch = touch.yaw, touch.pitch
+				touch.yaw, touch.pitch = 0, 0
+			end
 			-- Luanti's yaw grows counterclockwise seen from above, so the
 			-- mouse going right, which turns the player right, takes it down
-			local yaw = client.yaw - dmouse.x * MOUSE_SENSITIVITY
+			local yaw = client.yaw - dmouse.x * MOUSE_SENSITIVITY - tyaw
 			-- Luanti's pitch is positive looking down, which is the way the
 			-- mouse's own y goes
-			local pitch = client.pitch + dmouse.y * MOUSE_SENSITIVITY
+			local pitch = client.pitch + dmouse.y * MOUSE_SENSITIVITY + tpitch
 			if pitch > 89 then pitch = 89 end
 			if pitch < -89 then pitch = -89 end
 
@@ -2639,7 +2657,8 @@ local function show_client(host, port, name, password, mode, origin)
 			local yr = math.rad(yaw)
 			local fx, fz = -math.sin(yr), math.cos(yr)
 			local down = function(action)
-				return magic.input:GetKeyDown(BIND[action].key)
+				return magic.input:GetKeyDown(BIND[action].key) or
+						(touch and touch.held[action]) or false
 			end
 			local wish = {x = 0, z = 0,
 					jump = down("jump"),
@@ -2883,6 +2902,9 @@ local function show_client(host, port, name, password, mode, origin)
 			end
 			move(dtime)
 			update_tint()
+			if settings.touch then
+				digging = settings.touch.dig and not form_on()
+			end
 			update_dig(dtime)
 			objects.interpolate(world_objects, dtime)
 			for id, obj in pairs(world_objects) do
@@ -3039,6 +3061,7 @@ local function show_client(host, port, name, password, mode, origin)
 			if chat_input then
 				return
 			end
+			log:info("chat: the line opened")
 			local ui_root = magic.ui.root
 			local w = math.min(560, ui_root.width - 40)
 			local h = 96
@@ -3143,12 +3166,25 @@ local function show_client(host, port, name, password, mode, origin)
 			end
 		end
 
+		-- The right button's, and a touchscreen's tap
+		local function place_or_activate()
+			if pointed_object or (pointed_under and pointed_above) then
+				place()
+			else
+				-- Pointing at nothing: the item's secondary action, which
+				-- is what handlePointingAtNothing() sends
+				client:interact(luanti.INTERACT_ACTIVATE, wield_index - 1)
+			end
+		end
+
 		-- The dig button: the two events say whether it is held, and the
 		-- press is when a use or a hit goes out (Input's
 		-- GetMouseButtonDown would say the state, not the moment).
 		local mouse_down_cb = magic.SubscribeToEvent("MouseButtonDown",
 				function(event_type, event_data)
-			if form_on() then
+			-- A touchscreen's first finger is also the left button, which
+			-- SDL makes of it: res/touch.lua says when a dig is held
+			if form_on() or settings.touch then
 				return -- The click goes to the form; see UIMouseClick
 			end
 			-- The pointer lock asked for again, which a browser grants on a
@@ -3197,6 +3233,10 @@ local function show_client(host, port, name, password, mode, origin)
 		local ui_click_cb = magic.SubscribeToEvent("UIMouseClick",
 				function(event_type, event_data)
 			local button = event_data:GetInt("Button")
+			-- A touchscreen's taps are clicked by res/touch.lua
+			if settings.touch then
+				return
+			end
 			if form_on() then
 				session:click(event_data:GetInt("X"), event_data:GetInt("Y"),
 						button_name(button))
@@ -3212,6 +3252,9 @@ local function show_client(host, port, name, password, mode, origin)
 
 		local mouse_up_cb = magic.SubscribeToEvent("MouseButtonUp",
 				function(event_type, event_data)
+			if settings.touch then
+				return
+			end
 			if event_data:GetInt("Button") == MOUSEB_LEFT then
 				digging = false
 				hit_wait = 0
@@ -3223,14 +3266,7 @@ local function show_client(host, port, name, password, mode, origin)
 					not form_on() then
 				-- On the way up rather than the way down, so that holding
 				-- the button does not place a stack of nodes at once
-				if pointed_object or (pointed_under and pointed_above) then
-					place()
-				else
-					-- Pointing at nothing: the item's secondary action,
-					-- which is what handlePointingAtNothing() sends
-					client:interact(luanti.INTERACT_ACTIVATE,
-							wield_index - 1)
-				end
+				place_or_activate()
 			end
 		end)
 
@@ -3285,6 +3321,10 @@ local function show_client(host, port, name, password, mode, origin)
 				bar:Remove()
 			end
 			hotbar_row:destroy()
+			if settings.touch then
+				settings.touch.destroy()
+				settings.touch = nil
+			end
 			mouse_look(false, "the session ended")
 			client:disconnect()
 			view:close()
@@ -3346,8 +3386,8 @@ local function show_client(host, port, name, password, mode, origin)
 			end)
 		end
 
-		root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
-			local key = event_data:GetInt("Key")
+		-- A key's action, which a touchscreen's buttons press as well
+		local function on_key(key)
 			if chat_input or chat_wanted then
 				-- The dialog has the keys. Enter arrives as the line edit's
 				-- TextFinished and escape as the plain subscription made in
@@ -3459,7 +3499,42 @@ local function show_client(host, port, name, password, mode, origin)
 					open_pause_menu()
 				end
 			end
+		end
+		root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
+			on_key(event_data:GetInt("Key"))
 		end)
+
+		-- **Touch controls** on a touchscreen (res/touch.lua, vanilla's
+		-- too); nil elsewhere, and then the mouse is what it always was
+		if buildat.get_env("BUILDAT_TOUCH") == "1" then
+			settings.touch = buildat.run_extension_file("res/touch.lua")({
+				on_key = on_key,
+				BIND = BIND,
+				pause = function() open_pause_menu() end,
+				-- Not through a screen over the game or the chat line
+				place = function()
+					if uistack.main:top() == root and not chat_input then
+						place_or_activate()
+					end
+				end,
+				set_wield = function(i) wield_index = i end,
+				inventory = function() on_key(BIND.inventory.key) end,
+				chat = function() on_key(BIND.chat.key) end,
+				hotbar = function()
+					local _, _, slot, margin = hotbar_row:metrics()
+					return client.hud_params and client.hud_params[
+							luanti_hud.PARAM_HOTBAR_ITEMCOUNT] or
+							HOTBAR_SLOTS, slot, margin
+				end,
+				form_open = form_on,
+				form_click = function(x, y) session:click(x, y, "left") end,
+			})
+			-- And Luanti's Android autojump
+			avatar.autojump = true
+			-- The session hid the pointer before these were here
+			mouse_look(true, "touch controls on")
+			log:info("touch controls on")
+		end
 	end, {description = "Luanti server at "..host..":"..port})
 end
 

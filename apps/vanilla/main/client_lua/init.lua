@@ -142,7 +142,7 @@ local BIND = keys.BIND
 
 local function key_down(action)
 	local b = BIND[action]
-	-- A touchscreen's stick and buttons (main/touch.lua) hold the same
+	-- A touchscreen's stick and buttons (luanti/touch.lua) hold the same
 	-- actions the keys do
 	if keys.touch and keys.touch.held[action] then
 		return true
@@ -3713,7 +3713,7 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	end
 	-- A form on the screen is clicked through UIMouseClick below, which is
 	-- what says where the click landed; what is behind it is not what was
-	-- clicked on. A touchscreen's finger is its own (main/touch.lua).
+	-- clicked on. A touchscreen's finger is its own (luanti/touch.lua).
 	if luanti.form_open() or keys.touch then
 		return
 	end
@@ -3808,7 +3808,7 @@ end)
 -- Where a click landed, which MouseButtonDown does not say. A form is the
 -- only thing here that cares.
 magic.SubscribeToEvent("UIMouseClick", function(event_type, event_data)
-	-- A touchscreen's taps are clicked by main/touch.lua
+	-- A touchscreen's taps are clicked by luanti/touch.lua
 	if not luanti.form_open() or keys.touch then
 		return
 	end
@@ -4156,7 +4156,7 @@ function frame_peak.update(dt)
 	-- screen -- a form is open, a line is being typed, or Tab put it there
 	-- -- it is the pointer
 	-- -- it is the pointer. A touchscreen has no pointer to put anywhere:
-	-- a finger turns the head (main/touch.lua), in degrees
+	-- a finger turns the head (luanti/touch.lua), in degrees
 	local playing = (mouse_in_world or keys.touch) and
 			not luanti.form_open() and chat_input == nil
 	if playing then
@@ -4444,15 +4444,15 @@ magic.SubscribeToEvent("ScreenMode", function()
 	draw_hotbar()
 end)
 
--- **Touch controls** on a touchscreen (main/touch.lua); nil elsewhere, and
--- then the mouse is what it always was
+-- **Touch controls** on a touchscreen (luanti/touch.lua, luanti_client's
+-- res/touch.lua); nil elsewhere, and then the mouse is what it always was
 if buildat.get_env("BUILDAT_TOUCH") == "1" then
 	keys.touch = (function(ok, err, m)
 		if not ok or type(m) ~= "function" then
 			error("vanilla: could not load touch.lua: " .. tostring(err))
 		end
 		return m
-	end)(buildat.run_script_file("main/touch.lua"))({
+	end)(buildat.run_script_file("luanti/touch.lua"))({
 		on_key = keys.on_key,
 		BIND = BIND,
 		pause = open_pause_menu,
@@ -4463,6 +4463,12 @@ if buildat.get_env("BUILDAT_TOUCH") == "1" then
 		hotbar = function()
 			local _, _, slot, margin = hotbar_metrics()
 			return (luanti.hotbar and luanti.hotbar.count) or 8, slot, margin
+		end,
+		form_open = luanti.form_open,
+		form_click = function(x, y)
+			if luanti.form_window() then
+				luanti.click(x, y, "left")
+			end
 		end,
 	})
 	-- And Luanti's Android autojump: a node's step is walked up without

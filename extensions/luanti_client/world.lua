@@ -2198,6 +2198,9 @@ function M.new(magic, buildat, log, options)
 				end
 				cg:DefineVertex(magic.Vector3(p[1], p[2], p[3]))
 				cg:DefineColor(color)
+				-- Unlit's VS reads a UV whatever NOUV says; WebGL refuses
+				-- a draw that fetches an attribute the buffer has not got
+				cg:DefineTexCoord(magic.Vector2(0, 0))
 			end
 		end
 

@@ -1096,8 +1096,10 @@ function M.new(magic, buildat, log, ctx)
 										"\27(c@"..st.textcolor..")"))
 						t:SetTextAlignment(1) -- HA_CENTER
 					end
+					-- A press sends the label, as Luanti does
 					buttons[#buttons + 1] = {name = button_name,
 							x = x, y = y, w = w, h = h,
+							value = formspec.strip_escapes(text or ""),
 							exit = name:sub(-5) == "_exit"}
 				end
 			elseif name == "tabheader" then

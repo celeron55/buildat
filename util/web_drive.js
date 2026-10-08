@@ -21,6 +21,7 @@
 //   ["click", x, y]         left button, in CSS pixels
 //   ["mouse", x, y]         the pointer there, no button
 //   ["tap", x, y]           a finger's touch there and up again
+//   ["hold", x, y, ms]      a finger held still there for ms (Firefox only)
 //   ["drag", x0, y0, x1, y1, "touch"]
 //                           the left button (or a finger) down at x0, y0,
 //                           moved to x1, y1 over half a second, and up
@@ -145,6 +146,11 @@ async function firefox() {
 				{pointerType: "touch"}, actions: [
 				{type: "pointerMove", x, y}, {type: "pointerDown", button: 0},
 				{type: "pause", duration: 50}, {type: "pointerUp", button: 0}]}]}),
+		hold: (x, y, ms) => c.send("input.performActions", {context: ctx,
+				actions: [{type: "pointer", id: "t", parameters:
+				{pointerType: "touch"}, actions: [
+				{type: "pointerMove", x, y}, {type: "pointerDown", button: 0},
+				{type: "pause", duration: ms}, {type: "pointerUp", button: 0}]}]}),
 		drag: (x0, y0, x1, y1, kind) => c.send("input.performActions", {
 				context: ctx, actions: [{type: "pointer", id: kind === "touch" ?
 				"t" : "m", parameters: {pointerType: kind === "touch" ?
