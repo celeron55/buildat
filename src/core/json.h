@@ -148,6 +148,24 @@ namespace json
 		const Value deepcopy() const;
 	};
 
+	// An object's string, or `def` for anything else
+	inline std::string jstr(const Value &v, const char *k,
+			const std::string &def = "")
+	{
+		const Value &x = v.get(k);
+		return x.is_string() ? x.as_string() : def;
+	}
+	// An object's number as an integer; `def` for anything else, a number
+	// out of int64's range or NaN included
+	inline int64_t jint(const Value &v, const char *k, int64_t def = 0)
+	{
+		const Value &x = v.get(k);
+		if(x.is_integer())
+			return x.as_integer();
+		const double d = x.is_real() ? x.as_real() : 0;
+		return x.is_real() && d > -9e18 && d < 9e18 ? (int64_t)d : def;
+	}
+
 	template<> inline const json::Value& Value::as<json::Value>() const {
 		return *this;
 	}

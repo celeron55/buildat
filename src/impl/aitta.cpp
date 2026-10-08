@@ -15,6 +15,9 @@
 #include <cstring>
 #include <fstream>
 #include <sstream>
+
+using interface::sha256::unhex;
+
 #define MODULE "aitta"
 
 namespace interface {
@@ -39,23 +42,6 @@ static void write_file(const ss_ &path, const ss_ &data)
 	f<<data;
 	if(!f.good())
 		throw Exception("cannot write "+path);
-}
-
-static ss_ unhex(const ss_ &h)
-{
-	if(h.size() % 2)
-		throw Exception("odd-length hex");
-	ss_ out;
-	for(size_t i = 0; i < h.size(); i += 2){
-		auto nib = [&](char c) -> int {
-			if(c >= '0' && c <= '9') return c - '0';
-			if(c >= 'a' && c <= 'f') return c - 'a' + 10;
-			if(c >= 'A' && c <= 'F') return c - 'A' + 10;
-			throw Exception("not hex");
-		};
-		out += (char)(nib(h[i]) * 16 + nib(h[i + 1]));
-	}
-	return out;
 }
 
 static int rng(void*, unsigned char *out, size_t len)

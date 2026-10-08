@@ -49,6 +49,7 @@
 // to Hearth: it fetches, and only from where its admin said.
 #include "core/log.h"
 #include "core/json.h"
+#include "interface/sha256.h"
 #include "interface/os.h"
 #include "interface/module.h"
 #include "interface/server.h"
@@ -90,6 +91,11 @@
 #define STB_IMAGE_WRITE_STATIC
 #define STBI_WRITE_NO_STDIO
 #include "vendor/stb_image_write.h"
+
+using json::jstr;
+using json::jint;
+using interface::sha256::unhex;
+
 // stb_image's <limits.h> has a NAME_MAX of its own; Hearth's is below
 #undef NAME_MAX
 #define MODULE "main"
@@ -98,12 +104,6 @@ using interface::Event;
 
 // [SIM_CLOCK]: the calendar, which a check may move
 static int64_t now_s(){ return interface::os::wall_us() / 1000000; }
-
-static ss_ jstr(const json::Value &v, const char *k)
-{
-	const json::Value &x = v.get(k);
-	return x.is_string() ? x.as_string() : "";
-}
 
 // An address as compared: the scheme and host in lower case, no trailing /
 static ss_ norm_url(ss_ u)
@@ -115,14 +115,6 @@ static ss_ norm_url(ss_ u)
 	for(size_t i = 0; i < u.size() && i < path; i++)
 		u[i] = tolower((unsigned char)u[i]);
 	return u;
-}
-
-static int64_t jint(const json::Value &v, const char *k)
-{
-	const json::Value &x = v.get(k);
-	// out of int64's range (or NaN): 0, not undefined behaviour
-	const double d = x.is_number() ? x.as_number() : 0;
-	return d > -9e18 && d < 9e18 ? (int64_t)d : 0;
 }
 
 // What a user writes: up to `max` bytes, no control bytes but a tab and,
@@ -173,24 +165,6 @@ static const int UPLOADS_AN_HOUR = 20;
 // which an image is crushed again and a file is deleted
 static const char *const FILE_SETTINGS[3] = {"budget", "lod2_after",
 		"delete_after"};
-
-static ss_ unhex(const ss_ &h)
-{
-	auto val = [](char c){
-		return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ?
-				c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
-	};
-	if(h.size() % 2)
-		throw Exception("the file is not hex");
-	ss_ r(h.size() / 2, '\0');
-	for(size_t i = 0; i < r.size(); i++){
-		const int a = val(h[2 * i]), b = val(h[2 * i + 1]);
-		if(a < 0 || b < 0)
-			throw Exception("the file is not hex");
-		r[i] = (char)(a << 4 | b);
-	}
-	return r;
-}
 
 static void append_cb(void *to, void *data, int size)
 {

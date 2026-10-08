@@ -48,6 +48,9 @@
 #include <set>
 #include <memory>
 #include "interface/tcpsocket.h"
+
+using interface::sha256::unhex;
+
 #ifdef _WIN32
 	#include "ports/windows_sockets.h"
 #else
@@ -401,14 +404,6 @@ struct Module: public interface::Module, public Interface
 			listing.secret = unhex(l.get("secret").as_string());
 			m_listings[it.key()] = listing;
 		}
-	}
-
-	static ss_ unhex(const ss_ &h)
-	{
-		ss_ out;
-		for(size_t i = 0; i + 1 < h.size(); i += 2)
-			out += (char)strtol(h.substr(i, 2).c_str(), nullptr, 16);
-		return out;
 	}
 
 	// Under the lock

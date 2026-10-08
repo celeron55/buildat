@@ -107,6 +107,30 @@ ss_ hex(const ss_ &raw)
 	return result;
 }
 
+ss_ unhex(const ss_ &h)
+{
+	auto nib = [](char c){
+		return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ?
+				c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+	};
+	if(h.size() % 2)
+		throw Exception("not hex: an odd length");
+	ss_ r(h.size() / 2, '\0');
+	for(size_t i = 0; i < r.size(); i++){
+		const int a = nib(h[2 * i]), b = nib(h[2 * i + 1]);
+		if(a < 0 || b < 0)
+			throw Exception("not hex");
+		r[i] = (char)(a << 4 | b);
+	}
+	return r;
+}
+
+bool is_hex(const ss_ &s, size_t len)
+{
+	return s.size() == len &&
+			s.find_first_not_of("0123456789abcdef") == ss_::npos;
+}
+
 ss_ hmac(const ss_ &key_in, const ss_ &msg)
 {
 	ss_ key = key_in.size() > 64 ? calculate(key_in) : key_in;

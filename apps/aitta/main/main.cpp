@@ -58,6 +58,10 @@
 #include <algorithm>
 #include <fstream>
 #include <sstream>
+
+using json::jstr;
+using interface::sha256::is_hex;
+
 #define MODULE "main"
 
 using interface::Event;
@@ -69,22 +73,6 @@ static int64_t now_s(){ return interface::os::wall_us() / 1000000; }
 // simplified: per network; many networks get many times it
 static const int READS_A_MINUTE = 240;
 static const int UPLOADS_A_MINUTE = 30;
-
-static ss_ jstr(const json::Value &v, const char *k)
-{
-	const json::Value &x = v.get(k);
-	return x.is_string() ? x.as_string() : "";
-}
-
-static bool is_hex(const ss_ &s, size_t len)
-{
-	if(s.size() != len)
-		return false;
-	for(char c : s)
-		if(!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
-			return false;
-	return true;
-}
 
 // An author name: what a manifest's "author" may be
 static bool plain_name(const ss_ &s)

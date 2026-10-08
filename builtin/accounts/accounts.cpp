@@ -32,6 +32,9 @@
 #include <cstdio>
 #include <cstring>
 #include <cerrno>
+
+using json::jstr;
+
 #define MODULE "accounts"
 
 using interface::Event;
@@ -2016,12 +2019,6 @@ struct Module: public interface::Module, public Interface
 		json::Value v = m_store && m_store->get("smtp", data) ?
 				json::load_string(data.c_str(), &err) : json::Value();
 		return v.is_object() ? v : json::object();
-	}
-
-	static ss_ jstr(const json::Value &o, const char *k)
-	{
-		const json::Value &v = o.get(k);
-		return v.is_string() ? v.as_string() : "";
 	}
 
 	// One address, nothing in it that ends a header line or lists another

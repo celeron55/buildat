@@ -56,6 +56,12 @@
 #include <thread>
 #include <set>
 #include <condition_variable>
+
+using json::jstr;
+using json::jint;
+using interface::sha256::unhex;
+using interface::sha256::is_hex;
+
 #define MODULE "main"
 
 using interface::Event;
@@ -70,13 +76,6 @@ static int64_t now_s(){ return interface::os::wall_us() / 1000000; }
 static int64_t day_of(int64_t t){ return t / 86400; }
 
 static ss_ hex(const ss_ &raw){ return interface::sha256::hex(raw); }
-static ss_ unhex(const ss_ &h)
-{
-	ss_ out;
-	for(size_t i = 0; i + 1 < h.size(); i += 2)
-		out += (char)strtol(h.substr(i, 2).c_str(), nullptr, 16);
-	return out;
-}
 static ss_ random_hex(size_t bytes){
 	return hex(interface::bignum::random_bytes(bytes));
 }
@@ -89,11 +88,6 @@ static bool same(const ss_ &a, const ss_ &b)
 	for(size_t i = 0; i < a.size(); i++)
 		d |= (unsigned char)(a[i] ^ b[i]);
 	return d == 0;
-}
-static bool is_hex(const ss_ &s, size_t len)
-{
-	return s.size() == len &&
-			s.find_first_not_of("0123456789abcdef") == ss_::npos;
 }
 
 // One address counts once: an IPv4 address's /24, an IPv6 one's /48 (the
@@ -116,20 +110,6 @@ static ss_ subnet_of(const ss_ &addr)
 static const json::Value& jget(const json::Value &v, const char *k)
 {
 	return v.get(k);
-}
-static ss_ jstr(const json::Value &v, const char *k, const ss_ &def = "")
-{
-	const json::Value &x = v.get(k);
-	return x.is_string() ? x.as_string() : def;
-}
-static int64_t jint(const json::Value &v, const char *k, int64_t def = 0)
-{
-	const json::Value &x = v.get(k);
-	if(x.is_integer())
-		return x.as_integer();
-	// out of int64's range (or NaN): the default, not undefined behaviour
-	const double d = x.is_real() ? x.as_real() : 0;
-	return x.is_real() && d > -9e18 && d < 9e18 ? (int64_t)d : def;
 }
 static double jnum(const json::Value &v, const char *k, double def = 0)
 {
