@@ -570,6 +570,15 @@ if(BUILD_CLIENT)
 		# An imported archive is no dependency of the link by itself
 		set_property(TARGET ${CLIENT_EXE_NAME} APPEND PROPERTY
 			LINK_DEPENDS "${URHO3D_LIBRARY_FILE}")
+		# The preloaded files are packed at the link: a change to one links
+		# again, and a file added or removed is seen by CONFIGURE_DEPENDS
+		foreach(P ${WEB_PRELOAD})
+			string(REGEX REPLACE "@.*" "" P_DIR "${P}")
+			file(GLOB_RECURSE P_FILES CONFIGURE_DEPENDS "${P_DIR}/*")
+			list(FILTER P_FILES EXCLUDE REGEX "\\.swp$")
+			set_property(TARGET ${CLIENT_EXE_NAME} APPEND PROPERTY
+				LINK_DEPENDS ${P_FILES})
+		endforeach()
 		configure_file("${CMAKE_SOURCE_DIR}/src/client/web/index.html"
 			"${BUILDAT_WEB_OUTPUT}/index.html" COPYONLY)
 	endif()
