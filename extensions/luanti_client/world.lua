@@ -2610,6 +2610,57 @@ function M.new(magic, buildat, log, options)
 		return cg, materials
 	end
 
+	-- **A model in a form** (model[], the inventory's player): a View3D of
+	-- its own scene under `parent`, the quads turned in place by the
+	-- element's angles and the camera back far enough for all of them.
+	-- Cleared to nothing around the model, so the form shows through.
+	-- simplified: the rest pose, no mouse turning, as vanilla's module.lua
+	-- model_element.
+	function self:model_view(parent, w, h, quads, tiles, rot_x, rot_y)
+		if not quads or #quads == 0 or w < 1 or h < 1 then
+			return nil
+		end
+		local view = parent:CreateChild("View3D")
+		view.size = magic.IntVector2(math.floor(w), math.floor(h))
+		view.format = magic.Graphics.GetRGBAFormat()
+		view.blendMode = magic.BLEND_ALPHA
+		local s = magic.Scene.new()
+		s:CreateComponent("Octree")
+		local zone = s:CreateChild("zone"):CreateComponent("Zone")
+		zone.boundingBox = magic.BoundingBox(-1000, 1000)
+		zone.fogColor = magic.Color(0, 0, 0, 0)
+		zone.fogStart = 10000
+		zone.fogEnd = 10000
+		zone.ambientColor = magic.Color(1, 1, 1)
+		local lo, hi = {math.huge, math.huge, math.huge},
+				{-math.huge, -math.huge, -math.huge}
+		for _, q in ipairs(quads) do
+			for i = 0, 11 do
+				local a = i % 3 + 1
+				lo[a] = math.min(lo[a], q.p[i + 1])
+				hi[a] = math.max(hi[a], q.p[i + 1])
+			end
+		end
+		local radius = math.max(0.001, 0.5 * math.sqrt((hi[1] - lo[1])^2 +
+				(hi[2] - lo[2])^2 + (hi[3] - lo[3])^2))
+		local pivot = s:CreateChild("pivot")
+		local node = pivot:CreateChild("model")
+		build_object_mesh(node, quads, tiles or {})
+		node.position = magic.Vector3(-(lo[1] + hi[1]) / 2,
+				-(lo[2] + hi[2]) / 2, -(lo[3] + hi[3]) / 2)
+		pivot.rotation = magic.Quaternion(rot_x, rot_y, 0)
+		local cam_node = s:CreateChild("camera")
+		local cam = cam_node:CreateComponent("Camera")
+		local dist = radius / math.tan(math.rad(cam.fov / 2)) * 1.1
+		if h > w then
+			dist = dist * h / w
+		end
+		cam_node.position = magic.Vector3(0, 0, -dist)
+		cam_node.direction = magic.Vector3(0, 0, 1)
+		view:SetView(s, cam)
+		return view
+	end
+
 	-- The template node of one kind of object mesh: mesh name and textures
 	-- -> a node that is not drawn, holding the geometry and its materials.
 	--

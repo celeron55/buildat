@@ -1870,6 +1870,21 @@ local function show_client(host, port, name, password, mode, origin)
 			style = style,
 			white = "luanti_client/res/white.png",
 			formspec = formspec,
+			-- model[]: the mesh the server sent, wearing its textures;
+			-- nothing until both have arrived (the form is drawn again as
+			-- media arrives)
+			model = function(parent, w, h, mesh, textures, rot_x, rot_y)
+				local quads = read_mesh({mesh = mesh, visual_scale = 1})
+				local tiles = {}
+				for i, t in ipairs(textures) do
+					tiles[i] = media_texture(t)
+				end
+				if not quads or not tiles[1] then
+					return nil
+				end
+				return view:model_view(parent, w, h, quads, tiles, rot_x,
+						rot_y)
+			end,
 			-- Where a list[] element's slots come from: the player's own
 			-- inventory, one the server has detached, or the one that hangs
 			-- off a voxel, which is what a chest's slots are.
