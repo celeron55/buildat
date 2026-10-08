@@ -5,35 +5,14 @@ the name field, and the mapgen picked is the one written into world.mt."""
 import os, re, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import menu_drive
+import uidrive  # menu_drive put util on the path
 from menu_drive import Screen, click, type_into
 
 log, fifo, saves = sys.argv[1:4]
-w = open(fifo, "w")
-seen = 0
-def write(*cmds):
-    for c in cmds:
-        w.write(c + "\n")
-    w.flush()
+d = uidrive.Drive(log, fifo)
+write, read_block = d.write, d.block
 def say(s):
     print(s, flush=True)
-def read_block(label):
-    global seen
-    t0 = time.time()
-    while time.time() - t0 < 60:
-        buf = open(log, "rb").read()
-        m = re.search((r"scan %s: done, \d+ lines" % label).encode(), buf[seen:])
-        if m:
-            data = buf[seen:seen + m.end()].decode("utf-8", "replace")
-            seen += m.end()
-            pre = "scan %s: " % label
-            out = []
-            for line in data.splitlines():
-                i = line.find(pre)
-                if i >= 0:
-                    out.append(line[i + len(pre):])
-            return out
-        time.sleep(0.3)
-    return None
 
 GAME = "mineclone2"
 phase = 0

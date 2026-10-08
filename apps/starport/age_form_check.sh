@@ -13,17 +13,14 @@
 set -u
 . "$(dirname "$0")/../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
-t=$(mktemp -d)
-pid=
-trap '[ -n "$pid" ] && kill $pid 2>/dev/null; [ -n "${KEEP_TMP:-}" ] && echo "kept $t" || rm -rf "$t"' EXIT
-fail(){ echo "FAIL: $*"; exit 1; }
+check_tmp starport_age; t=$CHECK_TMP
 P=29886
 
 cd "$here/Build"
 start_server "$t/sp.log" "setup code" 120 $P \
 	bin/buildat_server -m ../apps/starport -D "$t/sp" -l 3 ||
 	fail "Starport did not start"
-pid=$SERVER_PID
+CHECK_PIDS+=($SERVER_PID)
 
 python3 -c 'import json, sys
 print(json.dumps([["nav", "${URL}id"], ["wait", 500],

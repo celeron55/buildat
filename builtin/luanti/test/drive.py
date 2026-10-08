@@ -28,6 +28,10 @@ import re
 import sys
 import time
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "..", "util"))
+import uidrive  # noqa: E402
+
 RES = 8
 # The radius of the voxel cube each turn's scan_volume carries
 VOLUME_R = 4
@@ -129,9 +133,7 @@ class State:
 BIN_RE = re.compile(
     r"bin (\d+),(\d+): (\S+)(?: at (-?\d+),(-?\d+),(-?\d+))?"
     r"(?: d=([\d.]+))?(?: via (\S+))?$")
-UI_RE = re.compile(
-    r"ui\s+(\w+) at (-?\d+),(-?\d+) size (\d+)x(\d+)(?: text \"(.*?)\")?"
-    r"(?: image \"(.*?)\")?")
+UI_RE = uidrive.UI_RE
 
 
 def parse(lines):

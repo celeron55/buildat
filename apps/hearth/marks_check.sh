@@ -14,17 +14,14 @@
 set -u
 . "$(dirname "$0")/../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
-t=$(mktemp -d)
-pid=
-trap '[ -n "$pid" ] && kill $pid 2>/dev/null; [ -n "${KEEP_TMP:-}" ] && echo "kept $t" || rm -rf "$t"' EXIT
-fail(){ echo "FAIL: $*"; exit 1; }
+check_tmp hearth_marks; t=$CHECK_TMP
 P=29885
 
 cd "$here/Build"
 start_server "$t/srv.log" "setup code" 120 $P \
 	bin/buildat_server --sim-clock -m ../apps/hearth -D "$t/srv" -l 3 ||
 	fail "Hearth did not start"
-pid=$SERVER_PID
+CHECK_PIDS+=($SERVER_PID)
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 
 client(){ # name password log requests [env...]

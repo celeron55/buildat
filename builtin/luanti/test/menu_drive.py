@@ -16,11 +16,14 @@ rung; until then full runs as world.
 """
 import os
 import re
+import sys
 import time
 
-UI_RE = re.compile(
-    r"ui\s+(\w+) at (-?\d+),(-?\d+) size (\d+)x(\d+)(?: text \"(.*?)\")?"
-    r"(?: image \"(.*?)\")?(?: (hidden))?$")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "..", "util"))
+import uidrive  # noqa: E402
+
+UI_RE = uidrive.UI_RE
 
 SCREEN_TIMEOUT_S = 90
 # A wait -- a compile of every module on empty paths, a download -- may
