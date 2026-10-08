@@ -24,37 +24,8 @@ if type(accounts) ~= "table" then
 	error("starport: could not load accounts.lua: " .. tostring(accounts_err))
 end
 
---
--- JSON out; in is buildat.parse_json.
--- simplified: an empty table goes as [], which every list the server
--- takes is, and no object it takes is ever empty
---
-local function encode(v)
-	local t = type(v)
-	if t == "nil" then
-		return "null"
-	elseif t == "boolean" or t == "number" then
-		return tostring(v)
-	elseif t == "string" then
-		return '"' .. v:gsub('[%c"\\]', function(c)
-			local map = {['"'] = '\\"', ['\\'] = '\\\\', ['\n'] = '\\n',
-				['\r'] = '\\r', ['\t'] = '\\t'}
-			return map[c] or string.format("\\u%04x", c:byte())
-		end) .. '"'
-	end
-	local out = {}
-	if next(v) == nil or v[1] ~= nil then
-		for _, x in ipairs(v) do
-			out[#out + 1] = encode(x)
-		end
-		return "[" .. table.concat(out, ",") .. "]"
-	end
-	for k, x in pairs(v) do
-		out[#out + 1] = encode(tostring(k)) .. ":" .. encode(x)
-	end
-	return "{" .. table.concat(out, ",") .. "}"
-end
-assert(encode({a = {1, "x\n"}}) == '{"a":[1,"x\\n"]}')
+-- JSON out; in is buildat.parse_json
+local encode = require("buildat/extension/network").write_json
 
 --
 -- Requests

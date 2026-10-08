@@ -60,8 +60,7 @@ page=$(grep -ao "hearth: page .*" "$t/back.log" | tail -1)
 [ "$page" = "hearth: page A new thread" ] ||
 	fail "the page after a restart: $page (typed: $(grep -ao 'hearth: page .*' "$t/type.log" | tail -1))"
 fields=$(grep -ao "hearth: fields .*" "$t/back.log" | tail -1)
-want='hearth: fields {"body":"first line\u000asecond line","title":"My title"}'
-alt='hearth: fields {"title":"My title","body":"first line\u000asecond line"}'
-[ "$fields" = "$want" ] || [ "$fields" = "$alt" ] ||
+want='hearth: fields {"body":"first line\nsecond line","title":"My title"}'
+[ "$fields" = "$want" ] ||
 	fail "the fields after a restart: $fields"
 echo "PASS: the new-thread page and its title and message come back after a restart; the Server window has both versions"

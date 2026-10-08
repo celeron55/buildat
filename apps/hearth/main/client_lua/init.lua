@@ -22,26 +22,8 @@ if type(accounts) ~= "table" then
 	error("hearth: could not load accounts.lua: " .. tostring(accounts_err))
 end
 
--- JSON out, for the flat requests this page sends
-local function encode(v)
-	if type(v) == "string" then
-		return '"' .. v:gsub('[%c"\\]', function(c)
-			return string.format("\\u%04x", c:byte())
-		end) .. '"'
-	elseif type(v) == "table" then
-		local out = {}
-		-- simplified: a table with v[1] is an array (no holes, no mixed keys)
-		if v[1] ~= nil then
-			for _, x in ipairs(v) do out[#out + 1] = encode(x) end
-			return "[" .. table.concat(out, ",") .. "]"
-		end
-		for k, x in pairs(v) do
-			out[#out + 1] = encode(tostring(k)) .. ":" .. encode(x)
-		end
-		return "{" .. table.concat(out, ",") .. "}"
-	end
-	return tostring(v)
-end
+-- JSON out; in is buildat.parse_json
+local encode = require("buildat/extension/network").write_json
 
 -- BUILDAT_HEARTH_RESUME=1 logs as a scripted client does, for its check
 local scripted = (buildat.get_env("BUILDAT_HEARTH_REQS") or "") ~= "" or

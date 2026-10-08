@@ -17,21 +17,8 @@ if type(accounts) ~= "table" then
 	error("aitta: could not load accounts.lua: " .. tostring(accounts_err))
 end
 
--- JSON out, for the flat requests this page sends
-local function encode(v)
-	if type(v) == "string" then
-		return '"' .. v:gsub('[%c"\\]', function(c)
-			return string.format("\\u%04x", c:byte())
-		end) .. '"'
-	elseif type(v) == "table" then
-		local out = {}
-		for k, x in pairs(v) do
-			out[#out + 1] = encode(tostring(k)) .. ":" .. encode(x)
-		end
-		return "{" .. table.concat(out, ",") .. "}"
-	end
-	return tostring(v)
-end
+-- JSON out; in is buildat.parse_json
+local encode = require("buildat/extension/network").write_json
 
 local next_id = 1
 local waiting = {}
