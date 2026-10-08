@@ -482,14 +482,14 @@ function M.new(magic, log, ctx)
 		for _, o in ipairs(order) do
 			local f = draw[o.n.kind]
 			local el = f and f(o.n, images)
+			-- Which UI element it was placed as, for the scan's rectangles
+			-- ([SCAN_EVENT]); none for one not drawn this time, whose
+			-- last one is gone
+			o.e.__placed = el or nil
 			if el == false or not f then
 				skipped[o.n.kind] = (skipped[o.n.kind] or 0) + 1
 				say_once("kind:" .. o.n.kind, "the game asked for a \"" ..
 						o.n.kind .. "\" HUD element, which is not drawn")
-			elseif el then
-				-- Which UI element it was placed as, for the scan's
-				-- rectangles ([SCAN_EVENT])
-				o.e.__placed = el
 			end
 		end
 		return skipped, images

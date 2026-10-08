@@ -50,7 +50,7 @@ bin/buildat -s localhost:29785 -w 1280x720 -l 3 \
 sleep 2
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
-edits=$(grep -a "scan scan: ui.*LineEdit" "$out/cli.log" | sed 's/.*text //')
+edits=$(grep -a "scan scan: ui.*LineEdit" "$out/cli.log" | sed 's/.*text \("[^"]*"\).*/\1/')
 echo "fields: $edits"
 if [ -z "$edits" ]; then echo "FAIL: no form field on the screen"; exit 1; fi
 if echo "$edits" | grep -q '"[^"]'; then echo "FAIL: the key typed into the field"; exit 1; fi

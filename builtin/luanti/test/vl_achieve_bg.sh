@@ -70,8 +70,10 @@ for path in sorted(glob.glob(sys.argv[1] + "/s*.png")):
     dark = lambda p: max(im.getpixel(p)) < 70
     near = lambda p, c: all(abs(a - b) <= 16 for a, b in
             zip(im.getpixel(p), c))
-    # The list's box, and the progress bar's grey under the description
-    if not dark((700, 400)) or not near((330, 495), (157, 157, 157)):
+    # The list's box at two points (a shadowed world passed for one), and
+    # the progress bar's grey under the description
+    if not dark((700, 400)) or not dark((900, 300)) or \
+            not near((330, 495), (157, 157, 157)):
         continue
     with_bar += 1
     # The panel's grey, whatever is behind
