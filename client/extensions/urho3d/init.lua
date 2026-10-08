@@ -790,7 +790,15 @@ add_global_event_handler("ElementRemoved", "__buildat_ui_dead",
 		local removed = data["Element"]:GetPtr("UIElement")
 		-- Weak too, and `true` for the same reason as magic_sandbox.live
 		local set = setmetatable({}, {__mode = "k"})
-		for element in pairs(subtree(removed, {})) do
+		local gone = subtree(removed, {})
+		-- A removed field kept alive by a wrapper kept the focus, and a
+		-- Return long after its dialog closed ran its TextFinished again
+		-- (aitta_publish_check, 2026-10-08)
+		local focus = ui:GetFocusElement()
+		if focus and gone[focus] then
+			ui:SetFocusElement(nil)
+		end
+		for element in pairs(gone) do
 			local wrappers = magic_sandbox.live[element]
 			if wrappers then
 				local why = "UIElement " .. dump(element:GetName()) ..
