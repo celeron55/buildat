@@ -61,7 +61,7 @@ luanti_hud.minimap = buildat.run_extension_file("res/minimap.lua")
 luanti_hud.hotbar = buildat.run_extension_file("res/hotbar.lua")
 local sounds = buildat.run_extension_file("sounds.lua")
 local formspec = buildat.run_extension_file("res/formspec.lua")
-local formspec_ui = buildat.run_extension_file("formspec_ui.lua")
+local formspec_ui = buildat.run_extension_file("res/formspec_ui.lua")
 local objects = buildat.run_extension_file("objects.lua")
 local M = {safe = nil}
 
@@ -1852,6 +1852,9 @@ local function show_client(host, port, name, password, mode, origin)
 			texture = media_texture,
 			item_image = item_image,
 			style = style,
+			white = "luanti_client/res/white.png",
+			formspec = formspec,
+			hud = luanti_hud,
 			-- Where a list[] element's slots come from: the player's own
 			-- inventory, one the server has detached, or the one that hangs
 			-- off a voxel, which is what a chest's slots are.

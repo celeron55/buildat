@@ -2428,6 +2428,10 @@ local ok_ui, err_ui, formspec_ui =
 if not ok_ui or type(formspec_ui) ~= "table" then
 	error("luanti: could not load formspec_ui.lua: " .. tostring(err_ui))
 end
+local ok_hud, err_hud, hud = buildat.run_script_file("luanti/hud.lua")
+if not ok_hud or type(hud) ~= "table" then
+	error("luanti: could not load hud.lua: " .. tostring(err_hud))
+end
 
 -- item name -> the expression it is drawn as; see core.__item_images()
 local item_images = {}
@@ -3139,6 +3143,8 @@ local function make_ui()
 		-- A plain white pixel, which a box or a tint is drawn with. Composed
 		-- rather than shipped: it is one operation and one file either way.
 		white = texture_of("[fill:1x1:#ffffffff"),
+		formspec = formspec,
+		hud = hud,
 	})
 	return ui
 end

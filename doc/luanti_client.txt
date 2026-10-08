@@ -270,7 +270,8 @@ sounds.lua      PLAY_SOUND and friends, and the sound groups a game's media
                 falls into
 res/formspec.lua The elements of a formspec, and where they go; served by
                 the luanti module too
-formspec_ui.lua A formspec on the screen, as Urho3D UI elements
+res/formspec_ui.lua A formspec on the screen, as Urho3D UI elements; the luanti
+                module serves the same file
 res/texmod.lua  Luanti's texture modifier language, as compose_image()
                 operations; the luanti module serves the same file
 world.lua       The scene: a node per map block, with buildat's voxel mesher

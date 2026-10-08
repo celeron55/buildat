@@ -1,13 +1,12 @@
--- Buildat: builtin/luanti/client_lua/formspec_ui.lua
+-- Buildat: extensions/luanti_client/res/formspec_ui.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 -- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
--- Copied from extensions/luanti_client/formspec_ui.lua, which is where it was written
--- and where its own history is; edit it there and copy it here, or the other
--- way round, rather than letting the two drift.
--- Two lines differ: how formspec.lua and hud.lua are loaded, and that the
--- white image comes from ctx rather than from the extension's own res/.
+-- Shared by both Luanti clients: the extension runs it as res/formspec_ui.lua
+-- and the luanti module serves it to its own client as luanti/formspec_ui.lua
+-- ([LUANTI_SHARED]). Each passes in its own formspec.lua, hud.lua and white
+-- image through ctx.
 --
 -- A formspec on the screen, out of Urho3D's UI elements.
 --
@@ -24,9 +23,6 @@
 -- The elements that are not implemented are counted and named once, which is
 -- what says whether it is worth implementing the next one; styles and the
 -- list ring are deliberately ignored rather than missing.
-
-local _, _, formspec = buildat.run_script_file("luanti/formspec.lua")
-local _, _, hud = buildat.run_script_file("luanti/hud.lua")
 
 local M = {}
 
@@ -55,9 +51,11 @@ local IGNORED = {
 --   without it a Text element has no font and draws nothing at all
 -- ctx.white is a plain white image, which is what a box or a tint is drawn
 --   with
+-- ctx.formspec and ctx.hud are the client's formspec.lua and hud.lua
 function M.new(magic, buildat, log, ctx)
 	local self = {}
 	local WHITE = ctx.white
+	local formspec, hud = ctx.formspec, ctx.hud
 	local unknown = {}
 
 	-- Urho3D sorts an element's children by priority and the sort is not a
@@ -422,51 +420,31 @@ function M.new(magic, buildat, log, ctx)
 		end
 	end
 
-	-- The hotbar and the health bar, which are not a formspec at all: the
-	-- game describes them as HUD elements and this draws the two of them a
-	-- player needs to see, out of the inventory and the hit points.
+	-- The health bar, which is not a formspec at all: the game describes it
+	-- as a HUD element and this draws the one a player needs to see, out of
+	-- the hit points. The hotbar beside it is luanti/hotbar.lua, the row
+	-- both Luanti clients share ([EXT_HOTBAR]).
 	--
-	-- simplified: not the game's own HUD. This server sends a hundred HUD
-	-- elements -- its own hearts, its bubbles, its armour bar, its crosshair
-	-- -- and none of them are drawn; what is drawn is a hotbar of the first
-	-- slots of the player's main list and a bar for the hit points. The
-	-- upgrade path is HUDADD and its friends.
+	-- simplified: not the game's own healthbar element -- its hearts, its
+	-- bubbles, its armour bar are drawn by hud_elements() only as far as
+	-- statbars go, and this is what is left when the game has none.
 	--
-	-- Returns the element it all went under, for the caller to take away
-	-- again when it changes.
-	function self:hud(root, list, count, wield, hp, hp_max, screen_w,
-			screen_h)
+	-- x0, y0 and width are where the hotbar's row is; the bar sits just
+	-- above it. Returns the element it went under, for the caller to take
+	-- away again when it changes.
+	function self:health_bar(root, hp, hp_max, x0, y0, width, slot)
 		depth = 0
 		local holder = root:CreateChild("UIElement")
 		if ctx.style then
 			holder.defaultStyle = ctx.style
 		end
-		local slot = math.floor(math.min(screen_w, screen_h) / 15)
-		local step = math.floor(slot * 1.1)
-		local width = step * count
-		local x0 = math.floor((screen_w - width) / 2)
-		local y0 = screen_h - slot - math.floor(slot * 0.5)
-
-		for i = 1, count do
-			local x = x0 + (i - 1) * step
-			local stack = list and list.items[i] or nil
-			-- The wielded slot is the lighter one, which is how a hotbar
-			-- says which it is
-			box(holder, x, y0, slot, slot, i == wield and
-					magic.Color(0.9, 0.9, 0.9, 0.55) or
-					magic.Color(0, 0, 0, 0.45))
-			draw_stack(holder, x, y0, slot, stack)
-		end
-
-		if hp and hp_max and hp_max > 0 then
-			local bar_h = math.max(3, math.floor(slot * 0.14))
-			local y = y0 - bar_h - 4
-			box(holder, x0, y, width, bar_h, magic.Color(0, 0, 0, 0.5))
-			local filled = math.floor(width * math.min(hp, hp_max) / hp_max)
-			if filled > 0 then
-				box(holder, x0, y, filled, bar_h,
-						magic.Color(0.85, 0.15, 0.15, 0.9))
-			end
+		local bar_h = math.max(3, math.floor(slot * 0.14))
+		local y = y0 - bar_h - 4
+		box(holder, x0, y, width, bar_h, magic.Color(0, 0, 0, 0.5))
+		local filled = math.floor(width * math.min(hp, hp_max) / hp_max)
+		if filled > 0 then
+			box(holder, x0, y, filled, bar_h,
+					magic.Color(0.85, 0.15, 0.15, 0.9))
 		end
 		return holder
 	end
@@ -479,8 +457,10 @@ function M.new(magic, buildat, log, ctx)
 	-- The HUD the server describes, as one element holding all of it.
 	--
 	-- elements is hud.lua's elements keyed by id. What comes back is the
-	-- holder and a count per element type that is not drawn, so that the
-	-- caller can say once what is missing.
+	-- holder, a count per element type that is not drawn so that the caller
+	-- can say once what is missing, and where each image element landed --
+	-- a game draws its hotbar's background as one of those and it has to
+	-- sit against the row ([EXT_HOTBAR]).
 	--
 	-- simplified: images, text and statbars are drawn, which is what this
 	-- game's hundred elements nearly all are. A waypoint and an image
@@ -516,6 +496,7 @@ function M.new(magic, buildat, log, ctx)
 		end)
 
 		local skipped = {}
+		local images = {}
 		for _, entry in ipairs(order) do
 			local e = entry.e
 			if e.type == hud.ELEM.IMAGE then
@@ -530,6 +511,9 @@ function M.new(magic, buildat, log, ctx)
 						el.size = magic.IntVector2(w, h)
 						set_picture(el, tex)
 						el.priority = next_priority()
+						images[#images + 1] = {name = e.text,
+								x = math.floor(x), y = math.floor(y),
+								w = w, h = h}
 					end
 				end
 			elseif e.type == hud.ELEM.TEXT then
@@ -572,7 +556,7 @@ function M.new(magic, buildat, log, ctx)
 				skipped[e.type] = (skipped[e.type] or 0) + 1
 			end
 		end
-		return holder, skipped
+		return holder, skipped, images
 	end
 
 	-- show(root, elements, layout, screen_w, screen_h)
