@@ -126,6 +126,11 @@ end
 -- PageUp and PageDown move this many items ([MENU_FAST_SCROLL])
 local PAGE = 10
 
+-- A dropdown's popup was up at the last Update (M.safe.dropdown)
+local drop_open = false
+-- One closed its popup on this frame's Escape
+local escape_taken = false
+
 -- How many rows one wheel click moves in a menu of n items in rows of
 -- columns: a list of any length is crossed in 10 to 20 clicks
 local function wheel_step(n, columns)
@@ -308,6 +313,10 @@ local function button_menu_nav(root, options)
 		if on_other_key and on_other_key(key) == true then
 			return
 		end
+		-- A dropdown's popup has the keys
+		if drop_open then
+			return
+		end
 		if key == KEY_ESCAPE and magic.input:GetKeyPress(key) then
 			local back = nav:back_item()
 			if back then
@@ -351,7 +360,7 @@ local function button_menu_nav(root, options)
 	-- ([MENU_FAST_SCROLL]): a row a click up to 20 rows, two up to 40,
 	-- so any list is crossed in 10 to 20 clicks.
 	root:SubscribeToStackEvent("MouseWheel", function(event_type, event_data)
-		if #items == 0 then
+		if #items == 0 or drop_open then
 			return
 		end
 		by_mouse = false
@@ -403,10 +412,6 @@ local function button_menu_nav(root, options)
 	return nav
 end
 
--- A dropdown's popup was up at the last Update (M.safe.dropdown)
-local drop_open = false
--- One closed its popup on this frame's Escape
-local escape_taken = false
 -- The one closed last by a pick or Escape, for its focus back on the next
 -- frame: a modal popup takes the dropdown's top-level element along under
 -- the modal root and puts it back as it closes, the focus is lost on the
@@ -777,6 +782,16 @@ function M.safe.vertical_menu(root, options)
 	function menu:on_key(fn)
 		nav:on_key(fn)
 		return self
+	end
+
+	-- A choice of one: M.safe.dropdown with `label` before it, an item
+	-- the arrows reach like the buttons; Enter opens it
+	function menu:add_dropdown(label, choices, current, on_choose, opts)
+		opts = opts or {}
+		opts.label = label
+		local d = M.safe.dropdown(window, choices, current, on_choose, opts)
+		nav:add(d, function() end)
+		return d
 	end
 
 	return menu
@@ -1292,6 +1307,12 @@ drops_update = function()
 			kept[#kept + 1] = d
 			if d.showPopup then
 				open = true
+				-- Opened by a click, the press gives the focus back to
+				-- the dropdown after the popup took it: the arrows went
+				-- nowhere
+				if d:HasFocus() then
+					d.listView:SetFocus(true)
+				end
 			elseif shown(d) then
 				if d.placeholder.width ~= d.width - 28 then
 					d.placeholder:SetFixedWidth(d.width - 28)

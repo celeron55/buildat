@@ -671,40 +671,31 @@ function draw_settings(paths)
 			waiting("Loading settings...")
 		end)
 	end)
-	-- The mode a session draws in, unless BUILDAT_LUANTI_PBR says
-	-- otherwise ([RENDER_MODES]); the current one marked
-	local modes = menu.window:CreateChild("Text")
-	modes:SetStyleAuto()
-	modes:SetText("Render mode (the next session's; BUILDAT_LUANTI_PBR overrides):")
-	for _, m in ipairs({"pbr", "shadows", "unlit"}) do
-		menu:add((m == mode and "[x] " or "[ ] ") .. m, function()
-			mode = m
-			local list = {}
-			for _, p in ipairs(paths) do
-				list[#list + 1] = p
-			end
-			send(list)
-		end)
+	local function resend()
+		local list = {}
+		for _, p in ipairs(paths) do
+			list[#list + 1] = p
+		end
+		send(list)
 	end
+	-- The mode a session draws in, unless BUILDAT_LUANTI_PBR says
+	-- otherwise ([RENDER_MODES])
+	menu:add_dropdown("Render mode (the next session's)",
+			{"pbr", "shadows", "unlit"}, mode, function(m)
+		mode = m
+		resend()
+	end)
 	-- The viewing range ([VIEW_RANGE]): how far the server sends, the
 	-- client meshes and the camera draws; 120 unless set, so a new
 	-- install does not bet on a strong computer. Applied at once in a
 	-- running world, and to the next one.
 	-- simplified: the five picks; a number field for the rest when
 	-- somebody wants 90.
-	local range_text = menu.window:CreateChild("Text")
-	range_text:SetStyleAuto()
-	range_text:SetText("View range, in nodes (farther is slower):")
-	for _, r in ipairs({"60", "120", "200", "300", "400"}) do
-		menu:add((r == view_range and "[x] " or "[ ] ") .. r, function()
-			view_range = r
-			local list = {}
-			for _, p in ipairs(paths) do
-				list[#list + 1] = p
-			end
-			send(list)
-		end)
-	end
+	menu:add_dropdown("View range, in nodes (farther is slower)",
+			{"60", "120", "200", "300", "400"}, view_range, function(r)
+		view_range = r
+		resend()
+	end)
 	-- How far full detail reaches, as a share of the range above
 	-- ([CLIENT_FRAME]): past it a chunk is meshed from a downsampled
 	-- volume -- a quarter of the triangles at the first step, and a
@@ -714,20 +705,12 @@ function draw_settings(paths)
 	-- 55 at half, and on its Nvidia the same change is worth almost
 	-- nothing. Full is the default, so nobody pays for the distance who
 	-- is not short of GPU.
-	local lod_text = menu.window:CreateChild("Text")
-	lod_text:SetStyleAuto()
-	lod_text:SetText("Distant terrain detail (less is faster):")
-	for _, d in ipairs({{"full", "Full"}, {"half", "Reduced past half range"},
-			{"third", "Reduced past a third"}}) do
-		menu:add((d[1] == lod_detail and "[x] " or "[ ] ") .. d[2], function()
-			lod_detail = d[1]
-			local list = {}
-			for _, p in ipairs(paths) do
-				list[#list + 1] = p
-			end
-			send(list)
-		end)
-	end
+	menu:add_dropdown("Distant terrain detail (less is faster)",
+			{{"Full", "full"}, {"Reduced past half range", "half"},
+			{"Reduced past a third", "third"}}, lod_detail, function(d)
+		lod_detail = d
+		resend()
+	end)
 	-- View bobbing ([VIEW_BOB]): official's view_bobbing_amount, 1 or off
 	-- simplified: on or off; the amount when somebody wants 0.5
 	menu:add((view_bobbing ~= "0" and "[x] " or "[ ] ") .. "View bobbing",
@@ -1002,27 +985,15 @@ function draw_new_save_name(gameid, state)
 			b:GetChild("ButtonText"):SetText((flags[f[1]] and "[x] " or "[ ] ") .. f[2])
 		end)
 	end
-	-- Which mapgen, one button each with the picked one marked: the same
-	-- shape as the flags above, and the sandbox has no dropdown
+	-- Which mapgen
 	local offered = game_mapgens[gameid] or MAPGENS
 	if #offered == 0 then
 		offered = MAPGENS
 	end
 	local mapgen = state.mapgen or offered[1]
-	local mapgen_buttons = {}
-	for _, name in ipairs(offered) do
-		local b
-		b = menu:add((mapgen == name and "[x] " or "[ ] ") .. "mapgen " ..
-				name, function()
-			mapgen = name
-			for other, ob in pairs(mapgen_buttons) do
-				ob:GetChild("ButtonText"):SetText(
-						(mapgen == other and "[x] " or "[ ] ") ..
-						"mapgen " .. other)
-			end
-		end)
-		mapgen_buttons[name] = b
-	end
+	menu:add_dropdown("Mapgen", offered, mapgen, function(name)
+		mapgen = name
+	end)
 	-- Over a running world a new one is only made ([VANILLA_PUBLIC] 5)
 	menu:add(public == "public_running" and "Create" or "Create and play",
 			function()
@@ -1275,19 +1246,10 @@ local function draw_game_settings(flat, perf)
 						values[#values + 1] = v
 					end
 				end
-				local b
-				b = button_on(menu, row, value, function()
-					local now = changed[it.name] or it.value
-					local next_v = values[1]
-					for k, v in ipairs(values) do
-						if v == now then
-							next_v = values[k % #values + 1]
-						end
-					end
-					changed[it.name] = next_v
-					b:GetChild("ButtonText"):SetText(next_v)
+				menu:add(ui_utils.dropdown(row, values, value, function(v)
+					changed[it.name] = v
 					label:SetText(it.label .. "  *")
-				end, control_w)
+				end, {width = control_w}), function() end)
 			else
 				local edit = row:CreateChild("LineEdit")
 				edit:SetStyleAuto()

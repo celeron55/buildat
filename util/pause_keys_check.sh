@@ -7,11 +7,11 @@
 # from the world -- a jump cycled the view range and the volume. close() now
 # calls magic.ui:SetFocusElement(nil).
 #
-# Driven in a minimal world: open the pause menu, click the view-range button
-# to focus it (logs "view range: N"), close the menu with Escape, then jump
-# five times with Space. With the focus cleared the jumps reach the world and
-# the range is unchanged; with the bug the detached button fires and the range
-# cycles, logging more "view range:" lines.
+# Driven in a minimal world: open the pause menu, pick a view range from its
+# dropdown, which leaves it focused (logs "view range: N"), close the menu
+# with Escape, then jump five times with Space. With the focus cleared the
+# jumps reach the world and the range is unchanged; with the bug the detached
+# control fires, logging more "view range:" lines.
 #
 # Scripted keypresses are dropped now and then (a known flake of the driver),
 # so a run only counts when it is conclusive: the click registered AND the menu
@@ -43,16 +43,16 @@ start_server "$t/srv.log" "STATUS Listening" 120 "$port" \
 	fail "server did not listen"
 srv=$SERVER_PID
 
-# The view-range button sits mid-window in the pause menu; at 1000x700 its
+# The view-range dropdown sits mid-window in the pause menu; at 1000x700 its
 # centre is about here (confirmed from a screenshot).
-BTN_X=500
-BTN_Y=443
+BTN_X=596
+BTN_Y=445
 
 # A line logged by sky_now.set_range alone, not the F5 status line (which has
 # the range mid-string): "<ts> I vanilla : view range: N" and nothing after.
 vr_changes(){ nolog "$1" | grep -cE 'vanilla : view range: [0-9]+$'; }
 # The F5 status line, printed only when the menu is not holding input.
-menu_closed(){ nolog "$1" | grep -qE 'vanilla : FPS:.*view range:'; }
+menu_closed(){ nolog "$1" | grep -qE 'vanilla : .*FPS:.*view range:'; }
 
 run_drive(){
 	{
@@ -65,6 +65,10 @@ run_drive(){
 		echo "delay 1200"
 		echo "mouse_pos $BTN_X $BTN_Y"
 		echo "mouse_click left"
+		echo "delay 500"
+		echo "keypress Up"
+		echo "delay 200"
+		echo "keypress Return"
 		echo "delay 1000"
 		echo "keypress Escape"
 		echo "delay 1000"
@@ -87,7 +91,7 @@ for a in 1 2 3 4 5; do
 		fail "client did not reach the world
 $(nolog "$log" | grep -iE 'error|refused|luanti' | tail -5)"
 	vr=$(vr_changes "$log")
-	# The click must have cycled the range once, or the menu/button was not
+	# The pick must have changed the range once, or the menu/button was not
 	# where expected; and F5 afterwards must prove the menu actually closed.
 	if [ "$vr" -ge 1 ] && menu_closed "$log"; then
 		conclusive=1
@@ -101,7 +105,7 @@ done
 # did not reach the focused button; more means the button fired from the world.
 if [ "$vr" -gt 1 ]; then
 	fail "after the pause menu closed, Space still worked the focused view-range \
-button ($vr range changes, expected 1) -- the UI focus is not being cleared in \
+dropdown ($vr range changes, expected 1) -- the UI focus is not being cleared in \
 pause.lua close()"
 fi
 

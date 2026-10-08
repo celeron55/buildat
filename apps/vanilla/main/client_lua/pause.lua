@@ -16,6 +16,7 @@
 local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
 local luanti = require("buildat/module/luanti")
+local ui_utils = require("buildat/extension/ui_utils")
 
 local _, err, accounts = buildat.run_script_file("accounts/accounts.lua")
 if type(accounts) ~= "table" then
@@ -100,27 +101,13 @@ local function close()
 	magic.ui:SetFocusElement(nil)
 end
 
--- Each click: muted -> 0 dB, then down the ladder in 6 dB steps, then
--- muted again. Six clicks round rather than eleven, a pause menu being
--- somewhere a player passes through; the settings screen has every step.
--- buildat.set_sound is the one preference a game may write ("Client
+-- muted, or 0 dB down to -30 in 6 dB steps; the settings screen has every
+-- step. buildat.set_sound is the one preference a game may write ("Client
 -- preferences" in doc/client_api.txt). **In decibels, as every volume in
 -- the tree is** ([VOLUME_LAW])
-local function cycle_sound()
-	local mute, db = buildat.get_sound()
-	if mute then
-		buildat.set_sound(false, 0)
-	elseif db > -30 then
-		buildat.set_sound(false, math.max(-30, db - 6))
-	else
-		buildat.set_sound(true, 0)
-	end
-end
-
-local function sound_text()
-	local mute, db = buildat.get_sound()
-	return mute and "Sound: muted" or (db <= -33 and "Sound: off" or
-			string.format("Sound: %d dB", db))
+local SOUNDS = {{"muted", "muted"}}
+for db = 0, -30, -6 do
+	SOUNDS[#SOUNDS + 1] = {db .. " dB", db}
 end
 
 -- Held while a screen that takes Escape as its own Back is up (the key
@@ -198,66 +185,43 @@ open = function()
 	accounts.page_button(w, "Chat...", function()
 		page(function() accounts.chat_page(open) end, open)
 	end)
-	local s
-	s = accounts.page_button(w, sound_text(), function()
-		cycle_sound()
-		s:GetChild(0):SetText(sound_text())
-	end)
+	local mute, db = buildat.get_sound()
+	ui_utils.dropdown(w, SOUNDS, mute and "muted" or db, function(v)
+		buildat.set_sound(v == "muted", v == "muted" and 0 or v)
+	end, {label = "Sound", fill = true})
 	-- The engine's render_scale: the 3D drawn at a share of the window's
-	-- pixels, the UI sharp. Each press the next step down from automatic
-	-- (the client's choice, made again on each start and resize), round to
-	-- automatic again; the web has no launcher to set it in.
-	local SCALES = {1, 0.75, 0.67, 0.5, 0.33, 0.25}
-	local function scale_text()
-		local now, auto = buildat.get_render_scale()
-		return string.format("Render scale: %s%d %%", auto and "automatic, "
-				or "", math.floor(now * 100 + 0.5))
-	end
-	local rs
-	rs = accounts.page_button(w, scale_text(), function()
-		local now, auto = buildat.get_render_scale()
-		local nxt = "auto"
-		if auto then
-			nxt = SCALES[1]
-		else
-			for _, v in ipairs(SCALES) do
-				if v < now - 0.001 then
-					nxt = v
-					break
-				end
-			end
+	-- pixels, the UI sharp. Automatic is the client's choice, made again on
+	-- each start and resize; the web has no launcher to set it in.
+	local scales = {{"automatic", "auto"}}
+	local now, auto = buildat.get_render_scale()
+	local scale = auto and "auto" or nil
+	for _, v in ipairs({1, 0.75, 0.67, 0.5, 0.33, 0.25}) do
+		scales[#scales + 1] = {math.floor(v * 100 + 0.5) .. " %", v}
+		if not auto and math.abs(v - now) < 0.005 then
+			scale = v
 		end
-		buildat.set_render_scale(nxt)
-		rs:GetChild(0):SetText(scale_text())
-	end)
+	end
+	ui_utils.dropdown(w, scales, scale, function(v)
+		buildat.set_render_scale(v)
+	end, {label = "Render scale", fill = true})
 	-- **The viewing range, the player's own** (user, 2026-09-30), kept on
-	-- this client for this server: each press the next step, round to the
-	-- nearest again, never over what the server allows (keys.view in
-	-- init.lua). A web client starts lower, and a fast one can go up.
+	-- this client for this server, never over what the server allows
+	-- (keys.view in init.lua). A web client starts lower, and a fast one
+	-- can go up.
 	local view = o.keys.view
 	if view then
-		local STEPS = {40, 60, 80, 120, 160, 240, 360, 500, 800}
-		local function view_text()
-			return "View range: " .. view.current() ..
-					((buildat.storage_read("view_range") or "") == "" and
-					" (default)" or "")
+		local steps = {}
+		for _, n in ipairs({40, 60, 80, 120, 160, 240, 360, 500, 800}) do
+			if n < view.ceiling then
+				steps[#steps + 1] = tostring(n)
+			end
 		end
-		local vb
-		vb = accounts.page_button(w, view_text(), function()
-			local now, nxt = view.current(), nil
-			for _, n in ipairs(STEPS) do
-				if n > now and n <= view.ceiling then
-					nxt = n
-					break
-				end
-			end
-			-- The server's own number is the last step when it is not one
-			if not nxt and now < view.ceiling then
-				nxt = view.ceiling
-			end
-			view.choose(nxt or math.min(STEPS[1], view.ceiling))
-			vb:GetChild(0):SetText(view_text())
-		end)
+		steps[#steps + 1] = tostring(view.ceiling)
+		ui_utils.dropdown(w, steps, tostring(view.current()), function(v)
+			view.choose(tonumber(v))
+		end, {label = "View range" ..
+				((buildat.storage_read("view_range") or "") == "" and
+				" (default)" or ""), fill = true, none = tostring(view.current())})
 	end
 	if account.public then
 		-- My account... local or not ([ACCOUNT_BUTTON]); the way to
