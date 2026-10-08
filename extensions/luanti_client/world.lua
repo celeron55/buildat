@@ -552,15 +552,11 @@ function M.new(magic, buildat, log, options)
 	local SHADOW_NEAR = 24    -- nodes; the first cascade
 	local SHADOW_FAR = 96     -- and the second, which is the shadow distance
 	-- What a lit face gets from the sun, against the sky as the ambient.
-	-- res/PBRVoxel's light pass is albedo * E * n.l / pi, so sunlit sand
-	-- at this exposure is about 0.4 * 3 / pi * 1.6, on the tone curve's
-	-- shoulder and not past it. It was 50 for Urho's own chain, which
-	-- divided by pi twice; under the one pi that whitened every sunlit
-	-- face at noon ([LUANTI_PBR_EXPOSURE], 2026-10-05: 95% of the ground
-	-- clipped at 50, 35% at 5, none at 3).
+	-- res/PBRVoxel's light pass is albedo * E * n.l / pi. The metered
+	-- exposure takes the absolute level; this is the sun against the sky
+	-- ([LUANTI_PBR_EXPOSURE], 2026-10-05: 50 was for Urho's own chain,
+	-- which divided by pi twice).
 	local SUN_BRIGHTNESS = 3.0
-	-- How far past the tone curve's middle the frame is exposed
-	local TONEMAP_EXPOSURE = 1.6
 	-- What the sun's disc is drawn at, in the same units: well past white, so
 	-- that the tone curve leaves it white and the bloom finds it
 	local SUN_DISC_OVEREXPOSURE = 6.0
@@ -817,17 +813,33 @@ function M.new(magic, buildat, log, options)
 	if pbr then
 		magic.renderer.HDRRendering = true
 		local rp = viewport.renderPath:Clone()
+		-- Vanilla's chain, vanilla being the reference ([LC_PBR_PARITY]):
+		-- the exposure metered before the bloom, the bloom a glow on what
+		-- clips, Uncharted2 with no bias on top of the meter. See
+		-- apps/vanilla/main/client_lua/init.lua for where each number
+		-- was picked.
+		rp:Append(magic.cache:GetResource("XMLFile",
+				"luanti_client/res/LuantiAutoExposure.xml"))
 		rp:Append(magic.cache:GetResource("XMLFile",
 				"PostProcess/BloomHDR.xml"))
 		rp:Append(magic.cache:GetResource("XMLFile",
 				"PostProcess/Tonemap.xml"))
 		rp:Append(magic.cache:GetResource("XMLFile",
 				"PostProcess/GammaCorrection.xml"))
-		-- Tonemap.xml ships with Reinhard on; Uncharted2 keeps more contrast
-		-- in the shadows, which on a world lit by one sun is most of it
 		rp:SetEnabled("TonemapReinhardEq3", false)
 		rp:SetEnabled("TonemapUncharted2", true)
-		rp:SetShaderParameter("TonemapExposureBias", TONEMAP_EXPOSURE)
+		rp:SetShaderParameter("AutoExposureAdaptRate", 0.6)
+		-- The floor is vanilla's 0.003 in vanilla's units, which are about
+		-- sixty times these (its sun is 195 against 3): at 0.003 the night
+		-- metered up to day, and 0.15 puts the pair's night and torch-lit
+		-- room either side of vanilla's (builtin/luanti/test/pbr_pair.sh)
+		rp:SetShaderParameter("AutoExposureLumRange",
+				magic.Vector2(0.15, 7.0))
+		rp:SetShaderParameter("AutoExposureMiddleGrey", 0.18)
+		rp:SetShaderParameter("BloomHDRThreshold", 1.2)
+		rp:SetShaderParameter("BloomHDRMix", magic.Vector2(1.0, 0.03))
+		rp:SetShaderParameter("TonemapExposureBias", 1.0)
+		rp:SetShaderParameter("TonemapMaxWhite", 2.0)
 		viewport.renderPath = rp
 	end
 
