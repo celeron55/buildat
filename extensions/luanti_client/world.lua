@@ -2733,7 +2733,7 @@ function M.new(magic, buildat, log, options)
 			entry.node.rotation = magic.Quaternion(0, -(obj.yaw or 0), 0)
 			entry.at_yaw = obj.yaw or 0
 		end
-		entry.lit_at = daylight
+		entry.lit_at = daylight and math.floor(daylight * 256)
 		light_object(entry, obj.position[1], obj.position[2], obj.position[3])
 
 		-- Cleared whatever the object is drawn as: a cube's tiles go on
@@ -3188,6 +3188,7 @@ function M.new(magic, buildat, log, options)
 	self.self_pose = nil
 
 	function self:place_objects(objects, dtime)
+		local day_step = daylight and math.floor(daylight * 256)
 		for id, obj in pairs(objects) do
 			local entry = object_nodes[id]
 			-- The player's own object carries no position from the server
@@ -3210,7 +3211,15 @@ function M.new(magic, buildat, log, options)
 					entry.at_x, entry.at_y, entry.at_z = x, y, z
 					entry.node.position = magic.Vector3(x,
 							y + (entry.offset or 0), z)
-					entry.lit_at = nil
+					-- Its light is its node's (object_color()), so a move
+					-- within the node keeps it
+					local nx, ny, nz = math.floor(x + 0.5),
+							math.floor(y + 0.5), math.floor(z + 0.5)
+					if nx ~= entry.lit_x or ny ~= entry.lit_y or
+							nz ~= entry.lit_z then
+						entry.lit_x, entry.lit_y, entry.lit_z = nx, ny, nz
+						entry.lit_at = nil
+					end
 				end
 				if entry.spin and entry.spin ~= 0 and dtime then
 					-- A dropped node turns on the spot; the server sends no
@@ -3223,8 +3232,11 @@ function M.new(magic, buildat, log, options)
 					entry.at_yaw = yaw
 					entry.node.rotation = magic.Quaternion(0, -yaw, 0)
 				end
-				if entry.lit_at ~= daylight then
-					entry.lit_at = daylight
+				-- By a step of the daylight rather than its every move:
+				-- it eases each frame, and light_object() keeps only a
+				-- 1/32 step of the colour anyway
+				if entry.lit_at ~= day_step then
+					entry.lit_at = day_step
 					light_object(entry, x, y, z)
 				end
 			end
@@ -3757,6 +3769,9 @@ function M.new(magic, buildat, log, options)
 	local SKY_EASE_SNAP = 0.35
 
 	local sky_eased = {}
+	-- When apply_daylight() last set the sky's parameters that only the
+	-- game changes; nil when it has changed them
+	local sky_static_at = nil
 
 	local function sky_share(dtime)
 		if dtime <= 0 then
@@ -4012,72 +4027,79 @@ function M.new(magic, buildat, log, options)
 			sky_material:SetShaderParameter("StarFade", math.max(day_opacity,
 					math.max(0, math.min(1, (0.25 - brightness) * 6))))
 
-			-- What the game says is up there, and how much of it
-			local sun = sky_bodies.sun
-			local moon = sky_bodies.moon
-			local stars = sky_bodies.stars
-			-- The textures, if the game gave any and the media has arrived.
-			-- A body whose texture is not there wears the shader's own
-			-- colour until it is: the sky is drawn from the first frame and
-			-- the media comes later.
-			local sun_texture = sun.visible and sun.texture and
-					sun.texture ~= "" and media_texture and
-					media_texture(sun.texture) or nil
-			local moon_texture = moon.visible and moon.texture and
-					moon.texture ~= "" and media_texture and
-					media_texture(moon.texture) or nil
-			if sun_texture then
-				sky_material:SetTexture(0, game_texture(sun_texture))
+			-- What the game says is up there, and how much of it: set when
+			-- it says something new and once a second besides, for a
+			-- texture whose media has arrived since. None of it moves with
+			-- the time of day.
+			if not sky_static_at or
+					scene.elapsedTime >= sky_static_at + 1 then
+				sky_static_at = scene.elapsedTime
+				local sun = sky_bodies.sun
+				local moon = sky_bodies.moon
+				local stars = sky_bodies.stars
+				-- The textures, if the game gave any and the media has arrived.
+				-- A body whose texture is not there wears the shader's own
+				-- colour until it is: the sky is drawn from the first frame and
+				-- the media comes later.
+				local sun_texture = sun.visible and sun.texture and
+						sun.texture ~= "" and media_texture and
+						media_texture(sun.texture) or nil
+				local moon_texture = moon.visible and moon.texture and
+						moon.texture ~= "" and media_texture and
+						media_texture(moon.texture) or nil
+				if sun_texture then
+					sky_material:SetTexture(0, game_texture(sun_texture))
+				end
+				if moon_texture then
+					sky_material:SetTexture(1, game_texture(moon_texture))
+				end
+				sky_material:SetShaderParameter("SunTextured",
+						sun_texture and 1 or 0)
+				sky_material:SetShaderParameter("MoonTextured",
+						moon_texture and 1 or 0)
+				-- How far past white the disc is drawn. On the PBR path the
+				-- frame is tone mapped, so this is a real multiplier and what
+				-- the bloom around the sun comes from; on the vanilla path the
+				-- frame clips at one and a little past it is all that is wanted.
+				sky_material:SetShaderParameter("SunOverexposure",
+						pbr and SUN_DISC_OVEREXPOSURE or 1.5)
+				sky_material:SetShaderParameter("SunSize",
+						sun.visible and SUN_HALF * (sun.scale or 1) or 0)
+				sky_material:SetShaderParameter("MoonSize",
+						moon.visible and MOON_HALF * (moon.scale or 1) or 0)
+				sky_material:SetShaderParameter("StarDensity",
+						stars.visible and STAR_DENSITY_DEFAULT *
+						(stars.count or STARS_DEFAULT) / STARS_DEFAULT or 0)
+				local star_color = stars.color or {133, 140, 158}
+				sky_material:SetShaderParameter("StarColor", magic.Color(
+						star_color[1] / 255, star_color[2] / 255,
+						star_color[3] / 255))
+				-- How fast they drift, which a game changes with the weather
+				local wind = sky_bodies.clouds.speed or CLOUD_SPEED_DEFAULT
+				sky_material:SetShaderParameter("CloudWind", magic.Vector2(
+						wind[1] * CLOUD_WIND_PER_NODE,
+						wind[2] * CLOUD_WIND_PER_NODE))
+				-- The density goes to the shader as it came. Luanti fills a
+				-- cloud cell where its own 0...1 noise falls below the density,
+				-- so the number is a quantile of that noise; the shader beside
+				-- this file fills where its noise rises above one minus the
+				-- coverage, which is a quantile of its own. Both are value noise
+				-- of much the same shape and both are even about a half, so the
+				-- quantile carries straight across and the coverage is the
+				-- density. Sampled over two hundred thousand points, what
+				-- Luanti's client covers and what this one covers agree to within
+				-- two parts in a hundred the whole way from nothing to a full
+				-- sky. What was here before scaled the density by 0.85 first,
+				-- which at Luanti's own default covered a sixth of the sky where
+				-- Luanti covers a quarter.
+				local cloud_color = sky_bodies.clouds.color_bright
+				sky_material:SetShaderParameter("CloudAlpha",
+						(cloud_color and cloud_color[4] and
+						cloud_color[4] / 255) or CLOUD_ALPHA_DEFAULT)
+				sky_material:SetShaderParameter("CloudCoverage",
+						(sky and sky.clouds == false) and 0 or
+						(sky_bodies.clouds.density or CLOUD_DENSITY_DEFAULT))
 			end
-			if moon_texture then
-				sky_material:SetTexture(1, game_texture(moon_texture))
-			end
-			sky_material:SetShaderParameter("SunTextured",
-					sun_texture and 1 or 0)
-			sky_material:SetShaderParameter("MoonTextured",
-					moon_texture and 1 or 0)
-			-- How far past white the disc is drawn. On the PBR path the
-			-- frame is tone mapped, so this is a real multiplier and what
-			-- the bloom around the sun comes from; on the vanilla path the
-			-- frame clips at one and a little past it is all that is wanted.
-			sky_material:SetShaderParameter("SunOverexposure",
-					pbr and SUN_DISC_OVEREXPOSURE or 1.5)
-			sky_material:SetShaderParameter("SunSize",
-					sun.visible and SUN_HALF * (sun.scale or 1) or 0)
-			sky_material:SetShaderParameter("MoonSize",
-					moon.visible and MOON_HALF * (moon.scale or 1) or 0)
-			sky_material:SetShaderParameter("StarDensity",
-					stars.visible and STAR_DENSITY_DEFAULT *
-					(stars.count or STARS_DEFAULT) / STARS_DEFAULT or 0)
-			local star_color = stars.color or {133, 140, 158}
-			sky_material:SetShaderParameter("StarColor", magic.Color(
-					star_color[1] / 255, star_color[2] / 255,
-					star_color[3] / 255))
-			-- How fast they drift, which a game changes with the weather
-			local wind = sky_bodies.clouds.speed or CLOUD_SPEED_DEFAULT
-			sky_material:SetShaderParameter("CloudWind", magic.Vector2(
-					wind[1] * CLOUD_WIND_PER_NODE,
-					wind[2] * CLOUD_WIND_PER_NODE))
-			-- The density goes to the shader as it came. Luanti fills a
-			-- cloud cell where its own 0...1 noise falls below the density,
-			-- so the number is a quantile of that noise; the shader beside
-			-- this file fills where its noise rises above one minus the
-			-- coverage, which is a quantile of its own. Both are value noise
-			-- of much the same shape and both are even about a half, so the
-			-- quantile carries straight across and the coverage is the
-			-- density. Sampled over two hundred thousand points, what
-			-- Luanti's client covers and what this one covers agree to within
-			-- two parts in a hundred the whole way from nothing to a full
-			-- sky. What was here before scaled the density by 0.85 first,
-			-- which at Luanti's own default covered a sixth of the sky where
-			-- Luanti covers a quarter.
-			local cloud_color = sky_bodies.clouds.color_bright
-			sky_material:SetShaderParameter("CloudAlpha",
-					(cloud_color and cloud_color[4] and
-					cloud_color[4] / 255) or CLOUD_ALPHA_DEFAULT)
-			sky_material:SetShaderParameter("CloudCoverage",
-					(sky and sky.clouds == false) and 0 or
-					(sky_bodies.clouds.density or CLOUD_DENSITY_DEFAULT))
 			-- And the reflections follow, once a second at most: the sun
 			-- moves every frame and the cube is six renders
 			if sky_cube and scene.elapsedTime >= (self.sky_cube_due or 0) then
@@ -4105,6 +4127,7 @@ function M.new(magic, buildat, log, options)
 
 	function self:set_sky(new_sky)
 		sky = new_sky
+		sky_static_at = nil
 		-- Where the fog starts is the game's to say, as a fraction of the
 		-- range; 0.7 is this client's own when it says nothing. The
 		-- reference fixture says 0.99, which is the fog off. [SKY_KNOBS].
@@ -4120,6 +4143,7 @@ function M.new(magic, buildat, log, options)
 		if not sky_bodies[which] or not what then
 			return
 		end
+		sky_static_at = nil
 		for key, value in pairs(what) do
 			sky_bodies[which][key] = value
 		end
@@ -4519,6 +4543,8 @@ function M.new(magic, buildat, log, options)
 	-- again, so dropping it leaves a hole in the world for the rest of the
 	-- session -- and the first blocks it sends are the ones around the
 	-- player, which is exactly where a hole is worst.
+	-- Where and when update() last looked for blocks out of range
+	local drop_at = nil
 	function self:update(dtime, drop_distance)
 		-- A device reset -- a change of screen mode on Windows -- loses
 		-- what was filled by hand; the registry puts its Images back
@@ -4546,7 +4572,14 @@ function M.new(magic, buildat, log, options)
 			place_lights()
 		end
 		update_sky_visibility()
-		if drop_distance then
+		-- Every block's distance, so not every frame: a block leaves the
+		-- range when the camera has moved, and one that arrived out of it
+		-- can wait a second
+		if drop_distance and (not drop_at or
+				scene.elapsedTime >= drop_at[4] + 1 or
+				(p.x - drop_at[1]) ^ 2 + (p.y - drop_at[2]) ^ 2 +
+				(p.z - drop_at[3]) ^ 2 > 4) then
+			drop_at = {p.x, p.y, p.z, scene.elapsedTime}
 			local limit = drop_distance / BLOCKSIZE
 			for key, block in pairs(blocks) do
 				local dx = block.x + 0.5 - p.x / BLOCKSIZE

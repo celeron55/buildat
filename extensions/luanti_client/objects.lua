@@ -203,9 +203,12 @@ function M.interpolate(objects, dtime)
 					f = 1
 				end
 			end
+			-- Landed on the target once within a millimetre: an object
+			-- easing forever is one placed and relit every frame
 			for i = 1, 3 do
-				obj.position[i] = obj.position[i] +
-						(obj.target[i] - obj.position[i]) * f
+				local d = obj.target[i] - obj.position[i]
+				obj.position[i] = (d > -0.001 and d < 0.001) and
+						obj.target[i] or obj.position[i] + d * f
 			end
 		end
 	end

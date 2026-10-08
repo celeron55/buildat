@@ -215,160 +215,180 @@ function M.writer()
 	return w
 end
 
-function M.reader(data)
-	local pos = 1
-	local r = {}
+-- The reads, shared by every reader: a reader is made for every packet,
+-- two or more of them, and a table of its own closures was ~32 functions a
+-- packet ([FRAME_WORK]).
+local Reader = {}
+local byte = string.byte
 
-	function r:raw(n)
-		if pos + n - 1 > #data then
-			error("luanti_client/serialize: read past the end of the packet")
+function Reader:raw(n)
+	local pos = self._pos
+	if pos + n - 1 > #self._data then
+		error("luanti_client/serialize: read past the end of the packet")
+	end
+	self._pos = pos + n
+	return self._data:sub(pos, pos + n - 1)
+end
+
+-- The integers straight out of the string, without a substring each
+local function take(self, n)
+	local pos = self._pos
+	if pos + n - 1 > #self._data then
+		error("luanti_client/serialize: read past the end of the packet")
+	end
+	self._pos = pos + n
+	return pos
+end
+
+function Reader:u8()
+	return byte(self._data, take(self, 1))
+end
+
+function Reader:u16()
+	local pos = take(self, 2)
+	local a, b = byte(self._data, pos, pos + 1)
+	return a * 0x100 + b
+end
+
+function Reader:u32()
+	local pos = take(self, 4)
+	local a, b, c, d = byte(self._data, pos, pos + 3)
+	return ((a * 0x100 + b) * 0x100 + c) * 0x100 + d
+end
+
+function Reader:s16()
+	local v = self:u16()
+	return v >= 0x8000 and v - 0x10000 or v
+end
+
+function Reader:s32()
+	local v = self:u32()
+	return v >= 0x80000000 and v - 0x100000000 or v
+end
+
+-- IEEE 754 single precision, big-endian, which is what Luanti sends for
+-- floats from protocol 37 onwards
+function Reader:f32()
+	local pos = take(self, 4)
+	local b1, b2, b3, b4 = byte(self._data, pos, pos + 3)
+	local sign = b1 >= 0x80 and -1 or 1
+	local exponent = (b1 % 0x80) * 2 + math.floor(b2 / 0x80)
+	local mantissa = ((b2 % 0x80) * 0x100 + b3) * 0x100 + b4
+	if exponent == 0xff then
+		if mantissa == 0 then
+			return sign * math.huge
 		end
-		local s = data:sub(pos, pos + n - 1)
-		pos = pos + n
-		return s
+		return 0 / 0 -- NaN
 	end
-
-	function r:u8()
-		return string.byte(self:raw(1))
+	-- 2^n rather than math.ldexp(), which Lua 5.4 no longer has and
+	-- test.lua wants to run under whatever lua is around
+	if exponent == 0 then
+		-- Zero, or subnormal: no implicit leading one
+		return sign * (mantissa / 0x800000) * 2 ^ -126
 	end
+	return sign * (1 + mantissa / 0x800000) * 2 ^ (exponent - 127)
+end
 
-	function r:u16()
-		local a, b = string.byte(self:raw(2), 1, 2)
-		return a * 0x100 + b
+-- The reads are in locals because the order in which Lua evaluates a
+-- return list is not something to rely on
+function Reader:v3s16()
+	local x = self:s16()
+	local y = self:s16()
+	local z = self:s16()
+	return x, y, z
+end
+
+function Reader:v3f()
+	local x = self:f32()
+	local y = self:f32()
+	local z = self:f32()
+	return x, y, z
+end
+
+function Reader:string()
+	return self:raw(self:u16())
+end
+
+function Reader:longstring()
+	return self:raw(self:u32())
+end
+
+-- Luanti's TileAnimationParams, which is in both a tile definition and an
+-- item's images. What follows the type is what the type says.
+function Reader:animation()
+	local animation_type = self:u8()
+	if animation_type == 1 then -- Vertical frames
+		return {type = animation_type, aspect_w = self:u16(),
+				aspect_h = self:u16(), length = self:f32()}
+	elseif animation_type == 2 then -- A 2D sheet
+		return {type = animation_type, frames_w = self:u8(),
+				frames_h = self:u8(), length = self:f32()}
 	end
+	return {type = animation_type}
+end
 
-	function r:u32()
-		local a, b, c, d = string.byte(self:raw(4), 1, 4)
-		return ((a * 0x100 + b) * 0x100 + c) * 0x100 + d
-	end
-
-	function r:s16()
-		local v = self:u16()
-		return v >= 0x8000 and v - 0x10000 or v
-	end
-
-	function r:s32()
-		local v = self:u32()
-		return v >= 0x80000000 and v - 0x100000000 or v
-	end
-
-	-- IEEE 754 single precision, big-endian, which is what Luanti sends for
-	-- floats from protocol 37 onwards
-	function r:f32()
-		local b1, b2, b3, b4 = string.byte(self:raw(4), 1, 4)
-		local sign = b1 >= 0x80 and -1 or 1
-		local exponent = (b1 % 0x80) * 2 + math.floor(b2 / 0x80)
-		local mantissa = ((b2 % 0x80) * 0x100 + b3) * 0x100 + b4
-		if exponent == 0xff then
-			if mantissa == 0 then
-				return sign * math.huge
-			end
-			return 0 / 0 -- NaN
-		end
-		-- 2^n rather than math.ldexp(), which Lua 5.4 no longer has and
-		-- test.lua wants to run under whatever lua is around
-		if exponent == 0 then
-			-- Zero, or subnormal: no implicit leading one
-			return sign * (mantissa / 0x800000) * 2 ^ -126
-		end
-		return sign * (1 + mantissa / 0x800000) * 2 ^ (exponent - 127)
-	end
-
-	-- The reads are in locals because the order in which Lua evaluates a
-	-- return list is not something to rely on
-	function r:v3s16()
-		local x = self:s16()
-		local y = self:s16()
-		local z = self:s16()
-		return x, y, z
-	end
-
-	function r:v3f()
-		local x = self:f32()
-		local y = self:f32()
-		local z = self:f32()
-		return x, y, z
-	end
-
-	function r:string()
-		return self:raw(self:u16())
-	end
-
-	function r:longstring()
-		return self:raw(self:u32())
-	end
-
-	-- Luanti's TileAnimationParams, which is in both a tile definition and an
-	-- item's images. What follows the type is what the type says.
-	function r:animation()
-		local animation_type = self:u8()
-		if animation_type == 1 then -- Vertical frames
-			return {type = animation_type, aspect_w = self:u16(),
-					aspect_h = self:u16(), length = self:f32()}
-		elseif animation_type == 2 then -- A 2D sheet
-			return {type = animation_type, frames_w = self:u8(),
-					frames_h = self:u8(), length = self:f32()}
-		end
-		return {type = animation_type}
-	end
-
-	-- A wide string: a count of UTF-16 units and then that many, big-endian.
-	-- Chat is the only thing that uses them. What comes out is UTF-8, which
-	-- is what everything else here and in Urho3D wants.
-	function r:wstring()
-		local count = self:u16()
-		local out = {}
-		local i = 1
-		while i <= count do
-			local c = self:u16()
-			if c >= 0xd800 and c < 0xdc00 and i < count then
-				-- A surrogate pair is one code point in two units
-				local low = self:u16()
-				i = i + 1
-				if low >= 0xdc00 and low < 0xe000 then
-					c = 0x10000 + (c - 0xd800) * 0x400 + (low - 0xdc00)
-				else
-					c = 0xfffd
-				end
-			end
-			out[#out + 1] = M.utf8_encode(c)
+-- A wide string: a count of UTF-16 units and then that many, big-endian.
+-- Chat is the only thing that uses them. What comes out is UTF-8, which
+-- is what everything else here and in Urho3D wants.
+function Reader:wstring()
+	local count = self:u16()
+	local out = {}
+	local i = 1
+	while i <= count do
+		local c = self:u16()
+		if c >= 0xd800 and c < 0xdc00 and i < count then
+			-- A surrogate pair is one code point in two units
+			local low = self:u16()
 			i = i + 1
+			if low >= 0xdc00 and low < 0xe000 then
+				c = 0x10000 + (c - 0xd800) * 0x400 + (low - 0xdc00)
+			else
+				c = 0xfffd
+			end
 		end
-		return table.concat(out)
+		out[#out + 1] = M.utf8_encode(c)
+		i = i + 1
 	end
+	return table.concat(out)
+end
 
-	-- One line of a part of a packet that is text rather than fields -- an
-	-- inventory, node metadata -- without its newline. What is left when
-	-- there is no newline is the last line.
-	function r:line()
-		local at = data:find("\n", pos, true)
-		if not at then
-			return self:rest()
-		end
-		local s = data:sub(pos, at - 1)
-		pos = at + 1
-		return s
+-- One line of a part of a packet that is text rather than fields -- an
+-- inventory, node metadata -- without its newline. What is left when
+-- there is no newline is the last line.
+function Reader:line()
+	local at = self._data:find("\n", self._pos, true)
+	if not at then
+		return self:rest()
 	end
+	local s = self._data:sub(self._pos, at - 1)
+	self._pos = at + 1
+	return s
+end
 
-	function r:skip(n)
-		self:raw(n)
-		return self
-	end
+function Reader:skip(n)
+	take(self, n)
+	return self
+end
 
-	-- How many bytes are left, for a packet that is a list with no count
-	function r:remaining()
-		return #data - pos + 1
-	end
+-- How many bytes are left, for a packet that is a list with no count
+function Reader:remaining()
+	return #self._data - self._pos + 1
+end
 
-	function r:rest()
-		return self:raw(#data - pos + 1)
-	end
+function Reader:rest()
+	return self:raw(#self._data - self._pos + 1)
+end
 
-	function r:remaining()
-		return #data - pos + 1
-	end
-
-	return r
+-- A table of references to the shared functions rather than a metatable,
+-- which the client's sandbox does not hand out
+function M.reader(data)
+	return {_data = data, _pos = 1, raw = Reader.raw, u8 = Reader.u8,
+			u16 = Reader.u16, u32 = Reader.u32, s16 = Reader.s16,
+			s32 = Reader.s32, f32 = Reader.f32, v3s16 = Reader.v3s16,
+			v3f = Reader.v3f, string = Reader.string,
+			longstring = Reader.longstring, animation = Reader.animation,
+			wstring = Reader.wstring, line = Reader.line, skip = Reader.skip,
+			remaining = Reader.remaining, rest = Reader.rest}
 end
 
 return M

@@ -2443,31 +2443,12 @@ local function show_client(host, port, name, password, mode, origin)
 					magic.input:GetKeyDown(BIND.sneak.key))
 		end
 
-		-- The bottom line is remade every frame; everything above it is the
-		-- log of what happened
+		-- The bottom line is remade every frame that F5 shows it;
+		-- everything above it is the log of what happened
 		local function set_counters()
 			-- What is not handled yet is logged once per command by
 			-- client.lua rather than shown here; it is a long line and the
 			-- world is behind it
-			local held = wielded()
-			local holding = held and (held.name..
-					(held.count > 1 and " x"..held.count or "")) or
-					"nothing"
-			local pointed = "pointing at nothing"
-			if dig then
-				pointed = (dig.done and "dug " or "digging ")..dig.name..
-						(dig.time and string.format(" %.2f/%.2f",
-						dig.elapsed, dig.time) or " (not by hand)")
-			elseif pointed_under then
-				local def = node_def_at(pointed_under)
-				pointed = "pointing at "..(def and def.name or "?")
-			elseif pointed_object then
-				local obj = world_objects[pointed_object]
-				local props = obj and obj.props
-				pointed = "pointing at object "..pointed_object..
-						(props and props.visual ~= "" and
-						" ("..props.visual..")" or "")
-			end
 			-- What the pointed node says about itself, which is a game's own
 			-- label for it. Only a few lines: Luanti cuts it at six.
 			local info = ""
@@ -2498,6 +2479,29 @@ local function show_client(host, port, name, password, mode, origin)
 			end
 			if info ~= info_text.text then
 				info_text.text = info
+			end
+			-- The rest is the debug line, which F5 shows
+			if show_debug == 0 then
+				return
+			end
+			local held = wielded()
+			local holding = held and (held.name..
+					(held.count > 1 and " x"..held.count or "")) or
+					"nothing"
+			local pointed = "pointing at nothing"
+			if dig then
+				pointed = (dig.done and "dug " or "digging ")..dig.name..
+						(dig.time and string.format(" %.2f/%.2f",
+						dig.elapsed, dig.time) or " (not by hand)")
+			elseif pointed_under then
+				local def = node_def_at(pointed_under)
+				pointed = "pointing at "..(def and def.name or "?")
+			elseif pointed_object then
+				local obj = world_objects[pointed_object]
+				local props = obj and obj.props
+				pointed = "pointing at object "..pointed_object..
+						(props and props.visual ~= "" and
+						" ("..props.visual..")" or "")
 			end
 			local condition = ""
 			if client.hp then
