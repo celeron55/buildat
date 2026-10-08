@@ -969,7 +969,6 @@ struct Module: public interface::Module
 		} else {
 			body = json::object();
 		}
-		ss_ data, type;
 		if(r.path == "/" && r.method == "GET")
 			front_page(r);
 		else if(r.path == "/api/announce" && r.method == "POST")
@@ -997,14 +996,8 @@ struct Module: public interface::Module
 						"Content-Security-Policy: frame-ancestors 'none'\r\n");
 			});
 		}
-		else if(r.path.compare(0, 7, "/brand/") == 0 && r.method == "GET" &&
-				interface::web_brand::file(m_server->get_config().get<ss_>(
-				"share_path"), r.path.substr(7), data, type)){
-			network::access(m_server, [&](network::Interface *iface){
-				iface->http_respond(r.peer, 200, type, data,
-						"Cache-Control: max-age=86400\r\n");
-			});
-		}
+		else if(r.method == "GET" && network::serve_brand(m_server, r))
+			return;
 		else if(r.path.compare(0, 14, "/api/starport/") == 0)
 			return; // builtin/starport_announce's, were this listed itself
 		else {

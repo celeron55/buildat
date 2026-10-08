@@ -416,13 +416,10 @@ struct Module: public interface::Module
 				iface->http_respond(r.peer, status, type, body, headers);
 			});
 		};
-		ss_ data, type;
-		if(r.path.compare(0, 7, "/brand/") == 0){
-			if(interface::web_brand::file(m_server->get_config().get<ss_>(
-					"share_path"), r.path.substr(7), data, type))
-				return send(200, type, data, "Cache-Control: max-age=86400\r\n");
+		if(network::serve_brand(m_server, r))
+			return;
+		if(r.path.compare(0, 7, "/brand/") == 0)
 			return send(404, "text/plain", "Not found\n");
-		}
 		const ss_ html_type = "text/html; charset=utf-8";
 		if(!m_save)
 			return send(503, html_type, interface::web_brand::page("Aitta",

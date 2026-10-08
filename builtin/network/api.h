@@ -4,6 +4,8 @@
 #include "interface/event.h"
 #include "interface/server.h"
 #include "interface/module.h"
+#include "interface/web_brand.h"
+#include "interface/server_config.h"
 #include <functional>
 #include <cstdint>
 
@@ -300,6 +302,22 @@ namespace network
 		return server->access_module("network", [&](interface::Module *module){
 			cb((network::Interface*)module->check_interface());
 		});
+	}
+
+	// [HTML_BRAND]'s font or logo for /brand/<name>, answered; false when
+	// the path is not one of them
+	inline bool serve_brand(interface::Server *server, const HttpRequest &r)
+	{
+		ss_ data, type;
+		if(r.path.compare(0, 7, "/brand/") != 0 || !interface::web_brand::file(
+				server->get_config().get<ss_>("share_path"), r.path.substr(7),
+				data, type))
+			return false;
+		access(server, [&](Interface *iface){
+			iface->http_respond(r.peer, 200, type, data,
+					"Cache-Control: max-age=86400\r\n");
+		});
+		return true;
 	}
 }
 

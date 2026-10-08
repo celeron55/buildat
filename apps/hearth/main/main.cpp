@@ -1812,16 +1812,8 @@ struct Module: public interface::Module
 			return;
 		// [HTML_BRAND]'s font and logo, before the pages' rate: each page
 		// fetches them
-		ss_ data, type;
-		if(r.path.compare(0, 7, "/brand/") == 0 && interface::web_brand::file(
-				m_server->get_config().get<ss_>("share_path"), r.path.substr(7),
-				data, type)){
-			network::access(m_server, [&](network::Interface *iface){
-				iface->http_respond(r.peer, 200, type, data,
-						"Cache-Control: max-age=86400\r\n");
-			});
+		if(network::serve_brand(m_server, r))
 			return;
-		}
 		if(!m_db)
 			return respond(r, 503, page("Hearth", "<p>Starting.</p>"));
 		// By the /64 for v6 ([DUAL_STACK])
