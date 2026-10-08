@@ -978,6 +978,8 @@ function PlayerRef:set_look_horizontal(h)
 	local o = state_of(self)
 	if o then
 		o.look.h = h
+		-- As Luanti, which sends it as it sends a set_pos
+		tell_the_client(o)
 	end
 end
 
@@ -990,6 +992,8 @@ function PlayerRef:set_look_vertical(v)
 	local o = state_of(self)
 	if o then
 		o.look.v = v
+		-- As Luanti, which sends it as it sends a set_pos
+		tell_the_client(o)
 	end
 end
 
