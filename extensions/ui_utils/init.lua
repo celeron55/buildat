@@ -166,6 +166,16 @@ local function button_menu_nav(root, options)
 	-- The drawing follows the focus, wherever it moved it from: a click,
 	-- Tab, a field taking it
 	local function sync()
+		-- Most frames nothing moved: the selected one still has the focus,
+		-- and only one element has it ([FRAME_WORK]: every item's was
+		-- asked, ~5-10 us an item a frame)
+		local cur = items[selected]
+		if cur and not gone(cur.button) and cur.button:HasFocus() then
+			return
+		end
+		if selected == 0 and magic.ui.focusElement == nil then
+			return
+		end
 		local at = 0
 		for i, item in ipairs(items) do
 			if not gone(item.button) and item.button:HasFocus() then
@@ -481,6 +491,13 @@ function M.safe.keyboard_page(win)
 		if page_gone(page) then
 			magic.UnsubscribeFromEvent("Update", update_sub)
 			magic.UnsubscribeFromEvent("MouseButtonUp", click_sub)
+			magic.UnsubscribeFromEvent("KeyDown", key_sub)
+			for i, p in ipairs(keyboard_pages) do
+				if p == page then
+					table.remove(keyboard_pages, i)
+					break
+				end
+			end
 			return
 		end
 		if not arranged and shown(win) then
@@ -496,19 +513,31 @@ function M.safe.keyboard_page(win)
 			rewalk(page)
 		end
 		local cols = page.columns
-		if cols and arranged and shown(win) then
+		-- Most frames the focus is where it was: that one asked, not both
+		-- columns walked ([FRAME_WORK]: ~1 ms a frame on the join screen)
+		local held = page.held
+		if cols and arranged and shown(win) and not page.keep_left and
+				(held and not gone(held) and held:HasFocus() or
+				not held and magic.ui.focusElement == nil) then
+			page.at_start = held and page.side == 2 and
+					held:GetTypeName() == "LineEdit" and
+					held.cursorPosition == 0 and held or nil
+		elseif cols and arranged and shown(win) then
 			-- The left one last focused there, by its place: a sidebar
 			-- drawn again has new buttons in the same places
 			local left, focused = page_items(cols[1], {}), false
+			page.held = nil
 			for i, e in ipairs(left) do
 				if e:HasFocus() then
 					page.left_at, page.side, focused = i, 1, true
+					page.held = e
 				end
 			end
 			page.at_start = nil
 			for _, e in ipairs(page_items(cols[2], {})) do
 				if e:HasFocus() then
 					page.side, focused = 2, true
+					page.held = e
 					-- The field's cursor before a key moves it: Left at its
 					-- start is the sidebar's
 					if e:GetTypeName() == "LineEdit" and
