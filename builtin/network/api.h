@@ -6,6 +6,8 @@
 #include "interface/module.h"
 #include "interface/web_brand.h"
 #include "interface/server_config.h"
+#include "interface/sha256.h"
+#include "interface/os.h"
 #include <functional>
 #include <cstdint>
 
@@ -167,6 +169,52 @@ namespace network
 		}
 		return "";
 	}
+	// Whether one more of `what` from `who` fits in `per` seconds, a window
+	// starting at a key's first use ([SHARED_HELPERS]: Starport's).
+	//
+	// The table is bounded ([SECURITY_RUN_1]): `who` is often what a
+	// request says -- an announce's id, a login's name -- and every new
+	// one would be a new entry. A long key is kept as its hash, windows
+	// that have passed are swept when the table is large, and past a
+	// ceiling of live ones a new key is refused: under a flood of made-up
+	// keys this fails closed. Not locked: its owner's thread only.
+	struct RateTable
+	{
+		struct Rate { int count = 0; int64_t start = 0; int64_t per = 0; };
+		sm_<ss_, Rate> rates;
+
+		// count false: whether one more would be within it, not counting it
+		bool ok(const ss_ &what, ss_ who, int max, int64_t per,
+				bool count = true)
+		{
+			if(who.size() > 64)
+				who = interface::sha256::hex(interface::sha256::calculate(who));
+			const ss_ key = what+"|"+who;
+			const int64_t t = interface::os::wall_us() / 1000000;
+			if(rates.size() >= 50000 && rates.count(key) == 0){
+				for(auto it = rates.begin(); it != rates.end();){
+					if(t - it->second.start >= it->second.per)
+						it = rates.erase(it);
+					else
+						++it;
+				}
+				if(rates.size() >= 200000)
+					return false;
+			}
+			Rate &r = rates[key];
+			if(t - r.start >= per){
+				r.count = 0;
+				r.start = t;
+			}
+			r.per = per;
+			if(r.count >= max)
+				return false;
+			if(count)
+				r.count++;
+			return true;
+		}
+	};
+
 	inline void query_value_self_check()
 	{
 		if(query_value("xa=1&a=2", "a") != "2" ||

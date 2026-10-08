@@ -675,8 +675,7 @@ struct Module: public interface::Module
 	int64_t m_next_reverify = 0;
 	// Rate limits, in memory only: by key, a count and when it started
 	// key -> count, window start, window length
-	struct Rate { int count = 0; int64_t start = 0; int64_t per = 0; };
-	sm_<ss_, Rate> m_rates;
+	network::RateTable m_rates;
 
 	// The verifier: a thread of its own, as it waits on other servers
 	std::mutex m_vmutex;
@@ -873,48 +872,6 @@ struct Module: public interface::Module
 	}
 
 	// -----------------------------------------------------------------------
-	// Rate limits
-
-	// Whether one more of `what` from `who` fits in `per` seconds
-	//
-	// The table is bounded ([SECURITY_RUN_1]): `who` is often what a
-	// request says -- an announce's id, a login's name -- and every new
-	// one was a new entry, never removed. A long key is kept as its hash,
-	// windows that have passed are swept when the table is large, and
-	// past a ceiling of live ones a new key is refused: under a flood of
-	// made-up keys this fails closed.
-	// count false: whether one more would be within it, not counting it
-	bool rate_ok(const ss_ &what, ss_ who, int max, int64_t per,
-			bool count = true)
-	{
-		if(who.size() > 64)
-			who = hex(interface::sha256::calculate(who));
-		const ss_ key = what+"|"+who;
-		const int64_t t = now_s();
-		if(m_rates.size() >= 50000 && m_rates.count(key) == 0){
-			for(auto it = m_rates.begin(); it != m_rates.end();){
-				if(t - it->second.start >= it->second.per)
-					it = m_rates.erase(it);
-				else
-					++it;
-			}
-			if(m_rates.size() >= 200000)
-				return false;
-		}
-		Rate &r = m_rates[key];
-		if(t - r.start >= per){
-			r.count = 0;
-			r.start = t;
-		}
-		r.per = per;
-		if(r.count >= max)
-			return false;
-		if(count)
-			r.count++;
-		return true;
-	}
-
-	// -----------------------------------------------------------------------
 	// The HTTP API
 
 	void respond(const network::HttpRequest &r, int status, const json::Value &v)
@@ -1080,7 +1037,7 @@ struct Module: public interface::Module
 		json::Value answer = json::object();
 		const int64_t t = now_s();
 		if(!id.empty()){
-			if(!rate_ok("announce", id, 1, 20)){
+			if(!m_rates.ok("announce", id, 1, 20)){
 				refuse(r, "announced too often");
 				return;
 			}
@@ -1090,7 +1047,8 @@ struct Module: public interface::Module
 				return;
 			}
 		} else {
-			if(!rate_ok("new_listing", network::address_key(r.address), 5, 86400)){
+			if(!m_rates.ok("new_listing", network::address_key(r.address),
+					5, 86400)){
 				refuse(r, "too many new listings from this address today");
 				return;
 			}
@@ -1450,7 +1408,7 @@ struct Module: public interface::Module
 
 	void api_list(const network::HttpRequest &r, const json::Value &b)
 	{
-		if(!rate_ok("list", network::address_key(r.address), 60, 60)){
+		if(!m_rates.ok("list", network::address_key(r.address), 60, 60)){
 			refuse(r, "listed too often");
 			return;
 		}
@@ -1579,7 +1537,8 @@ struct Module: public interface::Module
 
 	void api_report(const network::HttpRequest &r, const json::Value &b)
 	{
-		if(!rate_ok("report_addr", network::address_key(r.address), 10, 3600)){
+		if(!m_rates.ok("report_addr", network::address_key(r.address),
+				10, 3600)){
 			refuse(r, "too many reports from this address; try later");
 			return;
 		}
@@ -1614,7 +1573,7 @@ struct Module: public interface::Module
 			}
 			key_seen(key);
 			h = hex(interface::sha256::calculate(unhex(key)));
-			if(!rate_ok("report_key", h, 5, 3600)){
+			if(!m_rates.ok("report_key", h, 5, 3600)){
 				refuse(r, "too many reports from this key; try later");
 				return;
 			}
@@ -1933,7 +1892,8 @@ struct Module: public interface::Module
 	void api_report_status(const network::HttpRequest &r, const json::Value &b)
 	{
 		// Up to a hundred lookups a request, and nobody needs to log in
-		if(!rate_ok("report_status", network::address_key(r.address), 30, 60)){
+		if(!m_rates.ok("report_status", network::address_key(r.address),
+				30, 60)){
 			refuse(r, "asked too often");
 			return;
 		}
@@ -1968,7 +1928,7 @@ struct Module: public interface::Module
 	void api_transparency(const network::HttpRequest &r)
 	{
 		// Every report read, for anyone: once a few seconds an address
-		if(!rate_ok("transparency", network::address_key(r.address), 10, 60)){
+		if(!m_rates.ok("transparency", network::address_key(r.address), 10, 60)){
 			refuse(r, "asked too often");
 			return;
 		}
@@ -2095,7 +2055,7 @@ struct Module: public interface::Module
 	void front_page(const network::HttpRequest &r)
 	{
 		using interface::web_brand::html;
-		if(!rate_ok("page", network::address_key(r.address), 30, 60)){
+		if(!m_rates.ok("page", network::address_key(r.address), 30, 60)){
 			network::access(m_server, [&](network::Interface *iface){
 				iface->http_respond(r.peer, 429, "text/plain",
 						"Too many requests; try again in a minute.\n");
@@ -2488,7 +2448,7 @@ struct Module: public interface::Module
 		if(what == "register"){
 			if(!setting("id_registration").is_true())
 				throw Exception("this Starport makes no new IDs");
-			if(!rate_ok("id_register", network::address_bin(r.address), 5,
+			if(!m_rates.ok("id_register", network::address_bin(r.address), 5,
 					86400))
 				throw Exception("too many new IDs from this network today");
 			const ss_ name = jstr(b, "name");
@@ -2526,10 +2486,10 @@ struct Module: public interface::Module
 			// its owner out
 			const ss_ bin = network::address_bin(r.address);
 			auto wrong = [&](const char *why){
-				rate_ok("id_login_wrong", bin, 30, 3600);
+				m_rates.ok("id_login_wrong", bin, 30, 3600);
 				throw Exception(why);
 			};
-			if(!rate_ok("id_login_wrong", bin, 30, 3600, false))
+			if(!m_rates.ok("id_login_wrong", bin, 30, 3600, false))
 				throw Exception("too many wrong logins from this network; "
 						"try later");
 			json::Value id = load("ids", name);
@@ -2574,8 +2534,8 @@ struct Module: public interface::Module
 		if(what == "reset_request"){
 			const ss_ name = jstr(b, "name");
 			const json::Value o = load("operators", name);
-			if(!rate_ok("id_reset", name, 3, 86400) ||
-					!rate_ok("id_reset_addr",
+			if(!m_rates.ok("id_reset", name, 3, 86400) ||
+					!m_rates.ok("id_reset_addr",
 						network::address_key(r.address), 10, 86400))
 				throw Exception("too many resets; try later");
 			// Said the same whether or not there is an address, so a
@@ -2598,7 +2558,7 @@ struct Module: public interface::Module
 		if(what == "reset"){
 			const ss_ name = jstr(b, "name");
 			json::Value id = load("ids", name);
-			if(!rate_ok("id_reset_try", name, 10, 86400) ||
+			if(!m_rates.ok("id_reset_try", name, 10, 86400) ||
 					jstr(id, "reset_code").empty() ||
 					now_s() - jint(id, "reset_ts") > 86400 ||
 					!same(jstr(id, "reset_code"), jstr(b, "code")))
@@ -3222,7 +3182,7 @@ struct Module: public interface::Module
 			throw Exception("this Starport cannot send mail: its admin sets "
 					"the mail server (Admin, Health), or turns "
 					"email_confirmation off");
-		if(!rate_ok("mail", name, 3, 3600))
+		if(!m_rates.ok("mail", name, 3, 3600))
 			throw Exception("three codes an hour; try later");
 		const ss_ code = random_hex(4);
 		o.set("email_pending", email);

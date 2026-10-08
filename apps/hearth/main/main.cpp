@@ -605,9 +605,8 @@ struct Module: public interface::Module
 	sm_<network::PeerId, int64_t> m_viewing;
 	// The clients that have asked anything, for "hr:activity"
 	std::set<network::PeerId> m_joined;
-	// Searches and pages per address (or account) in the current minute
-	sm_<ss_, int> m_searches;
-	int64_t m_searches_minute = 0;
+	// Searches and pages per address (or account) a minute
+	network::RateTable m_searches;
 	// /api/discussed's pick and when it was made
 	json::Value m_discussed;
 	int64_t m_discussed_at = -1;
@@ -2407,11 +2406,7 @@ struct Module: public interface::Module
 	// `who`: an address, "@" and an account, or "page " and an address
 	bool allowed(const ss_ &who, int a_minute)
 	{
-		if(now_s() / 60 != m_searches_minute){
-			m_searches_minute = now_s() / 60;
-			m_searches.clear();
-		}
-		return ++m_searches[who] <= a_minute;
+		return m_searches.ok("", who, a_minute, 60);
 	}
 
 	// An address in the text, or a link the markup makes ("//host",

@@ -137,8 +137,7 @@ struct Module: public interface::Module
 	ss_ m_archives;
 	ss_ m_tmp;
 	sm_<ss_, Upload> m_uploads; // by sha256
-	int64_t m_hits_minute = 0;
-	std::map<ss_, int> m_hits;
+	network::RateTable m_hits;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -246,13 +245,9 @@ struct Module: public interface::Module
 
 	bool allowed(const network::HttpRequest &r)
 	{
-		if(now_s() / 60 != m_hits_minute){
-			m_hits_minute = now_s() / 60;
-			m_hits.clear();
-		}
 		const bool post = r.method == "POST";
-		return ++m_hits[(post ? "u " : "r ")+network::address_bin(r.address)] <=
-				(post ? UPLOADS_A_MINUTE : READS_A_MINUTE);
+		return m_hits.ok(post ? "u" : "r", network::address_bin(r.address),
+				post ? UPLOADS_A_MINUTE : READS_A_MINUTE, 60);
 	}
 
 	void on_http(const network::HttpRequest &r)
