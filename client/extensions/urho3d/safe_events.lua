@@ -121,6 +121,9 @@ return {
 	-- An element losing the UI's focus: a field left by a click elsewhere
 	Defocused = {
 	},
+	-- And gaining it: a form's field drawn in its focused colour
+	Focused = {
+	},
 	-- What the scrolling family says happened; see the classes of the same
 	-- name in safe_classes.lua. Element is the list, the bar or the slider
 	-- it happened to.

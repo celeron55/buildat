@@ -435,6 +435,12 @@ function M.parse(spec)
 			version = tonumber(fields[1]) or 1
 		elseif name == "real_coordinates" then
 			real = fields[1] == "true"
+		elseif name == "__prepend_end" then
+			-- What a client put in front of the form from the player's
+			-- formspec prepend, which Luanti reads in legacy coordinates
+			for _, e in ipairs(elements) do
+				e.prepend = true
+			end
 		elseif name == "container" then
 			local v = M.parse_v2(fields[1] or "")
 			stack[#stack + 1] = offset

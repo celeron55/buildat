@@ -605,19 +605,41 @@ function M.new(magic, buildat, log, ctx)
 		end
 
 		-- What a named element of a given type is styled as
-		local function style_of(element_type, element_name)
-			local by_name = element_name and styles[element_name]
-			local by_type = type_styles[element_type]
-			if not by_name then
-				return by_type or {}
-			end
-			if not by_type then
-				return by_name
-			end
+		-- The parent type's style under the type's, as Luanti's
+		-- getStyleForElement(): an item_image_button is styled as an
+		-- image_button unless something says otherwise
+		local function style_of(element_type, element_name, parent_type)
 			local out = {}
-			for k, v in pairs(by_type) do out[k] = v end
-			for k, v in pairs(by_name) do out[k] = v end
+			local layers = {parent_type and type_styles[parent_type],
+					type_styles[element_type],
+					element_name and styles[element_name]}
+			for i = 1, 3 do
+				for k, v in pairs(layers[i] or {}) do out[k] = v end
+			end
 			return out
+		end
+
+		-- A button's background: the style's image, nine-sliced (the
+		-- middle stretches and the border keeps its size, or the image
+		-- comes out smeared), else a box unless border=false
+		local function button_bg(x, y, w, h, st)
+			if st.bgimg and st.bgimg ~= "" then
+				local drawn = image(window, x, y, w, h, st.bgimg)
+				local tex = drawn and drawn.texture
+				local border = drawn and slice_border(st.bgimg_middle,
+						tex and tex.width or 0, tex and tex.height or 0)
+				if border then
+					drawn.imageBorder = border
+					drawn.border = border
+				end
+				if drawn then
+					return drawn
+				end
+			end
+			if st.border ~= "false" then
+				return box(window, x, y, w, h,
+						magic.Color(0.35, 0.35, 0.42, 0.9))
+			end
 		end
 
 		-- The columns the tables after a tablecolumns[] have, and where the
@@ -637,9 +659,10 @@ function M.new(magic, buildat, log, ctx)
 		-- characters, which is close enough for the tables a game builds and
 		-- needs none of the font's metrics.
 		--
-		-- simplified: no image or custom colour columns, and no scrollbar to
-		-- drag -- the wheel is what scrolls. A cell that does not fit its
-		-- column is cut rather than shortened with an ellipsis.
+		-- simplified: no image or custom colour columns, and the scrollbar
+		-- is drawn but not dragged -- the wheel is what scrolls. A cell that
+		-- does not fit its column is cut rather than shortened with an
+		-- ellipsis.
 		local function draw_table(e, x, y, w, h)
 			local list = e.name == "table" and columns or
 					{{type = "text", opts = {}}}
@@ -744,6 +767,9 @@ function M.new(magic, buildat, log, ctx)
 			-- down to nothing, which is what sharing the width out in
 			-- proportion would do.
 			local avail = w - pad * 2
+			if #shown > math.max(1, math.floor((h - pad * 2) / 16)) then
+				avail = avail - 12 -- the scrollbar's, below
+			end
 			local left = avail
 			for k, tc in ipairs(text_cols) do
 				local for_the_rest = (#text_cols - k) * 40
@@ -756,6 +782,20 @@ function M.new(magic, buildat, log, ctx)
 			local visible = math.max(1, math.floor((h - pad * 2) / row_h))
 			local scroll = math.min(state.scroll[name] or 0,
 					math.max(0, #shown - visible))
+			-- A scrollbar down the right when the rows do not all fit, as
+			-- Luanti's: the thumb as long as the share that shows
+			local full_w = w
+			if #shown > visible then
+				local bar_w = 12
+				w = w - bar_w
+				box(window, x + w, y, bar_w, h,
+						magic.Color(0.25, 0.25, 0.28, 0.95))
+				local thumb_h = math.max(8, h * visible / #shown)
+				local thumb_y = y + (h - thumb_h) * scroll /
+						(#shown - visible)
+				box(window, x + w + 1, thumb_y, bar_w - 2, thumb_h,
+						magic.Color(0.6, 0.6, 0.62, 0.95))
+			end
 			local selected = tonumber(e.fields[5])
 			local on_screen = {}
 			for i = scroll + 1, math.min(#shown, scroll + visible) do
@@ -789,7 +829,7 @@ function M.new(magic, buildat, log, ctx)
 				on_screen[#on_screen + 1] = {index = row.index, y = ry,
 						opens = row.opens}
 			end
-			tables[#tables + 1] = {name = name, x = x, y = y, w = w, h = h,
+			tables[#tables + 1] = {name = name, x = x, y = y, w = full_w, h = h,
 					row_h = row_h, count = #shown, visible = visible,
 					scroll = scroll, rows = on_screen}
 		end
@@ -819,6 +859,14 @@ function M.new(magic, buildat, log, ctx)
 			end
 			return g[1] * layout.scale[1], g[2] * layout.scale[2]
 		end
+
+		-- Before formspec_version 2 Luanti sizes some elements by the slot
+		-- rather than the spacing, and a button or a one-line field is a
+		-- fixed height about the middle of its cell (guiFormSpecMenu.cpp,
+		-- each parse function's legacy branch; m_btn_height)
+		local legacy = layout.origin[1] ~= 0
+		local sx, sy, imgsize = layout.scale[1], layout.scale[2], layout.imgsize
+		local btn_h = imgsize * 15 / 13 * 0.35
 
 		-- A form the game gave no bgcolor[] gets a dark grey one over the
 		-- whole of it. A form is drawn over the world, and text on top of a
@@ -899,9 +947,10 @@ function M.new(magic, buildat, log, ctx)
 					-- y as Luanti's parseBackground() takes them
 					-- ([UI_PARITY] 8): in real coordinates the form shrunk
 					-- by that many units on every side, in legacy ones
-					-- grown by that many whole pixels
+					-- grown by that many whole pixels, and a prepend's
+					-- always in legacy ones
 					local dx, dy
-					if layout.origin[1] == 0 then
+					if layout.origin[1] == 0 and not e.prepend then
 						dx = -(pos[1] + e.at[1]) * layout.scale[1]
 						dy = -(pos[2] + e.at[2]) * layout.scale[2]
 					else
@@ -958,13 +1007,25 @@ function M.new(magic, buildat, log, ctx)
 			elseif name == "image" then
 				local x, y = at(e, 1)
 				local w, h = geometry(e, 2)
+				if legacy and w then
+					w, h = w / sx * imgsize, h / sy * imgsize
+				end
 				if x and w then
 					-- Nothing at all for a texture that is not there yet:
 					-- these cover a whole form, and a grey box each hides
 					-- what the form is made of. The media is asked for when
 					-- the texture is wanted, and the form is drawn again
 					-- when it arrives.
-					image(window, x, y, w, h, e.fields[3])
+					local img = image(window, x, y, w, h, e.fields[3])
+					-- A middle (formspec_version 6) slices it as
+					-- background9[] does, the border at its texels' size
+					local tex = img and e.fields[4] and img.texture
+					local border = tex and slice_border(e.fields[4],
+							tex.width, tex.height)
+					if border then
+						img.imageBorder = border
+						img.border = border
+					end
 				end
 			elseif name == "box" then
 				local x, y = at(e, 1)
@@ -979,7 +1040,19 @@ function M.new(magic, buildat, log, ctx)
 			elseif name == "item_image" or name == "item_image_button" then
 				local x, y = at(e, 1)
 				local w, h = geometry(e, 2)
+				local is_button = name == "item_image_button"
+				if legacy and w then
+					if is_button then
+						w, h = w - (sx - imgsize), h - (sy - imgsize)
+					else
+						w, h = w / sx * imgsize, h / sy * imgsize
+					end
+				end
 				if x and w then
+					if is_button then
+						button_bg(x, y, w, h,
+								style_of(name, e.fields[4], "image_button"))
+					end
 					draw_stack(window, x, y, math.min(w, h),
 							{name = e.fields[3], count = 1})
 					if name == "item_image_button" then
@@ -991,8 +1064,16 @@ function M.new(magic, buildat, log, ctx)
 					name == "image_button" or name == "image_button_exit" then
 				local x, y = at(e, 1)
 				local w, h = geometry(e, 2)
+				local is_image = name:sub(1, 5) == "image"
+				if legacy and x and w then
+					w = w - (sx - imgsize)
+					if is_image then
+						h = h - (sy - imgsize)
+					else
+						y, h = y + h / sy * imgsize / 2 - btn_h, btn_h * 2
+					end
+				end
 				if x and w then
-					local is_image = name:sub(1, 5) == "image"
 					local button_name = is_image and e.fields[4] or e.fields[3]
 					local text = is_image and e.fields[5] or e.fields[4]
 					local st = style_of(name, button_name)
@@ -1001,24 +1082,8 @@ function M.new(magic, buildat, log, ctx)
 					-- A game that styles its buttons means them to look like
 					-- the image it gives, and a bordered box behind that is
 					-- not what it asked for
-					if not drawn and st.bgimg and st.bgimg ~= "" then
-						drawn = image(window, x, y, w, h, st.bgimg)
-						-- A styled button's image is nine-sliced too: the
-						-- middle is what stretches and the border of it
-						-- keeps its size, or the image comes out smeared
-						local tex = drawn and drawn.texture
-						local border = drawn and
-								slice_border(st.bgimg_middle,
-										tex and tex.width or 0,
-										tex and tex.height or 0)
-						if border then
-							drawn.imageBorder = border
-							drawn.border = border
-						end
-					end
-					if not drawn and st.border ~= "false" then
-						box(window, x, y, w, h,
-								magic.Color(0.35, 0.35, 0.42, 0.9))
+					if not drawn then
+						button_bg(x, y, w, h, st)
 					end
 					if text and text ~= "" then
 						-- Luanti centres a button's text in it
@@ -1088,17 +1153,18 @@ function M.new(magic, buildat, log, ctx)
 					-- A label's y is the middle of its line, and so is a
 					-- checkbox's
 					local cy = y - size / 2
-					box(window, x, cy, size, size,
-							magic.Color(0.1, 0.1, 0.12, 0.9))
+					-- Luanti's skin: a grey box edged dark, and the label
+					-- in the skin's white whatever the style's textcolor
+					-- (parseCheckbox reads no colour from it)
+					box(window, x, cy, size, size, magic.Color(0, 0, 0))
+					box(window, x + 1, cy + 1, size - 2, size - 2,
+							magic.Color(0.5, 0.5, 0.5))
 					if on then
 						box(window, x + 3, cy + 3, size - 6, size - 6,
 								magic.Color(0.85, 0.85, 0.9, 0.95))
 					end
-					local st = style_of(name, e.fields[2])
 					label(window, x + size + 6, y - 8, nil,
-							formspec.strip_escapes(e.fields[3] or ""), 13,
-							st.textcolor and markup_color(
-									"\27(c@"..st.textcolor..")"))
+							formspec.strip_escapes(e.fields[3] or ""), 13)
 					taps[#taps + 1] = {name = e.fields[2],
 							value = tostring(not on), x = x, y = cy,
 							w = size, h = size, check = true}
@@ -1446,10 +1512,43 @@ function M.new(magic, buildat, log, ctx)
 				end
 			elseif name == "tablecolumns" then
 				columns = parse_columns(e.fields)
-			elseif name == "label" or name == "textarea" or
-					name == "vertlabel" then
+			elseif name == "textarea" then
+				-- textarea[X,Y;W,H;name;label;default], its label above it.
+				-- A nameless one is text to read, wrapped in its box, and
+				-- with no default Luanti shows its label there instead
+				-- (parseField's swap for old forms): VoxeLibre's
+				-- achievement descriptions are written that way.
 				local x, y = at(e, 1)
-				local text = name == "textarea" and e.fields[5] or e.fields[2]
+				local w, h = geometry(e, 2)
+				if legacy and x and w then
+					x, y = x - layout.origin[1], y - layout.origin[2] + btn_h
+					w = w - (sx - imgsize)
+				end
+				if x and w then
+					local st = style_of(name, e.fields[3])
+					local color = st.textcolor and
+							markup_color("\27(c@"..st.textcolor..")")
+					local text, above = e.fields[5] or "", e.fields[4] or ""
+					if (e.fields[3] or "") == "" and text == "" then
+						text, above = above, ""
+					end
+					if text ~= "" then
+						local t = label(window, x, y, w,
+								formspec.strip_escapes(text), 13,
+								markup_color(text) or color)
+						t:SetWordwrap(true)
+					end
+					if above ~= "" then
+						label(window, x, y - 15, nil,
+								formspec.strip_escapes(above), 12, color)
+					end
+				end
+			elseif name == "label" or name == "vertlabel" then
+				local x, y = at(e, 1)
+				if legacy and y then
+					y = y + 7 / 30 * sy
+				end
+				local text = e.fields[2]
 				if name == "vertlabel" and text then
 					-- Luanti's own: the label with a line break after each
 					-- character (guiFormSpecMenu.cpp parseVertLabel)
@@ -1491,6 +1590,11 @@ function M.new(magic, buildat, log, ctx)
 			elseif name == "field" or name == "pwdfield" then
 				local x, y = at(e, 1)
 				local w, h = geometry(e, 2)
+				if legacy and x and w then
+					x = x - layout.origin[1]
+					y = y - layout.origin[2] + h / sy * imgsize / 2 - btn_h
+					w, h = w - (sx - imgsize), btn_h * 2
+				end
 				if x and w then
 					local st = style_of(name, e.fields[3])
 					local bg = st.bgcolor and
@@ -1515,7 +1619,18 @@ function M.new(magic, buildat, log, ctx)
 					edit.enabled = true
 					edit.priority = next_priority()
 					edit.texture = magic.cache:GetResource("Texture2D", WHITE)
-					edit.color = bg or magic.Color(0.1, 0.1, 0.12, 0.9)
+					-- Luanti's skin: grey, and green while it has the keys
+					-- (EGDC_EDITABLE, EGDC_FOCUSED_EDITABLE)
+					edit.color = bg or magic.Color(0.5, 0.5, 0.5)
+					if not bg then
+						magic.SubscribeToEvent(edit, "Focused", function()
+							edit.color = magic.Color(96 / 255, 134 / 255,
+									49 / 255)
+						end)
+						magic.SubscribeToEvent(edit, "Defocused", function()
+							edit.color = magic.Color(0.5, 0.5, 0.5)
+						end)
+					end
 					local value = name == "field" and e.fields[5] or ""
 					edit:SetText(formspec.strip_escapes(value or ""))
 					-- The text fits the field: the style's size is for the
@@ -1525,6 +1640,11 @@ function M.new(magic, buildat, log, ctx)
 					if te then
 						te:SetFontSize(math.max(8, math.min(14,
 								math.floor(h * 0.6))))
+					end
+					local fg = st.textcolor and
+							markup_color("\27(c@"..st.textcolor..")")
+					if te and fg then
+						te:SetColor(fg)
 					end
 					if name == "pwdfield" then
 						edit.echoCharacter = 42 -- an asterisk
@@ -1603,6 +1723,17 @@ function M.new(magic, buildat, log, ctx)
 			elseif e.name == "set_focus" then
 				focus_name = e.fields[1]
 			end
+		end
+		-- None said: the first empty field, else the first field, as
+		-- Luanti's setInitialFocus()
+		if not focus_name then
+			for _, f in ipairs(fields) do
+				if f.edit and f.value == "" then
+					focus_name = f.name
+					break
+				end
+			end
+			focus_name = focus_name or (fields[1] and fields[1].name)
 		end
 		-- Not on a touchscreen: a focused field opens its keyboard over the
 		-- form, and the field is the player's to tap (user, 2026-09-30)

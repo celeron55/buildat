@@ -2319,7 +2319,7 @@ local function show_client(host, port, name, password, mode, origin)
 			local spec = form.spec
 			-- The prepend goes in front unless the form says not to
 			if not spec:find("no_prepend%[") then
-				spec = prepend..spec
+				spec = prepend.."__prepend_end[]"..spec
 			end
 			log:verbose("FORMSPEC "..spec)
 			local elements, size, real = formspec.parse(spec)

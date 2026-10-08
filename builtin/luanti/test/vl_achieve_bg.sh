@@ -8,7 +8,9 @@
 # away. The fixture does what a click on the list does -- shows the form
 # again with that item -- an item without a bar, then one with, and holds
 # it; the client shoots every second, and each shot with the bar in it
-# must have the backdrop's grey around it. Vanilla, 1280x720.
+# must have the backdrop's grey around it -- VoxeLibre's own light panel
+# since the server sends the formspec prepend ([VL_INV_PARITY]), where it
+# was the client's dark one. Vanilla, 1280x720.
 #
 #   builtin/luanti/test/vl_achieve_bg.sh
 set -u
@@ -66,14 +68,15 @@ shots = with_bar = 0
 for path in sorted(glob.glob(sys.argv[1] + "/s*.png")):
     im = Image.open(path).convert("RGB")
     dark = lambda p: max(im.getpixel(p)) < 70
-    # The list's box, and the progress bar's light grey under the icon
-    if not dark((700, 400)) or min(im.getpixel((440, 495))) < 120:
+    near = lambda p, c: all(abs(a - b) <= 16 for a, b in
+            zip(im.getpixel(p), c))
+    # The list's box, and the progress bar's grey under the description
+    if not dark((700, 400)) or not near((330, 495), (157, 157, 157)):
         continue
     with_bar += 1
-    # The backdrop's grey (0.12, 0.12, 0.14 at 0.94), whatever is behind
-    grey = lambda p: all(abs(a - b) <= 16 for a, b in
-            zip(im.getpixel(p), (31, 31, 36)))
-    backdrop = [p for p in ((320, 420), (560, 440), (330, 250)) if not grey(p)]
+    # The panel's grey, whatever is behind
+    backdrop = [p for p in ((320, 420), (560, 440), (330, 250))
+            if not near(p, (208, 208, 208))]
     if backdrop:
         print("FAIL: %s: no backdrop at %s" % (path, backdrop))
         sys.exit(1)

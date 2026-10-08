@@ -2165,7 +2165,9 @@ local function prepended(playername, spec)
 	if spec == "" or p == "" or spec:find("no_prepend[", 1, true) then
 		return spec
 	end
-	return p .. spec
+	-- The marker says where the prepend ends: Luanti reads a prepend in
+	-- legacy coordinates whatever the form's are
+	return p .. "__prepend_end[]" .. spec
 end
 
 function core.show_formspec(playername, formname, formspec)
