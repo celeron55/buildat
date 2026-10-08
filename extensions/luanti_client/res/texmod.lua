@@ -93,6 +93,15 @@ end
 
 -- A Luanti ColorString: "#rgb", "#rgba", "#rrggbb", "#rrggbbaa" or a name.
 -- Returns {r, g, b, a}, or nil.
+-- How many square frames a vertical strip of w by h holds ("[verticalframe"
+-- cuts it into that many), or `default` when it is no strip
+function M.strip_frames(w, h, default)
+	if w and h and w > 0 and h > w then
+		return math.floor(h / w)
+	end
+	return default
+end
+
 function M.parse_color(s)
 	if s == nil or s == "" then
 		return nil

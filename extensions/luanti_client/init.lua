@@ -1567,19 +1567,26 @@ local function show_client(host, port, name, password, mode, origin)
 		-- One frame of the crack, as a resource name: the strip cut into
 		-- frames by the same [verticalframe texmod.lua already does for an
 		-- animated tile. Cut once per frame index and kept.
-		local crack_frames = nil
+		-- **Counted from the file that is cut** ([CRACK_FRAMES]): a
+		-- server's own crack_anylength.png goes before the client's
+		-- five frames -- VoxeLibre's has ten, Repixture's eight -- and a
+		-- strip cut into the wrong count is two cracks squeezed onto a
+		-- face. Counted again, and the cut frames forgotten, when which
+		-- file that is changes: the server's media arriving.
+		local crack_file = nil
+		local crack_frames = CRACK_FRAMES_DEFAULT
 		local crack_resource = {}
 
 		local function crack_frame_count()
-			if crack_frames then
-				return crack_frames
-			end
-			crack_frames = CRACK_FRAMES_DEFAULT
-			local tex = magic.cache:GetResource("Texture2D",
-					BUILTIN_TEXTURES["crack_anylength.png"])
-			-- A strip of square frames, so how many there are is its shape
-			if tex and tex.width > 0 and tex.height > tex.width then
-				crack_frames = math.floor(tex.height / tex.width)
+			local file = texmod_ctx.resource("crack_anylength.png")
+			if file ~= crack_file then
+				crack_file = file
+				crack_resource = {}
+				local tex = file and magic.cache:GetResource("Texture2D", file)
+				crack_frames = texmod.strip_frames(tex and tex.width,
+						tex and tex.height, CRACK_FRAMES_DEFAULT)
+				log:info("crack: " .. crack_frames .. " frames in " ..
+						tostring(file))
 			end
 			return crack_frames
 		end

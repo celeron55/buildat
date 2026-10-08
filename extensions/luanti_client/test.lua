@@ -969,6 +969,11 @@ print("player: ok")
 -- texmod.lua: Luanti's texture modifier language
 --
 
+-- [CRACK_FRAMES]: VoxeLibre's crack strip is ten frames, the client's own five
+assert(texmod.strip_frames(16, 160, 5) == 10, "texmod: a 16x160 strip")
+assert(texmod.strip_frames(16, 80, 5) == 5, "texmod: a 16x80 strip")
+assert(texmod.strip_frames(16, 16, 5) == 5 and texmod.strip_frames(nil, nil, 5) == 5,
+		"texmod: no strip")
 assert(texmod.parse_color("#f80")[1] == 255 and
 		texmod.parse_color("#f80")[2] == 136 and
 		texmod.parse_color("#f80")[3] == 0, "texmod: #rgb")
