@@ -275,9 +275,18 @@ magic.SubscribeToEvent("Update", function()
 end)
 
 -- **Drafts** ([HEARTH_UI]): what is typed in a field, kept by its place
--- ("reply 12", "new 3", "edit 40") while the client runs, so Back or a
--- page drawn again loses nothing
-local drafts = {}
+-- ("reply 12", "new 3", "edit 40"), so Back or a page drawn again loses
+-- nothing; and kept on the client with the page open ([HEARTH_RESUME],
+-- below), so a closed tab or a server's restart loses neither
+local drafts, draft_times = {}, {}
+-- [HEARTH_RESUME] The page open as data: {kind = "thread", id, topic,
+-- scroll}, {kind = "topic", id} or {kind = "compose", topic, tracker};
+-- nil for the rest, which start at the top
+local place = nil
+local state_dirty = false
+-- A kept thread's scroll, for show_thread to put it back
+local restore_scroll = nil
+local function state_changed() state_dirty = true end
 
 -- A field; multi: a message's, where Enter breaks the line and Ctrl+Enter
 -- finishes. `draft` names its draft.
@@ -298,6 +307,8 @@ local function edit(parent, label, multi, draft, width)
 		e:SetText(drafts[draft] or "")
 		magic.SubscribeToEvent(e, "TextChanged", function()
 			drafts[draft] = e:GetText()
+			draft_times[draft] = buildat.get_time_us() / 1e6
+			state_changed()
 		end)
 	end
 	return e
@@ -382,6 +393,8 @@ end
 local function enter(key, page)
 	history = {}
 	section = key
+	place = nil
+	state_changed()
 	here = page
 	draw_sidebar()
 	page()
@@ -410,6 +423,8 @@ end
 -- Escape: a selected message let go, else Back
 local selected = nil
 local composer = nil
+-- A touchscreen: Escape there is the browser's Back, which goes back
+local touch = buildat.get_env("BUILDAT_TOUCH") == "1"
 -- The open thread's list, laid out again as a message's actions show
 local thread_list = nil
 
@@ -758,6 +773,8 @@ local ORDERS = {{"active", "active"}, {"new", "new"},
 		{"unanswered", "unanswered first"}}
 show_topic = function(id)
 	open_thread = nil
+	place = {kind = "topic", id = id}
+	state_changed()
 	req("topic", {topic = id}, function(t)
 		local w = open(t.name)
 		if t.about ~= "" then
@@ -844,8 +861,11 @@ end
 -- message's actions show under it while it is selected (user, 2026-10-06:
 -- reading stays uncluttered). `at`: a message to open at, else the first
 -- unread, else the end.
-show_thread = function(id, at)
+show_thread = function(id, at, missing)
+	place = {kind = "thread", id = id}
+	state_changed()
 	req("thread", {thread = id}, function(t)
+		place.topic = t.topic
 		local w = open(t.title)
 		local info = kind_text(t)
 		info = (info ~= "" and info .. (t.version ~= "" and
@@ -1010,7 +1030,14 @@ show_thread = function(id, at)
 			end
 		end
 		place()
-		open_thread = {id = id, last = t.list[#t.list] and t.list[#t.list].id or 0,
+		-- [HEARTH_RESUME]: where it was scrolled to when kept
+		if restore_scroll then
+			v:scroll(-1000000)
+			v:scroll(restore_scroll)
+			restore_scroll = nil
+		end
+		open_thread = {id = id, view = v,
+				last = t.list[#t.list] and t.list[#t.list].id or 0,
 				append = function(list_)
 			for _, m in ipairs(list_) do
 				add_message(m, false)
@@ -1038,6 +1065,7 @@ show_thread = function(id, at)
 			-- It comes back as "hr:new", as anyone else's does
 			req("reply", {thread = id, body = e:GetText()}, function()
 				drafts[key] = nil
+				state_changed()
 				pcall(function() e:SetText("") end)
 			end)
 		end
@@ -1058,6 +1086,9 @@ show_thread = function(id, at)
 			e:SetFocus(true)
 		end
 	end, function(why)
+		if missing then
+			return missing()
+		end
 		say(why)
 	end)
 end
@@ -1132,14 +1163,134 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 	end
 	if accounts.page then
 		accounts.back()
-	elseif area.visible and selected and composer then
+	elseif area.visible and selected and composer and not touch then
 		composer:SetFocus(true)
 	elseif area.visible and (#history > 0 or narrow) then
 		back()
+	elseif area.visible and section ~= "home" then
+		-- A section's first page: Back is to the top ([PLAYTEST_1008])
+		enter("home", function() show_home() end)
 	else
 		accounts.show_account()
 	end
 end)
+-- [PLAYTEST_1008] The browser's Back is Escape while the handler above has
+-- a page to go back from (the web page's depth, [TAP_BACK]); at the top it
+-- leaves the page. A client from before set_back_depth_extra has none.
+local back_extra = nil
+magic.SubscribeToEvent("Update", function()
+	if not buildat.set_back_depth_extra then
+		return
+	end
+	local n = frame and frame.visible and (accounts.page or
+			(area.visible and (#history > 0 or narrow or
+			section ~= "home"))) and 1 or 0
+	if n ~= back_extra then
+		back_extra = n
+		buildat.set_back_depth_extra(n)
+	end
+end)
+
+-- **Kept on the client** ([HEARTH_RESUME]): every non-empty draft and
+-- the page open, in the served code's storage (per server; on the web
+-- IndexedDB, written every 5 s and when the page is hidden), with the
+-- account they are of: another account on the same client gets none of
+-- them. Written a second after a change at most.
+local STATE, DRAFT_DAYS = "hearth_state", 30
+-- Written only once read, so a start writes nothing over it first; a
+-- scripted client keeps nothing unless BUILDAT_HEARTH_RESUME=1 (a check's
+-- client name logs in many times)
+local state_loaded = false
+local state_at = 0
+magic.SubscribeToEvent("Update", function()
+	local t = buildat.get_time_us()
+	if not state_dirty or t - state_at < 1000000 or not state_loaded or
+			not buildat.storage_write then
+		return
+	end
+	state_dirty, state_at = false, t
+	local d = {}
+	for k, text_ in pairs(drafts) do
+		if text_ ~= "" then
+			d[k] = {text = text_, t = draft_times[k] or t / 1e6}
+		end
+	end
+	local p = place
+	if p and p.kind == "thread" and open_thread and open_thread.id == p.id
+			and open_thread.view then
+		p.scroll = -open_thread.view.list.position.y
+	end
+	buildat.storage_write(STATE, encode({account = me.account, drafts = d,
+			place = p}))
+end)
+-- A thread's scroll changes with no event here: the place is written
+-- again every few seconds while a thread is open
+-- simplified: by a timer rather than on each scroll
+local scroll_at = 0
+magic.SubscribeToEvent("Update", function()
+	local t = buildat.get_time_us()
+	if open_thread and t - scroll_at > 5000000 then
+		scroll_at = t
+		state_changed()
+	end
+end)
+
+-- The kept drafts into `drafts`, and the kept page, or nil; on start,
+-- once `me` is known
+local function load_state()
+	if scripted and buildat.get_env("BUILDAT_HEARTH_RESUME") ~= "1" then
+		return nil
+	end
+	state_loaded = true
+	local raw = buildat.storage_read and buildat.storage_read(STATE)
+	local st = raw and buildat.parse_json(raw)
+	if type(st) ~= "table" or st.account ~= me.account then
+		return nil
+	end
+	local oldest = buildat.get_time_us() / 1e6 - DRAFT_DAYS * 86400
+	for k, d in pairs(type(st.drafts) == "table" and st.drafts or {}) do
+		if type(k) == "string" and type(d) == "table" and
+				type(d.text) == "string" and (tonumber(d.t) or 0) > oldest then
+			drafts[k], draft_times[k] = d.text, tonumber(d.t)
+		end
+	end
+	return type(st.place) == "table" and st.place or nil
+end
+
+-- The kept page opened again, with Back going up from it (thread to topic,
+-- topic to the top); a thread gone or hidden opens its topic, or the top
+local function restore(p)
+	local function home() enter("home", function() show_home() end) end
+	local topic = tonumber(p.topic)
+	local function topic_page()
+		if topic then
+			enter("topic " .. topic, function() show_topic(topic) end)
+		else
+			home()
+		end
+	end
+	if p.kind == "thread" and tonumber(p.id) then
+		local id = tonumber(p.id)
+		section = topic and "topic " .. topic or "home"
+		history = {topic and function() show_topic(topic) end or
+				function() show_home() end}
+		draw_sidebar()
+		here = function() show_thread(id) end
+		local scroll = tonumber(p.scroll)
+		show_thread(id, nil, topic_page)
+		if scroll then
+			restore_scroll = scroll
+		end
+	elseif p.kind == "topic" and tonumber(p.id) then
+		topic = tonumber(p.id)
+		topic_page()
+	elseif p.kind == "compose" and topic then
+		topic_page()
+		go(function() show_compose({topic = topic, tracker = p.tracker}) end)
+	else
+		home()
+	end
+end
 
 -- **Compose**: a new thread (`o.topic`, `o.tracker`), feedback about a
 -- package (`o.feedback`), or an edit (`o.edit`, a message of `o.thread`);
@@ -1158,6 +1309,8 @@ show_compose = function(o)
 				"server " .. o.server.subject
 	else
 		title, key = "A new thread", "new " .. (o.topic or 0)
+		place = {kind = "compose", topic = o.topic, tracker = o.tracker}
+		state_changed()
 	end
 	local w = open(title)
 	if o.feedback then
@@ -1238,6 +1391,7 @@ show_compose = function(o)
 		local b = body:GetText()
 		local function done(new_id)
 			drafts[key], drafts[key .. " title"] = nil, nil
+			state_changed()
 			-- In place of this page; an edit's thread is the one behind it
 			if o.edit then
 				table.remove(history)
@@ -1836,6 +1990,7 @@ accounts.on_joined = function()
 			-- click on it would; "queue" or "account:<name>" a page, and
 			-- "server:<key>" a Server window page
 			local open_page = buildat.get_env("BUILDAT_HEARTH_OPEN") or ""
+			local kept = load_state()
 			local open_ = tonumber(open_page)
 			-- **"Feedback..." on an app** ([PACKAGE_SUBJECT]): the launch grid
 			-- came here with the app's package and versions, which start the
@@ -1877,7 +2032,11 @@ accounts.on_joined = function()
 					end
 				end)
 			else
-				enter("home", function() show_home() end)
+				if kept then
+					restore(kept)
+				else
+					enter("home", function() show_home() end)
+				end
 			end
 			-- "server:<page>": the Server window's page over it
 			if open_page:match("^server:") then

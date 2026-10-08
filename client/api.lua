@@ -190,10 +190,26 @@ local local_launch, running_game = nil, nil
 buildat.safe.set_leave_reason = function(text)
 	leave_reason = tostring(text)
 end
+-- [TAP_BACK] The main stack's depth for the web page's Back, and what an
+-- app adds to it ([PLAYTEST_1008]): screens of its own inside one of the
+-- main stack's, so Back is Escape while it has one to go back from
+local back_depth, back_extra = 0, 0
+buildat.set_back_depth = function(n)
+	back_depth = n
+	__buildat_set_back_depth(back_extra > 0 and
+			math.max(back_depth, 1) + back_extra or back_depth)
+end
+buildat.safe.set_back_depth_extra = function(n)
+	back_extra = math.max(0, math.floor(tonumber(n) or 0))
+	buildat.set_back_depth(back_depth)
+end
 -- Back to the launcher, true when there was one to go back to; `why`, a
 -- dialog over it. A launcher with no game running under it (a client
 -- started straight into a server) answers false
 local function leave_to_launcher(why)
+	-- simplified: an app's extra depth goes when it is left through here;
+	-- another way out keeps it until the next app sets its own
+	buildat.safe.set_back_depth_extra(0)
 	local m = buildat.menu_extension()
 	if not (m and m.leave_app and m.leave_app()) then
 		return false
@@ -900,10 +916,8 @@ buildat.safe.leave_to_menu = __buildat_leave_to_menu
 -- asks before taking the mouse: a check shares a desk with the person
 -- whose mouse it is ([BOX_PLAYTEST_3])
 buildat.safe.is_scripted = __buildat_is_scripted
--- [TAP_BACK] uistack's: Escape pressed as Back, and the main stack's depth
--- for the web page's Back
+-- [TAP_BACK] uistack's: Escape pressed as Back (the depth is above)
 buildat.press_back = __buildat_press_back
-buildat.set_back_depth = __buildat_set_back_depth
 
 -- **The client's preferences, against a fixed key set**: the names are
 -- `list_preferences()`'s and nothing else, which is what keeps this a
