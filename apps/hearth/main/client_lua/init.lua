@@ -43,8 +43,10 @@ local function encode(v)
 	return tostring(v)
 end
 
+-- BUILDAT_HEARTH_RESUME=1 logs as a scripted client does, for its check
 local scripted = (buildat.get_env("BUILDAT_HEARTH_REQS") or "") ~= "" or
-		(buildat.get_env("BUILDAT_HEARTH_OPEN") or "") ~= ""
+		(buildat.get_env("BUILDAT_HEARTH_OPEN") or "") ~= "" or
+		buildat.get_env("BUILDAT_HEARTH_RESUME") == "1"
 local next_id = 1
 local waiting = {}
 -- What the last request said, for the page drawn next; say() puts it on
@@ -290,7 +292,9 @@ local function state_changed() state_dirty = true end
 
 -- A field; multi: a message's, where Enter breaks the line and Ctrl+Enter
 -- finishes. `draft` names its draft.
-local function edit(parent, label, multi, draft, width)
+-- on_change: called on TextChanged after the draft is kept; a second
+-- subscription to it would replace this one's
+local function edit(parent, label, multi, draft, width, on_change)
 	if label then
 		text(parent, label, DIM)
 	end
@@ -305,10 +309,17 @@ local function edit(parent, label, multi, draft, width)
 	e.textCopyable = true
 	if draft then
 		e:SetText(drafts[draft] or "")
+	end
+	if draft or on_change then
 		magic.SubscribeToEvent(e, "TextChanged", function()
-			drafts[draft] = e:GetText()
-			draft_times[draft] = buildat.get_time_us() / 1e6
-			state_changed()
+			if draft then
+				drafts[draft] = e:GetText()
+				draft_times[draft] = buildat.get_time_us() / 1e6
+				state_changed()
+			end
+			if on_change then
+				on_change()
+			end
 		end)
 	end
 	return e
@@ -1285,8 +1296,15 @@ local function restore(p)
 		topic = tonumber(p.id)
 		topic_page()
 	elseif p.kind == "compose" and topic then
-		topic_page()
-		go(function() show_compose({topic = topic, tracker = p.tracker}) end)
+		-- Not topic_page() and then go(): the topic's answer, coming after,
+		-- drew it over this page
+		section = "topic " .. topic
+		history = {function() show_topic(topic) end}
+		draw_sidebar()
+		here = function()
+			show_compose({topic = topic, tracker = p.tracker})
+		end
+		here()
 	else
 		home()
 	end
@@ -1363,7 +1381,11 @@ show_compose = function(o)
 	-- The field the page's width; the preview under it once Preview is
 	-- pressed, as a reply's ([HEARTH_NEW_PREVIEW]: beside it, it halved
 	-- the field)
-	local body = edit(w, "The message (Markdown)", true, key, W)
+	-- A second after the last key, a preview shown again
+	local changed = nil
+	local body = edit(w, "The message (Markdown)", true, key, W, function()
+		changed = buildat.get_time_us()
+	end)
 	body:SetFixedHeight(W >= 600 and 200 or 120)
 	if o.edit and not drafts[key] then
 		body:SetText(o.edit.body)
@@ -1371,6 +1393,10 @@ show_compose = function(o)
 		local f = o.feedback
 		body:SetText("App: " .. f.package .. " " .. f.version .. "\nEngine: " ..
 				f.engine .. "\nPlatform: " .. f.platform .. "\n\n")
+	end
+	if scripted then
+		log:info("hearth: fields " .. encode({title = title_e and
+				title_e:GetText() or "", body = body:GetText()}))
 	end
 	local pv, shown = nil, nil
 	local function show(s)
@@ -1420,11 +1446,6 @@ show_compose = function(o)
 	markup_buttons(w, body, show, function(r)
 		button(r, o.edit and "Save" or o.feedback and "Send" or
 				"Start the thread", submit, true)
-	end)
-	-- A second after the last key, a preview shown again
-	local changed = nil
-	magic.SubscribeToEvent(body, "TextChanged", function()
-		changed = buildat.get_time_us()
 	end)
 	local sub
 	sub = magic.SubscribeToEvent("Update", function()

@@ -1,0 +1,59 @@
+#!/bin/bash
+# tier: quick
+# cost: ~40 s (2026-10-08)
+# covers: apps/hearth/main/client_lua/init.lua builtin/accounts/client_lua/**
+# [HEARTH_RESUME_2]: a client with BUILDAT_HEARTH_RESUME=1 opens a topic's
+# new-thread page, types a title and a two-line message and quits; started
+# again, it is on that page with both fields back.
+# simplified: native only; the kept state is client Lua, the same on the
+# web, whose storage ([HEARTH_RESUME]) is the one difference left undriven.
+# There is no new-thread page without a topic to keep.
+#
+#   apps/hearth/resume_check.sh
+set -u
+. "$(dirname "$0")/../../util/check_paths.sh"
+here=$(cd "$(dirname "$0")/../.." && pwd)
+t=$(mktemp -d)
+pid=
+trap '[ -n "$pid" ] && kill $pid 2>/dev/null; [ -n "${KEEP_TMP:-}" ] && echo "kept $t" || rm -rf "$t"' EXIT
+fail(){ echo "FAIL: $*"; exit 1; }
+P=29884
+
+cd "$here/Build"
+start_server "$t/srv.log" "setup code" 120 $P \
+	bin/buildat_server -m ../apps/hearth -D "$t/srv" -l 3 ||
+	fail "Hearth did not start"
+pid=$SERVER_PID
+code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
+
+client(){ # commands log [env...]
+	local c=$1 log=$2
+	shift 2
+	printf "$c" > "$t/cmds"
+	env BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12 \
+		BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_CODE=$code "$@" \
+		timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 \
+		-l 3 -o sound_mute=1 -s 127.0.0.1:$P -c @"$t/cmds" > "$log" 2>&1
+}
+
+client 'delay 6000\nquit\n' "$t/topic.log" \
+	BUILDAT_HEARTH_REQS='{"cmd":"new_topic","name":"Help","about":"x"}'
+grep -aq 'hr: {"id":1001,"ok":true' "$t/topic.log" || fail "the topic"
+
+# The page's title field has the focus; the message field clicked
+client 'delay 5000\nclick Button "Help"\ndelay 2000
+click Button "New thread..."\ndelay 2000\ntext My title\ndelay 300
+mouse_pos 450 200\nmouse_click left\ndelay 300\ntext first line
+keypress Return\ntext second line\ndelay 2500\nquit\n' \
+	"$t/type.log" BUILDAT_HEARTH_RESUME=1
+client 'delay 6000\nquit\n' "$t/back.log" BUILDAT_HEARTH_RESUME=1
+
+page=$(grep -ao "hearth: page .*" "$t/back.log" | tail -1)
+[ "$page" = "hearth: page A new thread" ] ||
+	fail "the page after a restart: $page (typed: $(grep -ao 'hearth: page .*' "$t/type.log" | tail -1))"
+fields=$(grep -ao "hearth: fields .*" "$t/back.log" | tail -1)
+want='hearth: fields {"body":"first line\u000asecond line","title":"My title"}'
+alt='hearth: fields {"title":"My title","body":"first line\u000asecond line"}'
+[ "$fields" = "$want" ] || [ "$fields" = "$alt" ] ||
+	fail "the fields after a restart: $fields"
+echo "PASS: the new-thread page and its title and message come back after a restart"
