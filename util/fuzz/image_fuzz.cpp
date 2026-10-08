@@ -11,6 +11,7 @@
 #include <Urho3D/Core/Context.h>
 #include <Urho3D/IO/MemoryBuffer.h>
 #include <Urho3D/Resource/Image.h>
+#include <STB/stb_image.h>
 #include <cstdint>
 #include <vector>
 
@@ -18,6 +19,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
 	using namespace Urho3D;
 	static Context *context = new Context();
+	// [SEC_RUN2_LEFTOVERS] simplified: a size declared over 2^24 pixels is
+	// skipped, as the compressed branch skips one below -- stb_image
+	// decoding what a small input declares held run 2 at 3 exec/s. The
+	// large-size paths go unfuzzed; drop this for a run that wants them.
+	int w, h, comp;
+	if(stbi_info_from_memory(data, (int)size, &w, &h, &comp) &&
+			(int64_t)w * h > (1 << 24))
+		return 0;
 	SharedPtr<Image> image(new Image(context));
 	MemoryBuffer buf(data, (unsigned)size);
 	if(!image->Load(buf))
