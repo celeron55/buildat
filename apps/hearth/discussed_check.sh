@@ -1,13 +1,15 @@
 #!/bin/bash
 # tier: quick
-# cost: ~60 s (2026-10-08)
+# cost: ~100 s (2026-10-08)
 # covers: apps/hearth/main/main.cpp
 # [HEARTH_DISCUSSED_API]: GET /api/discussed. Empty first ({}). Then bob, a
 # member, writes two days ago and today; carol, a new account, twice today;
 # eve, a helper, today, and that one hidden. Neither carol's nor eve's
 # counts, so today has one and the week two: span "this week", a message of
 # bob's, its excerpt plain (no markup, the link as its text), its URL
-# opening the message, and the CORS header there.
+# opening its thread at it ([HEARTH_VISITOR_FLOW]), and the CORS header
+# there. Then a message past the thread's first page: /m/ links the page
+# it is on.
 #
 #   apps/hearth/discussed_check.sh
 set -u
@@ -93,11 +95,27 @@ e = m["excerpt"]
 want = "First one with the site and <b>raw</b> code here"
 if e != want:
     fail("excerpt %r, not %r" % (e, want))
-if not m["url"].endswith("/m/%d" % m["id"]) or "/t/1" not in m["thread"]["url"] \
+if not m["url"].endswith("/t/1#m%d" % m["id"]) or "/t/1" not in m["thread"]["url"] \
         or "/topic/1" not in m["topic"]["url"]:
     fail("the links")
 PY
 url=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["message"]["url"])' "$t/api.json")
-curl -s "$url" | grep -q 'the site' || fail "$url does not open the message"
+curl -s "${url%#*}" | grep -q "id=\"${url#*#}\".*the site" ||
+	fail "$url does not open the thread at the message"
 [ "$(curl -s "$API")" = "$(cat "$t/api.json")" ] || fail "the pick changed within ten minutes"
-echo "PASS: /api/discussed: this week's pick, a member's, plain, its links open, CORS"
+# A message past the thread's first page (256 KiB): /m/'s way to its
+# thread is the page it is on
+big=$(head -c 19000 /dev/zero | tr '\0' x)
+# Five at a time: an environment string is 128 KiB at most
+reqs=
+for _i in $(seq 5); do
+	reqs+="{\"cmd\":\"reply\",\"thread\":1,\"body\":\"$big\"}"$'\n'
+done
+for _i in 1 2 3; do client admin checkpass12 "$reqs"; done
+client admin checkpass12 '{"cmd":"reply","thread":1,"body":"the last"}'
+last=21 # after the five above and the fifteen
+in=$(curl -s "http://127.0.0.1:$P/m/$last" | grep -o 'In <a href="[^"]*"' | cut -d'"' -f2)
+case "$in" in /t/1\?after=*"#m$last") ;; *) fail "/m/$last's thread link is $in" ;; esac
+curl -s "http://127.0.0.1:$P${in%#*}" | grep -q "id=\"m$last\"" ||
+	fail "$in is not the page with the message"
+echo "PASS: /api/discussed: this week's pick, a member's, plain, its links open at it, CORS"

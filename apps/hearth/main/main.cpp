@@ -690,6 +690,7 @@ struct Module: public interface::Module
 	// /api/discussed's pick and when it was made
 	json::Value m_discussed;
 	int64_t m_discussed_at = -1;
+	ss_ m_discussed_path;
 	// When the files were last held to their budget (sweep_files)
 	int64_t m_files_swept = 0;
 	// What a request changed, sent once it is committed
@@ -1415,6 +1416,29 @@ struct Module: public interface::Module
 		return t;
 	}
 
+	// The thread page a message is on: the `after` its link takes, 0 for
+	// the first ([HEARTH_VISITOR_FLOW])
+	int64_t page_after(int64_t thread_id, int64_t message_id)
+	{
+		int64_t after = 0;
+		for(;;){
+			const json::Value t = thread(thread_id, after);
+			const json::Value &list = t.get("list");
+			if(!t.get("more").is_true() || list.size() == 0 ||
+					jint(list.at(list.size() - 1), "id") >= message_id)
+				return after;
+			after = jint(list.at(list.size() - 1), "id");
+		}
+	}
+
+	// The address of a message where it is read: its thread's page, at it
+	ss_ message_path(int64_t thread_id, int64_t message_id)
+	{
+		const int64_t after = page_after(thread_id, message_id);
+		return "/t/"+itos(thread_id)+(after ? "?after="+itos(after) : ss_())+
+				"#m"+itos(message_id);
+	}
+
 	// held: a new account's link waiting for approval ([TRUST_LADDER]),
 	// in nobody's view, index or notifications but its author's
 	// simplified: approved later, it tells no one, as a hide undone does
@@ -1598,6 +1622,8 @@ struct Module: public interface::Module
 				"<meta name=\"viewport\" content=\"width=device-width, "
 				"initial-scale=1\"><title>"+html(title)+"</title><style>"+
 				interface::web_brand::css+".blob{color:#26d9ff}"
+				// The message a link pointed at
+				".box:target{border:2px solid #8c33f2;background:#2b2638}"
 				"</style></head><body><header>"
 				"<a class=\"brand\" href=\"/\">"+interface::web_brand::logo+
 				"Hearth</a>"
@@ -1901,8 +1927,9 @@ struct Module: public interface::Module
 			m.set("hidden_text", hidden_text(q.i(7), q.s(8)));
 			const ss_ thread_title = q.s(6);
 			title = thread_title+" - Hearth";
-			body = "<p class=\"meta\">In <a href=\"/t/"+itos(q.i(5))+"#m"+
-					itos(id)+"\">"+html(thread_title)+"</a></p>\n"+
+			body = "<p class=\"meta\">In <a href=\""+
+					message_path(q.i(5), id)+"\">"+html(thread_title)+
+					"</a></p>\n"+
 					message_box(m);
 		} else if(path.compare(0, 3, "/u/") == 0){
 			// **An account's page**, where an @name goes: its last
@@ -2281,6 +2308,9 @@ struct Module: public interface::Module
 					continue;
 				m_discussed.set("span", span.second);
 				m_discussed.set("message", *in[rng() % in.size()]);
+				m_discussed_path = message_path(
+						jint(m_discussed.get("message").get("thread"), "id"),
+						jint(m_discussed.get("message"), "id"));
 				break;
 			}
 		}
@@ -2296,7 +2326,9 @@ struct Module: public interface::Module
 		json::Value out = m_discussed;
 		json::Value m = out.get("message");
 		json::Value t = m.get("thread"), p = m.get("topic");
-		m.set("url", base+"/m/"+itos(jint(m, "id")));
+		// Read in its thread, where its replies are; /m/ is its
+		// permanent address
+		m.set("url", base+m_discussed_path);
 		t.set("url", base+"/t/"+itos(jint(t, "id")));
 		p.set("url", base+"/topic/"+itos(jint(p, "id")));
 		m.set("thread", t);
