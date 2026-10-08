@@ -4491,14 +4491,64 @@ local function cube_expr(def)
 			"\1" .. right .. "^[multiply:#aaaaaa"
 end
 
+-- A node box's or a mesh's node, which Luanti's inventory draws as its
+-- shape ([VL_INV_PARITY]): "\1shape\1", "b:" and the fixed boxes
+-- ("x0,y0,z0,x1,y1,z1;...", nodes) or "m:" and the mesh, then the six
+-- tiles. The client projects it (extensions/luanti_client/res/
+-- item_shape.lua).
+local function shape_expr(def)
+	local geom
+	local nb = def.node_box
+	if def.drawtype == "nodebox" and type(nb) == "table" and
+			(nb.type == "fixed" or nb.type == "leveled") and
+			type(nb.fixed) == "table" then
+		local boxes = type(nb.fixed[1]) == "number" and {nb.fixed} or nb.fixed
+		local parts = {}
+		for _, b in ipairs(boxes) do
+			if type(b) ~= "table" or #b < 6 then
+				return nil
+			end
+			local n = {}
+			for i = 1, 6 do
+				n[i] = tonumber(b[i])
+				if not n[i] then
+					return nil
+				end
+			end
+			parts[#parts + 1] = string.format("%.4g,%.4g,%.4g,%.4g,%.4g,%.4g",
+					math.min(n[1], n[4]), math.min(n[2], n[5]),
+					math.min(n[3], n[6]), math.max(n[1], n[4]),
+					math.max(n[2], n[5]), math.max(n[3], n[6]))
+		end
+		if #parts == 0 then
+			return nil
+		end
+		geom = "b:" .. table.concat(parts, ";")
+	elseif def.drawtype == "mesh" and type(def.mesh) == "string" and
+			def.mesh ~= "" and not def.mesh:find("\1") then
+		geom = "m:" .. def.mesh
+	else
+		return nil
+	end
+	local tiles = {}
+	for i = 1, 6 do
+		tiles[i] = tile_of(def, i)
+		if tiles[i] == nil or tiles[i] == "" then
+			return nil
+		end
+	end
+	return "\1shape\1" .. geom .. "\1" .. table.concat(tiles, "\1")
+end
+
 -- What one item is drawn as: its own picture, the little cube if it places
--- one, its first tile, or what it looks like in a hand
+-- one, its shape if it is a node box or a mesh, its first tile, or what it
+-- looks like in a hand
 local function item_image_expr(def)
 	local expr = def.inventory_image
 	if expr ~= nil and expr ~= "" then
 		return expr
 	end
-	expr = cube_expr(def)
+	expr = cube_expr(def) or shape_expr(def)
 	if expr ~= nil then
 		return expr
 	end

@@ -1823,6 +1823,37 @@ local function show_client(host, port, name, password, mode, origin)
 					{CUBE_SIZE, CUBE_SIZE})
 		end
 
+		-- A node box's or a mesh's node as its shape, the way Luanti's
+		-- inventory renders it (res/item_shape.lua); loaded here, as this
+		-- function is at Lua's upvalue limit
+		local item_shape = buildat.run_extension_file("res/item_shape.lua")
+		local function inventory_shape(def)
+			local quads = nil
+			if def.drawtype == 12 and def.node_box and
+					#def.node_box.boxes > 0 then -- NDT_NODEBOX
+				quads = item_shape.box_quads(def.node_box.boxes)
+			elseif def.drawtype == 16 then -- NDT_MESH
+				quads = read_mesh(def)
+			end
+			if not quads then
+				return nil
+			end
+			local key = "\0shape"
+			local ops = item_shape.ops(quads, CUBE_UNIT, function(tile, shade)
+				local expr = tile_expression(def, math.min(tile, 6))
+				if not expr then
+					return nil
+				end
+				if shade then
+					expr = expr.."^[multiply:"..shade
+				end
+				key = key.."\0"..expr
+				return texmod.resolve(expr, texmod_ctx)
+			end)
+			return ops and texmod_ctx.compose(def.name..key, ops,
+					{CUBE_SIZE, CUBE_SIZE})
+		end
+
 		function item_image(item_name)
 			-- The name an alias means, so that what is looked for below is
 			-- the item itself
@@ -1835,7 +1866,7 @@ local function show_client(host, port, name, password, mode, origin)
 			if node then
 				-- A voxel with no inventory image of its own is the little
 				-- cube, when it is a cube at all
-				local cube = inventory_cube(node)
+				local cube = inventory_cube(node) or inventory_shape(node)
 				if cube then
 					return cube
 				end

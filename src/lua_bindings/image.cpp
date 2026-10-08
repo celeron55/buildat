@@ -30,6 +30,7 @@
 #include <ResourceCache.h>
 #include <Scene.h>
 #include <Color.h>
+#include <cstring>
 #include <cmath>
 #include <algorithm>
 #define MODULE "lua_bindings"
@@ -528,6 +529,24 @@ static void apply_op(magic::Context *context, Canvas &c,
 			throw Exception("compose_image(): shear has no src");
 		Canvas src;
 		load_source(context, src_name, src);
+		// Only a part of the source, in fractions of it: a face of a
+		// node box is the part of the tile its extent covers
+		double part[4] = {0.0, 0.0, 1.0, 1.0};
+		if(table_numbers(t, "part", part, 4) == 4){
+			const int x0 = std::max(0, std::min(src.w - 1,
+					(int)std::floor(part[0] * src.w + 0.5)));
+			const int y0 = std::max(0, std::min(src.h - 1,
+					(int)std::floor(part[1] * src.h + 0.5)));
+			const int x1 = std::max(x0 + 1, std::min(src.w,
+					(int)std::floor(part[2] * src.w + 0.5)));
+			const int y1 = std::max(y0 + 1, std::min(src.h,
+					(int)std::floor(part[3] * src.h + 0.5)));
+			Canvas cut;
+			cut.reset(x1 - x0, y1 - y0);
+			for(int y = y0; y < y1; y++)
+				memcpy(cut.at(0, y - y0), src.at(x0, y), (size_t)cut.w * 4);
+			src = cut;
+		}
 		int at[2] = {0, 0};
 		table_ints(t, "at", at, 2);
 		int u[2] = {src.w, 0};

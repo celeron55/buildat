@@ -155,6 +155,10 @@ end
 -- is composed when the server says so, and this is for the ones that turn up
 -- later -- a formspec's background, an item's inventory image.
 local cube_texture
+local shape_texture
+-- (mesh name) -> its quads, asked for if they have not come; beside
+-- want_model() below
+local shape_model
 
 local function texture_of(expr)
 	if expr == nil or expr == "" then
@@ -165,6 +169,9 @@ local function texture_of(expr)
 	end
 	if string.sub(expr, 1, 6) == "\1cube\1" then
 		return cube_texture(expr)
+	end
+	if string.sub(expr, 1, 7) == "\1shape\1" then
+		return shape_texture(expr)
 	end
 	local got = compose(expr, resource_of(expr))
 	if got then
@@ -233,6 +240,85 @@ function cube_texture(expr)
 	})
 	if not okc then
 		log:warning("the inventory cube could not be composed: " ..
+				tostring(errc))
+		return nil
+	end
+	added_dir()
+	composed[expr] = resource
+	return resource
+end
+
+-- A node box's or a mesh's node as the shape Luanti's inventory draws:
+-- core.__item_image_of()'s "\1shape\1" geometry and six tiles, projected
+-- by the shared res/item_shape.lua ([VL_INV_PARITY]). nil until a mesh's
+-- quads have come; the form is drawn again when they do.
+local SHAPE_MARK = "\1shape\1"
+local ok_ishape, err_ishape, item_shape =
+		buildat.run_script_file("luanti/item_shape.lua")
+if not ok_ishape or type(item_shape) ~= "table" then
+	error("luanti: could not load item_shape.lua: " .. tostring(err_ishape))
+end
+
+-- The geometry and the six tiles of a shape expression
+local function shape_parts(expr)
+	local parts = {}
+	for part in string.gmatch(string.sub(expr, #SHAPE_MARK + 1), "[^\1]+") do
+		parts[#parts + 1] = part
+	end
+	local geom = table.remove(parts, 1)
+	return geom, parts
+end
+
+function shape_texture(expr)
+	if composed[expr] then
+		return composed[expr]
+	end
+	local geom, tiles = shape_parts(expr)
+	if not geom or #tiles ~= 6 then
+		return nil
+	end
+	local quads
+	if geom:sub(1, 2) == "b:" then
+		local boxes = {}
+		for b in string.gmatch(geom:sub(3), "[^;]+") do
+			local n = {}
+			for v in string.gmatch(b, "[^,]+") do
+				n[#n + 1] = tonumber(v)
+			end
+			if #n ~= 6 then
+				return nil
+			end
+			boxes[#boxes + 1] = n
+		end
+		quads = item_shape.box_quads(boxes)
+	elseif geom:sub(1, 2) == "m:" then
+		local have = shape_model(geom:sub(3))
+		if not have then
+			return nil
+		end
+		-- The server's quads count their tiles from 0
+		quads = {}
+		for i, q in ipairs(have) do
+			quads[i] = {p = q.p, uv = q.uv, tile = (q.tile or 0) + 1}
+		end
+	else
+		return nil
+	end
+	local ops = item_shape.ops(quads, CUBE_UNIT, function(tile, shade)
+		local t = tiles[math.min(math.max(tile, 1), 6)]
+		return texture_of(shade and t .. "^[multiply:" .. shade or t)
+	end)
+	if not ops then
+		return nil
+	end
+	local resource = resource_of(expr)
+	local okc, errc = pcall(buildat.compose_image, {
+		size = {CUBE_SIZE, CUBE_SIZE},
+		ops = ops,
+		write = path_of(resource),
+	})
+	if not okc then
+		log:warning("the inventory shape could not be composed: " ..
 				tostring(errc))
 		return nil
 	end
@@ -498,6 +584,11 @@ local function want_model(name, frame)
 	buildat.send_packet("luanti:get_model",
 			cereal.binary_output({name, frame and tostring(frame) or ""},
 			{"array", "string"}))
+end
+
+shape_model = function(name)
+	want_model(name)
+	return models[name] and models[name].quads or nil
 end
 
 -- The quads of one model, grouped by the material they wear, on a node of
@@ -2443,6 +2534,9 @@ function M.item_face_texture(item_name)
 	local expr = item_images[item_name]
 	if expr ~= nil and string.sub(expr, 1, #CUBE_MARK) == CUBE_MARK then
 		expr = string.match(string.sub(expr, #CUBE_MARK + 1), "^[^\1]+")
+	elseif expr ~= nil and string.sub(expr, 1, #SHAPE_MARK) == SHAPE_MARK then
+		local _, tiles = shape_parts(expr)
+		expr = tiles[1]
 	end
 	return texture_of(expr)
 end
@@ -2693,6 +2787,13 @@ local function add_to_expr(expr, add)
 			faces[#faces + 1] = part .. add
 		end
 		return CUBE_MARK .. table.concat(faces, "\1")
+	end
+	if string.sub(expr, 1, #SHAPE_MARK) == SHAPE_MARK then
+		local geom, tiles = shape_parts(expr)
+		for i = 1, #tiles do
+			tiles[i] = tiles[i] .. add
+		end
+		return SHAPE_MARK .. geom .. "\1" .. table.concat(tiles, "\1")
 	end
 	return expr .. add
 end
@@ -3198,9 +3299,9 @@ end
 -- Only a form that has a model in it: drawing one again is cheap but it
 -- takes what the player typed in a field with it, and every other form on
 -- the screen when a model arrives is somebody else's
+-- A form's model[] or an item drawn as a mesh's shape
 form_model_arrived = function()
-	local form = current_form()
-	if form and string.find(form.spec, "model[", 1, true) then
+	if current_form() then
 		session:redraw()
 	end
 end
