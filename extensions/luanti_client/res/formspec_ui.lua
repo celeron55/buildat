@@ -820,10 +820,12 @@ function M.new(magic, buildat, log, ctx)
 			return g[1] * layout.scale[1], g[2] * layout.scale[2]
 		end
 
-		-- A form the game gave no background of its own gets a dark grey one
-		-- over the whole of it. A form is drawn over the world, and text on
-		-- top of a sunlit hillside cannot be read.
-		local has_background = false
+		-- A form the game gave no bgcolor[] gets a dark grey one over the
+		-- whole of it. A form is drawn over the world, and text on top of a
+		-- sunlit hillside cannot be read. A background[] does not take it
+		-- away: Luanti draws its default bgcolor under every form, and
+		-- VoxeLibre's achievements lost their backdrop to a progress bar's
+		-- background[] ([VL_ACHIEVE_BG]).
 		layout.slot_bg, layout.tip_bg, layout.tip_fg = nil, nil, nil
 		-- bgcolor[color;fullscreen;fbgcolor], as Luanti's
 		-- parseBackgroundColor(): the form's colour, whether it or the
@@ -831,9 +833,7 @@ function M.new(magic, buildat, log, ctx)
 		-- only), and the screen's colour ([UI_PARITY] 8)
 		local bg = nil
 		for _, e in ipairs(elements) do
-			if e.name == "background" or e.name == "background9" then
-				has_background = true
-			elseif e.name == "bgcolor" then
+			if e.name == "bgcolor" then
 				bg = bg or {form = true, color = {r = 0, g = 0, b = 0,
 						a = 140 / 255}, screen_color = {r = 0, g = 0, b = 0,
 						a = 140 / 255}}
@@ -880,7 +880,7 @@ function M.new(magic, buildat, log, ctx)
 			if bg.form then
 				box(window, 0, 0, layout.width, layout.height, rgba(bg.color))
 			end
-		elseif not has_background then
+		else
 			box(window, 0, 0, layout.width, layout.height,
 					magic.Color(0.12, 0.12, 0.14, 0.94))
 		end
