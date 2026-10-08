@@ -26,7 +26,7 @@ end
 -- password as well as KeyDown did. While one has the focus only the keys
 -- that move or finish answer.
 local function secret_focus()
-	return magic_sandbox.is_secret_field(ui:GetFocusElement())
+	return magic_sandbox.keys_withheld()
 end
 local MOVE_KEYS = {}
 for _, name in ipairs({"KEY_RETURN", "KEY_RETURN2", "KEY_KP_ENTER",
@@ -2041,8 +2041,19 @@ function M.define(dst, util)
 					"SetAlignment", {}, {"UIElement", "number", "number"}),
 			SetFocusMode = util.self_function(
 					"SetFocusMode", {}, {"UIElement", "number"}),
-			SetFocus = util.self_function(
-					"SetFocus", {}, {"UIElement", "boolean"}),
+			-- **Not off the client's login** ([SEC_SECRET_FOCUS]): while
+			-- its password field is shown (magic_sandbox.secret_open) a
+			-- script focuses nothing but a client field -- one of its own
+			-- would take the keys the user types into what looks like the
+			-- login -- and drops no focus
+			SetFocus = util.wrap_function({"UIElement", "boolean"},
+				function(self, enable)
+					if magic_sandbox.keys_withheld() and
+							(not enable or not magic_sandbox.is_secret_field(self)) then
+						return
+					end
+					self:SetFocus(enable)
+				end),
 			HasFocus = util.self_function(
 					"HasFocus", {"boolean"}, {"UIElement"}),
 			-- Whether it or one under it has the focus ([SANDBOX_API_AUDIT]:
@@ -2689,6 +2700,12 @@ function M.define(dst, util)
 		instance = {
 			SetFocusElement = util.wrap_function({"UI", {"UIElement", "__nil"}},
 				function(self, element)
+					-- **Not off the client's login** ([SEC_SECRET_FOCUS]):
+					-- see UIElement:SetFocus
+					if magic_sandbox.keys_withheld() and
+							not magic_sandbox.is_secret_field(element) then
+						return
+					end
 					if element == nil then
 						self:SetFocusElement(nil)
 					else
@@ -2733,7 +2750,9 @@ function M.define(dst, util)
 		},
 		properties = {
 			root = util.simple_property(dst.UIElement),
-			focusElement = util.simple_property({dst.UIElement, "__nil"}),
+			-- Read-only ([SEC_SECRET_FOCUS]): the focus moves by
+			-- SetFocusElement, which keeps it on a secret field
+			focusElement = util.read_only_property({dst.UIElement, "__nil"}),
 			scale = {
 				get = function(current_value)
 					return current_value

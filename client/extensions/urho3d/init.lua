@@ -378,7 +378,7 @@ function Safe.SubscribeToEvent(x, y, z)
 		if callback_is_sandboxed and (sub_event_type == "KeyDown" or
 				sub_event_type == "KeyUp" or
 				sub_event_type == "TextInput") and
-				magic_sandbox.is_secret_field(ui:GetFocusElement()) then
+				magic_sandbox.keys_withheld() then
 			return
 		end
 		-- **F9 to F12 are the client's alone** ([TRUST_CODE],

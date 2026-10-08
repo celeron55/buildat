@@ -53,6 +53,29 @@ function M.is_secret_field(unsafe)
 	return name ~= nil and name:sub(1, 9) == "__trusted"
 end
 
+-- **While the client's password field is shown** ([SEC_SECRET_FOCUS]): no
+-- script hears or polls keys, and no script moves the focus anywhere but
+-- onto a client field. Gating on the field having the focus was not
+-- enough: a script moved the focus to a LineEdit of its own (or hid and
+-- showed an ancestor in one call, which drops it) and the keys the user
+-- typed into what looked like the login reached it. Looked up by name,
+-- once a frame.
+-- simplified: the first "__trusted_secret" under the root counts; two
+-- login dialogs at once, the first hidden, would read as closed
+local secret_frame, secret_was = -1, false
+function M.secret_open()
+	local f = time.frameNumber
+	if f ~= secret_frame then
+		secret_frame = f
+		local e = ui.root:GetChild("__trusted_secret", true)
+		secret_was = e ~= nil and e:IsVisibleEffective()
+	end
+	return secret_was
+end
+function M.keys_withheld()
+	return M.secret_open() or M.is_secret_field(ui:GetFocusElement())
+end
+
 -- **The client's own UI that no script may see at all**: an element named
 -- "__trusted_hidden..." and everything under it is never handed to a
 -- script -- not by GetChild(), the focus or an event; wrap() gives nil.
