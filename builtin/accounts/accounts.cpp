@@ -387,9 +387,11 @@ struct UserRow
 	// 10g: logs in only by its Starport ID (no password anyone knows), so
 	// not while the Starport is away
 	uint8_t id_only = 0;
+	// [TRUST_LADDER]
+	int32_t level = 0;
 	template<class Archive>
 	void serialize(Archive &archive){
-		archive(name, privs, here, id_only);
+		archive(name, privs, here, id_only, level);
 	}
 };
 
@@ -403,9 +405,11 @@ struct UsersInfo
 	// 10g: Starport IDs off, anyone or approved; the IDs waiting
 	ss_ starport_ids;
 	sv_<ss_> approvals;
+	// [TRUST_LADDER] The viewer's: a moderator's page has less on it
+	int32_t level = 0;
 	template<class Archive>
 	void serialize(Archive &archive){
-		archive(users, invites, access, bans, starport_ids, approvals);
+		archive(users, invites, access, bans, starport_ids, approvals, level);
 	}
 };
 
@@ -595,6 +599,7 @@ struct Module: public interface::Module, public Interface
 			return;
 		}
 		m_store = m_save->store("accounts");
+		migrate_levels();
 		load_access();
 	}
 
@@ -624,7 +629,7 @@ struct Module: public interface::Module, public Interface
 		const bool joined = !it->second.name.empty();
 		m_peers.erase(it);
 		if(joined)
-			send_users_to_admins();
+			send_users_to_staff();
 	}
 
 	// The interface
@@ -714,7 +719,7 @@ struct Module: public interface::Module, public Interface
 			const int64_t made = sp == ss_::npos ? 0 :
 					atoll(v.c_str() + sp + 1);
 			const ss_ name = key.substr(10);
-			if(made < now - UNTRUSTED_US || has_priv(name, "trusted")){
+			if(made < now - UNTRUSTED_US || level(name) >= LV_MEMBER){
 				m_store->remove(key);
 				continue;
 			}
@@ -726,39 +731,77 @@ struct Module: public interface::Module, public Interface
 		if(in_bin >= UNTRUSTED_A_NETWORK)
 			return "This network has "+itos(UNTRUSTED_A_NETWORK)+" new "
 					"accounts waiting to be trusted: one more is made once a "
-					"moderator or a helper approves one of them, or it has "
-					"been active a few days";
+					+level_name(LV_HELPER)+" or a "+level_name(LV_MODERATOR)+
+					" trusts one of them, or it has been active a few days";
 		if(today >= UNTRUSTED_A_DAY)
 			return "No more new accounts today; try tomorrow";
 		return "";
 	}
 
-	bool has_priv(const ss_ &name, const ss_ &priv)
+	int level(const ss_ &name)
 	{
 		Account account;
-		return !name.empty() && get_account(name, account) &&
-				account.has(priv);
+		ss_ v;
+		if(name.empty() || !get_account(name, account))
+			return LV_NEW;
+		if(account.has("admin"))
+			return LV_ADMIN;
+		return m_store->get("level/"+name, v) ? atoi(v.c_str()) : LV_NEW;
 	}
 
-	ss_ set_priv(const ss_ &name, const ss_ &priv, bool on)
+	ss_ set_level(const ss_ &name, int lv, const ss_ &by)
 	{
-		Account account;
-		if(!get_account(name, account))
+		if(!exists(name))
 			return "No such account";
-		if(priv == "admin")
-			return "An admin is made in the Server window";
-		sv_<ss_> privs;
-		for(const ss_ &p : account.privs)
-			if(p != priv)
-				privs.push_back(p);
-		if(on)
-			privs.push_back(priv);
-		account.privs = privs;
-		set_account(name, account);
-		if(priv == "trusted" && on)
+		const int was = level(name);
+		if(lv < LV_NEW || lv >= LV_ADMIN || was >= LV_ADMIN)
+			return "A "+level_name(LV_ADMIN)+" is made in the Server window";
+		if(!by.empty()){
+			const int by_lv = level(by);
+			if(by_lv < LV_MODERATOR || lv >= by_lv || was >= by_lv)
+				return "One sets only levels below one's own, from "+
+						level_name(LV_MODERATOR);
+		}
+		if(lv == LV_NEW)
+			m_store->remove("level/"+name);
+		else
+			m_store->set("level/"+name, itos(lv));
+		if(lv >= LV_MEMBER)
 			m_store->remove("untrusted/"+name);
+		if(!by.empty())
+			log_i(MODULE, "%s set the level of %s to %i", cs(by), cs(name), lv);
 		privs_changed(name);
+		// A new moderator's Server window has the Accounts page
+		if(lv >= LV_MODERATOR)
+			for(PeerId peer : find_peers(name))
+				send_users(peer);
 		return "";
+	}
+
+	// [TRUST_LADDER] 0.6.73 saved the levels as privileges
+	void migrate_levels()
+	{
+		for(const ss_ &key : m_store->list("auth/")){
+			Account account;
+			const ss_ name = key.substr(5);
+			if(!get_account(name, account))
+				continue;
+			int lv = LV_NEW;
+			sv_<ss_> privs;
+			for(const ss_ &p : account.privs){
+				const int l = p == "trusted" ? LV_MEMBER : p == "helper" ?
+						LV_HELPER : p == "moderator" ? LV_MODERATOR : -1;
+				if(l < 0)
+					privs.push_back(p);
+				lv = std::max(lv, l);
+			}
+			if(privs.size() == account.privs.size())
+				continue;
+			account.privs = privs;
+			set_account(name, account);
+			if(lv > level(name))
+				m_store->set("level/"+name, itos(lv));
+		}
 	}
 
 	sv_<ss_> account_names()
@@ -851,7 +894,7 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "%s banned %s (%s)", cs(by), cs(name), cs(b.address));
 		for(PeerId p : peers)
 			kick(p, "banned by "+by);
-		send_users_to_admins();
+		send_users_to_staff();
 		return "";
 	}
 
@@ -891,7 +934,7 @@ struct Module: public interface::Module, public Interface
 		if(!found)
 			return "No ban of "+name_or_address;
 		log_i(MODULE, "%s was unbanned", cs(name_or_address));
-		send_users_to_admins();
+		send_users_to_staff();
 		return "";
 	}
 
@@ -1181,7 +1224,7 @@ struct Module: public interface::Module, public Interface
 				log_i(MODULE, "New account %s for a Starport ID of %s%s",
 						cs(name), cs(id.starport), mode == "approved" ?
 						" (waiting for approval)" : "");
-				send_users_to_admins();
+				send_users_to_staff();
 			}
 			ss_ pending;
 			if(m_store->get("approval/"+name, pending))
@@ -1292,7 +1335,7 @@ struct Module: public interface::Module, public Interface
 		// password and kept login too -- not of an admin's or a
 		// moderator's, which a blocklist must not lock out
 		if(id.sub.empty() && !local && !account.has("admin") &&
-				!account.has("moderator") && id_blocked(name)){
+				level(name) < LV_MODERATOR && id_blocked(name)){
 			log_i(MODULE, "Login of %s refused: its Starport ID is on a "
 					"blocklist", cs(name));
 			return reply("Banned by a blocklist this server follows");
@@ -1312,7 +1355,7 @@ struct Module: public interface::Module, public Interface
 		peer.name = name;
 		reply("");
 		m_server->emit_event("accounts:login", new Login(packet.sender, name));
-		send_users_to_admins();
+		send_users_to_staff();
 	}
 
 	// The admin's
@@ -1330,6 +1373,7 @@ struct Module: public interface::Module, public Interface
 			ss_ x;
 			row.id_only = m_store->get("starport_of/"+row.name, x) &&
 					!m_store->get("own_password/"+row.name, x);
+			row.level = level(row.name);
 			info.users.push_back(row);
 		}
 		for(const ss_ &key : m_store->list("invite/")){
@@ -1347,15 +1391,16 @@ struct Module: public interface::Module, public Interface
 		});
 		for(const ss_ &key : m_store->list("approval/"))
 			info.approvals.push_back(key.substr(9));
+		info.level = level(name_of(peer));
 		send(peer, "accounts:users", pack(info));
 	}
 
-	void send_users_to_admins()
+	void send_users_to_staff()
 	{
 		if(!m_store)
 			return;
 		for(auto &pair : m_peers)
-			if(is_admin(pair.second.name))
+			if(level(pair.second.name) >= LV_MODERATOR)
 				send_users(pair.first);
 	}
 
@@ -1369,10 +1414,24 @@ struct Module: public interface::Module, public Interface
 	{
 		AdminRequest r;
 		auto pit = m_peers.find(packet.sender);
-		if(!m_store || pit == m_peers.end() || !is_admin(pit->second.name) ||
-				!unpack(packet.data, r))
+		if(!m_store || pit == m_peers.end() ||
+				level(pit->second.name) < LV_MODERATOR || !unpack(packet.data, r))
 			return;
 		const ss_ by = pit->second.name;
+		// [TRUST_LADDER] A moderator's: the Accounts page but for what
+		// changes an account's login or the server
+		const int by_lv = level(by);
+		if(by_lv < LV_ADMIN && r.cmd != "list" && r.cmd != "kick" &&
+				r.cmd != "ban" && r.cmd != "unban" && r.cmd != "invite" &&
+				r.cmd != "uninvite" && r.cmd != "approve" &&
+				r.cmd != "turn_away" && r.cmd != "level")
+			return send(packet.sender, "accounts:admin_result",
+					pack(ss_("Only the "+level_name(LV_ADMIN)+" does that")));
+		if((r.cmd == "kick" || r.cmd == "ban") && by_lv < LV_ADMIN &&
+				level(r.name) >= by_lv)
+			return send(packet.sender, "accounts:admin_result",
+					pack(ss_("Only the "+level_name(LV_ADMIN)+" does that to a "+
+					level_name(level(r.name)))));
 		auto result = [&](const ss_ &text){
 			send(packet.sender, "accounts:admin_result", pack(text));
 		};
@@ -1402,6 +1461,12 @@ struct Module: public interface::Module, public Interface
 			log_i(MODULE, "%s %s admin %s", cs(by), r.on ? "granted" : "revoked",
 					cs(r.name));
 			result(r.name+(r.on ? " is an admin" : " is no longer an admin"));
+		} else if(r.cmd == "level"){
+			// [TRUST_LADDER] arg: the number
+			const ss_ why = set_level(r.name, atoi(r.arg.c_str()), by);
+			if(!why.empty())
+				return result(why);
+			result(r.name+" is a "+level_name(level(r.name)));
 		} else if(r.cmd == "kick"){
 			if(!target)
 				return result(r.name+" is not here");
@@ -1453,6 +1518,7 @@ struct Module: public interface::Module, public Interface
 			m_store->remove("approval/"+r.name);
 			m_store->remove("ban_report/"+r.name);
 			m_store->remove("own_password/"+r.name);
+			m_store->remove("level/"+r.name);
 			log_i(MODULE, "%s deleted the account %s", cs(by), cs(r.name));
 			result("The account "+r.name+" was deleted");
 		} else if(r.cmd == "add"){
@@ -1541,7 +1607,7 @@ struct Module: public interface::Module, public Interface
 		} else {
 			return;
 		}
-		send_users_to_admins();
+		send_users_to_staff();
 	}
 
 	// A user's own password: the old one and the new one
@@ -2082,6 +2148,7 @@ struct Module: public interface::Module, public Interface
 		m_store->remove("auth/"+name);
 		m_store->remove("totp/"+name);
 		m_store->remove("totp_pending/"+name);
+		m_store->remove("level/"+name);
 		log_i(MODULE, "Account %s deleted", cs(name));
 		return "";
 	}

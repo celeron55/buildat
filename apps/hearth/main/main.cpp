@@ -592,11 +592,15 @@ static bool is_patch(const ss_ &name, const ss_ &data)
 static const char *CLAIMED[] = {"/topic/", "/t/", "/m/", "/search", "/f/",
 		"/robots.txt", "/p/", "/brand/", "/u/", "/unseen"};
 
-// Trust ([HEARTH_MVP] step 6, [TRUST_LADDER]): the levels, spaced so one
-// added later goes between two; compared with >=, never ==. A helper and
-// a moderator are accounts privileges a moderator or the admin gives.
-static const int LV_NEW = 0, LV_MEMBER = 10, LV_HELPER = 20,
-		LV_MODERATOR = 30, LV_ADMIN = 40;
+// Trust ([HEARTH_MVP] step 6, [TRUST_LADDER]): accounts' levels, spaced so
+// one added later goes between two; compared with >=, never ==. Saved as
+// numbers in accounts; their names are accounts::level_name()'s.
+using accounts::LV_NEW;
+using accounts::LV_MEMBER;
+using accounts::LV_HELPER;
+using accounts::LV_MODERATOR;
+using accounts::LV_ADMIN;
+using accounts::level_name;
 // What a level may post
 struct Limits { int threads_a_day, messages_an_hour; bool links; };
 static Limits limits(int lv)
@@ -610,9 +614,10 @@ static Limits limits(int lv)
 static const int HIDDEN = 1, HELD = 2, REPORTED = 3;
 static ss_ hidden_text(int64_t hidden, const ss_ &reason)
 {
-	return hidden == HELD ? "Waiting for a helper to approve its link" :
-			hidden == REPORTED ? "Reported; hidden until a moderator looks" :
-			"Hidden by a moderator: "+reason;
+	return hidden == HELD ? "Waiting for a "+level_name(LV_HELPER)+
+			" to approve its link" : hidden == REPORTED ?
+			"Reported; hidden until a "+level_name(LV_MODERATOR)+" looks" :
+			"Hidden by a "+level_name(LV_MODERATOR)+": "+reason;
 }
 // Approvals a day by a helper, and how long it may take one back
 static const int APPROVALS_A_DAY = 20;
@@ -1845,33 +1850,27 @@ struct Module: public interface::Module
 		push();
 	}
 
-	// An account's level: the admin, a moderator's or a helper's role, or
-	// a member while trusted -- by ACTIVE_DAYS, which trusts it in
-	// accounts from then on, or by an approval -- and no message of it
-	// hidden in the last 30 days
+	// An account's level in accounts; below LV_HELPER a member while
+	// trusted -- by ACTIVE_DAYS, which trusts it in accounts from then on,
+	// or by an approval -- and no message of it hidden in the last 30 days
 	int level(const ss_ &name)
 	{
-		int role = LV_NEW;
-		bool trusted = false;
+		int lv = LV_NEW;
 		accounts::access(m_server, [&](accounts::Interface *a){
-			if(name.empty() || !a->exists(name))
-				return;
-			role = a->is_admin(name) ? LV_ADMIN :
-					a->has_priv(name, "moderator") ? LV_MODERATOR :
-					a->has_priv(name, "helper") ? LV_HELPER : LV_NEW;
-			trusted = a->has_priv(name, "trusted");
+			lv = a->level(name);
 		});
-		if(role >= LV_HELPER)
-			return role;
+		if(lv >= LV_HELPER || name.empty())
+			return lv;
 		const json::Value t = trust(name);
-		if(!trusted && jint(t, "days") >= ACTIVE_DAYS){
+		if(lv < LV_MEMBER && jint(t, "days") >= ACTIVE_DAYS){
 			accounts::access(m_server, [&](accounts::Interface *a){
-				trusted = a->set_priv(name, "trusted", true).empty();
+				if(a->set_level(name, LV_MEMBER).empty())
+					lv = LV_MEMBER;
 			});
 			log_i(MODULE, "%s is trusted, active on %i days", cs(name),
 					ACTIVE_DAYS);
 		}
-		return trusted && jint(t, "hidden") == 0 ? LV_MEMBER : LV_NEW;
+		return lv >= LV_MEMBER && jint(t, "hidden") == 0 ? lv : LV_NEW;
 	}
 
 	// [TRUST_LADDER] A message held: hidden from all but its author, and
@@ -1902,11 +1901,15 @@ struct Module: public interface::Module
 					"AND time > ?");
 			a.b(name).b(by).b(now_s() - UNDO_S);
 			if(!a.step())
-				throw Exception("a helper takes back only its own approval, "
-						"within 7 days");
+				throw Exception("a "+level_name(LV_HELPER)+" takes back only "
+						"its own approval, within 7 days");
 		}
 		accounts::access(m_server, [&](accounts::Interface *a){
-			why = a->set_priv(name, "trusted", on);
+			const int was = a->level(name);
+			// Trust is the lowest step: a role above it is taken first
+			why = was >= LV_HELPER ? name+" is a "+level_name(was) :
+					a->set_level(name, on ? std::max(was, (int)LV_MEMBER) :
+					LV_NEW);
 		});
 		need(why);
 		if(on){
@@ -2016,8 +2019,9 @@ struct Module: public interface::Module
 			const ss_ &text)
 	{
 		const Limits l = limits(lv);
-		const char *how = lv < LV_MEMBER ? " (a new account's limit, until "
-				"it has been active on five days or a helper approves it)" : "";
+		const ss_ how = lv < LV_MEMBER ? " (a "+level_name(LV_NEW)+"'s "
+				"limit, until it has been active on five days or a "+
+				level_name(LV_HELPER)+" approves it)" : "";
 		bool held = false;
 		if(!l.links && has_link(text)){
 			const std::set<ss_> domains = tracker_domains();
@@ -2299,7 +2303,7 @@ struct Module: public interface::Module
 		if(cmd == "new_topic"){
 			// The tree changes rarely, by a trusted hand: a moderator's
 			if(!mod)
-				throw Exception("only a moderator adds topics");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" adds topics");
 			const ss_ topic_name = jstr(q, "name"), about = jstr(q, "about");
 			need(text_ok(topic_name, NAME_MAX, false, "the name"));
 			if(!about.empty())
@@ -2324,7 +2328,7 @@ struct Module: public interface::Module
 		// [HEARTH_UI] A topic's name and what it is about, by a moderator
 		if(cmd == "edit_topic"){
 			if(!mod)
-				throw Exception("only a moderator edits topics");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" edits topics");
 			const ss_ topic_name = jstr(q, "name"), about = jstr(q, "about");
 			need(text_ok(topic_name, NAME_MAX, false, "the name"));
 			if(!about.empty())
@@ -2339,7 +2343,7 @@ struct Module: public interface::Module
 		// about a server the client was playing on
 		if(cmd == "topic_category"){
 			if(!mod)
-				throw Exception("only a moderator sets a topic's category");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" sets a topic's category");
 			const ss_ category = jstr(q, "category");
 			if(category != "" && category != "servers")
 				throw Exception("a category is \"servers\" or none");
@@ -2351,7 +2355,7 @@ struct Module: public interface::Module
 		}
 		if(cmd == "topic_tracker"){
 			if(!mod)
-				throw Exception("only a moderator marks a tracker");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" marks a tracker");
 			Q u(m_db, "UPDATE topics SET tracker = ? WHERE id = ?");
 			u.b((int64_t)q.get("on").is_true()).b(jint(q, "topic")).step();
 			if(sqlite3_changes(m_db) == 0)
@@ -2364,7 +2368,7 @@ struct Module: public interface::Module
 			std::set<ss_> domains = tracker_domains();
 			if(!q.get("add").is_undefined() || !q.get("remove").is_undefined()){
 				if(!mod)
-					throw Exception("only a moderator sets the tracker domains");
+					throw Exception("only a "+level_name(LV_MODERATOR)+" sets the tracker domains");
 				for(const char *k : {"add", "remove"}){
 					const json::Value &l = q.get(k);
 					for(unsigned i = 0; l.is_array() && i < l.size(); i++){
@@ -2443,9 +2447,10 @@ struct Module: public interface::Module
 			// [HEARTH_TRACKER]: a patch, a new account's too
 			const bool patch = is_patch(file_name, data);
 			if(!limits(lv).links && !patch)
-				throw Exception("no files yet but a patch (a new account's "
-						"limit, until it has been active on five days or a "
-						"helper approves it)");
+				throw Exception("no files yet but a patch (a "+
+						level_name(LV_NEW)+"'s limit, until it has been "
+						"active on five days or a "+level_name(LV_HELPER)+
+						" approves it)");
 			Q c(m_db, "SELECT count(*) FROM files WHERE uploader = ? AND "
 					"created > ?");
 			c.b(name).b(now_s() - 3600).step();
@@ -2479,7 +2484,7 @@ struct Module: public interface::Module
 		}
 		if(cmd == "file_settings"){
 			if(!admin)
-				throw Exception("only the admin sets the files' budget");
+				throw Exception("only the "+level_name(LV_ADMIN)+" sets the files' budget");
 			json::Value v = file_settings();
 			bool any = false;
 			for(const char *k : FILE_SETTINGS)
@@ -2506,7 +2511,7 @@ struct Module: public interface::Module
 			// A claim of copyright or personal data a moderator has upheld:
 			// gone at once, whatever its use
 			if(!mod)
-				throw Exception("only a moderator deletes a file");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" deletes a file");
 			Q d(m_db, "DELETE FROM files WHERE id = ?");
 			d.b(jint(q, "file")).step();
 			if(sqlite3_changes(m_db) == 0)
@@ -2517,7 +2522,7 @@ struct Module: public interface::Module
 			// [PACKAGE_SUBJECT]: the Aittas read and this Hearth's own
 			// addresses, set by a moderator; without either, the current
 			if(!admin)
-				throw Exception("only the admin sets the release sources");
+				throw Exception("only the "+level_name(LV_ADMIN)+" sets the release sources");
 			json::Value v = setting("release_sources");
 			// Neither given: as they are, nothing fetched again
 			if(q.get("aittas").is_undefined() && q.get("addresses").is_undefined())
@@ -2608,7 +2613,7 @@ struct Module: public interface::Module
 			const int64_t thread_id = jint(q, "thread");
 			const ss_ status = jstr(q, "status"), fixed_in = jstr(q, "fixed_in");
 			if(!mod)
-				throw Exception("only a moderator sets a problem's status");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" sets a problem's status");
 			Q t(m_db, "SELECT kind FROM threads WHERE id = ?");
 			t.b(thread_id);
 			if(!t.step() || (t.s(0) != "problem" && t.s(0) != "patch"))
@@ -2766,7 +2771,8 @@ struct Module: public interface::Module
 			if(appeal && m.s(0) != name)
 				throw Exception("only its author appeals");
 			if(appeal && m.i(1) != HIDDEN)
-				throw Exception("the message is not hidden by a moderator");
+				throw Exception("the message is not hidden by a "+
+						level_name(LV_MODERATOR));
 			if(!appeal && m.s(0) == name)
 				throw Exception("one's own message is edited, not reported");
 			if(!appeal && m.i(1))
@@ -2814,7 +2820,8 @@ struct Module: public interface::Module
 		}
 		if(cmd == "queue"){
 			if(lv < LV_HELPER)
-				throw Exception("only a helper or a moderator sees the queue");
+				throw Exception("only a "+level_name(LV_HELPER)+" or higher sees the "
+						"queue");
 			json::Value list = json::array();
 			Q r(m_db, "SELECT r.id, r.kind, r.message, r.by, r.reason, r.time, "
 					"m.author, m.body, m.thread, t.title, m.hidden_reason, "
@@ -2844,7 +2851,7 @@ struct Module: public interface::Module
 			// and refusing an appeal say why: the author is told it. A held
 			// link ([TRUST_LADDER]): approve or reject, a helper's too.
 			if(lv < LV_HELPER)
-				throw Exception("only a moderator moderates");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" moderates");
 			const ss_ action = jstr(q, "action"), statement = jstr(q, "statement");
 			Q r(m_db, "SELECT r.kind, r.message, m.author, m.thread, m.hidden "
 					"FROM reports r JOIN messages m ON m.id = r.message WHERE "
@@ -2874,7 +2881,7 @@ struct Module: public interface::Module
 				return json::Value(true);
 			}
 			if(!mod)
-				throw Exception("only a moderator moderates");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" moderates");
 			// Hidden by reports and dismissed: shown again, and its reports
 			// overturned, which weigh their reporters' next ones nothing
 			if(!appeal && action == "dismiss" && r.i(4) == REPORTED){
@@ -2935,50 +2942,38 @@ struct Module: public interface::Module
 		if(cmd == "trust"){
 			const ss_ who = jstr(q, "name");
 			if(lv < LV_HELPER)
-				throw Exception("only a helper or a moderator trusts an account");
+				throw Exception("only a "+level_name(LV_HELPER)+" or higher "
+						"trusts an account");
 			need(text_ok(who, NAME_MAX, false, "the name"));
 			trust_account(who, name, lv, q.get("on").is_true());
 			return json::Value(true);
 		}
-		// {name, role}: "helper", "moderator" or "" (none). A moderator makes
-		// and unmakes helpers, the admin moderators too
-		if(cmd == "role"){
-			const ss_ who = jstr(q, "name"), role = jstr(q, "role");
-			if(role != "" && role != "helper" && role != "moderator")
-				throw Exception("a role is helper, moderator or none");
-			bool was_mod = false;
-			accounts::access(m_server, [&](accounts::Interface *a){
-				was_mod = a->has_priv(who, "moderator");
-			});
-			if(lv < ((role == "moderator" || was_mod) ? LV_ADMIN : LV_MODERATOR))
-				throw Exception(role == "moderator" || was_mod ?
-						"only the admin makes or unmakes a moderator" :
-						"only a moderator makes or unmakes a helper");
+		// {name, level}: a level below the asker's own, from a moderator
+		// (accounts::set_level's rule): a moderator makes and unmakes
+		// helpers, the admin moderators too
+		if(cmd == "level"){
+			const ss_ who = jstr(q, "name");
 			ss_ why;
 			accounts::access(m_server, [&](accounts::Interface *a){
-				why = a->set_priv(who, "helper", role == "helper");
-				if(why.empty())
-					why = a->set_priv(who, "moderator", role == "moderator");
+				why = a->set_level(who, jint(q, "level"), name);
 			});
 			need(why);
-			log_i(MODULE, "%s made %s %s", cs(name), cs(who),
-					role.empty() ? "no helper or moderator" : cs(role));
 			return json::Value(true);
 		}
-		// The helpers and the moderators, to a helper and up
+		// {name, level} of the helpers and up, to a helper and up
 		if(cmd == "staff"){
 			if(lv < LV_HELPER)
-				throw Exception("only a helper or a moderator lists them");
+				throw Exception("only a "+level_name(LV_HELPER)+" or higher "
+						"lists them");
 			json::Value list = json::array();
 			accounts::access(m_server, [&](accounts::Interface *a){
 				for(const ss_ &n : a->account_names()){
-					const ss_ role = a->has_priv(n, "moderator") ? "moderator" :
-							a->has_priv(n, "helper") ? "helper" : "";
-					if(role.empty())
+					const int l = a->level(n);
+					if(l < LV_HELPER)
 						continue;
 					json::Value v = json::object();
 					v.set("name", n);
-					v.set("role", role);
+					v.set("level", l);
 					list.append(v);
 				}
 			});

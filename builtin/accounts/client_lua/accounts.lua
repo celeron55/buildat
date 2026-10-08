@@ -68,7 +68,7 @@ local ADMIN = {"object", {"cmd", "string"}, {"name", "string"},
 local USERS = {"object",
 	{"users", {"array", {"object", {"name", "string"},
 			{"privs", {"array", "string"}}, {"here", "byte"},
-			{"id_only", "byte"}}}},
+			{"id_only", "byte"}, {"level", "int32_t"}}}},
 	{"invites", {"array", {"object", {"code", "string"},
 			{"privs", {"array", "string"}}, {"by", "string"}}}},
 	{"access", {"object", {"open_registration", "byte"}}},
@@ -76,7 +76,23 @@ local USERS = {"object",
 	-- [STARPORT] 10g: Starport IDs off, anyone or approved; those waiting
 	{"starport_ids", "string"},
 	{"approvals", {"array", "string"}},
+	-- [TRUST_LADDER] The viewer's level
+	{"level", "int32_t"},
 }
+
+-- [TRUST_LADDER] The trust levels' names, as builtin/accounts/api.h's
+-- level_name() says them; changed together. An app's pages say them by
+-- M.level_name.
+local LEVEL_NAMES = {{40, "Host"}, {30, "Steward"}, {20, "Keeper"},
+		{10, "Resident"}, {0, "Guest"}}
+function M.level_name(lv)
+	for _, x in ipairs(LEVEL_NAMES) do
+		if lv >= x[1] then
+			return x[2]
+		end
+	end
+	return LEVEL_NAMES[#LEVEL_NAMES][2]
+end
 
 local opts = {}
 local window = nil
@@ -1138,7 +1154,10 @@ users_page = function(back)
 			end
 		end
 	end
-	if admins > 0 and id_only_admins == admins then
+	-- [TRUST_LADDER] A moderator's page has what does not change a login
+	-- or the server
+	local admin = u.level >= 40
+	if admin and admins > 0 and id_only_admins == admins then
 		page_text(w, "Every admin logs in only by a Starport ID: while the "..
 				"Starport cannot be reached, nobody can manage this server. "..
 				"Give an admin a local password (Password... on their row).",
@@ -1175,33 +1194,55 @@ users_page = function(back)
 		-- The name over its buttons: five of them are a narrow window's
 		-- width at the web client's scale
 		local it = item()
-		page_text(it, user.name .. (user.here == 1 and " (here)" or "") ..
+		page_text(it, user.name .. " - " .. M.level_name(user.level) ..
+				(user.here == 1 and " (here)" or "") ..
 				(user.id_only == 1 and " (Starport ID only)" or ""))
 		local r = row(it)
 		lines = lines + 2
-		button(r, has.admin and "Admin: yes" or "Admin: no", function()
-			M.admin("priv", user.name, "admin", not has.admin)
-		end)
-		if user.here == 1 then
+		local below = user.level < u.level
+		if admin then
+			button(r, has.admin and "Admin: yes" or "Admin: no", function()
+				M.admin("priv", user.name, "admin", not has.admin)
+			end)
+		end
+		if user.here == 1 and (admin or below) then
 			button(r, "Kick", function() M.admin("kick", user.name) end)
 		end
-		if not has.admin then
+		if not has.admin and (admin or below) then
 			button(r, "Ban...", function() ban_page(user.name, back) end)
 		end
-		button(r, "Password...", function()
-			ask_page("A new password for " .. user.name, {"Password"},
-					function(p) M.admin("password", user.name, p) end)
-		end)
-		button(r, "Delete...", function()
-			local w2 = open_page("ask", "Delete the account " .. user.name ..
-					"? Their session ends.", back)
-			local r2 = row(w2)
-			button(r2, "Delete", function()
-				M.admin("delete", user.name)
-				users_page(back)
+		-- [TRUST_LADDER] Each level below the viewer's, on a row of its own
+		if below and user.level < 40 then
+			local r2 = row(it)
+			lines = lines + 1
+			for _, lv in ipairs({10, 20, 30}) do
+				-- "No longer" for the highest held only: it steps down one
+				if lv < u.level and user.level < lv + 10 then
+					local on = user.level >= lv
+					button(r2, (on and "No longer a " or "Make a ") ..
+							M.level_name(lv), function()
+						M.admin("level", user.name,
+								tostring(on and lv - 10 or lv))
+					end)
+				end
+			end
+		end
+		if admin then
+			button(r, "Password...", function()
+				ask_page("A new password for " .. user.name, {"Password"},
+						function(p) M.admin("password", user.name, p) end)
 			end)
-			button(r2, "Back", function() users_page(back) end)
-		end)
+			button(r, "Delete...", function()
+				local w2 = open_page("ask", "Delete the account " .. user.name ..
+						"? Their session ends.", back)
+				local r2 = row(w2)
+				button(r2, "Delete", function()
+					M.admin("delete", user.name)
+					users_page(back)
+				end)
+				button(r2, "Back", function() users_page(back) end)
+			end)
+		end
 	end
 	if #u.invites > 0 then
 		page_text(item(), "Invites (each makes one account):")
@@ -1229,17 +1270,19 @@ users_page = function(back)
 	list:SetFixedHeight(math.min(lines * 34 + 8,
 			math.floor(magic.ui.root.height * 0.45)))
 	local r = row(w)
-	button(r, "Add a user...", function()
-		ask_page("Add a user", {"Name", "Password"},
-				function(n, p) M.admin("add", n, p) end)
-	end)
+	if admin then
+		button(r, "Add a user...", function()
+			ask_page("Add a user", {"Name", "Password"},
+					function(n, p) M.admin("add", n, p) end)
+		end)
+	end
 	button(r, "New invite", function() M.admin("invite") end)
 	local a = u.access
-	button(w, a.open_registration == 1 and
+	if admin then button(w, a.open_registration == 1 and
 			"Local accounts: anyone can make one" or
 			"Local accounts: invite only", function()
 		M.admin("setting", "open_registration", "", a.open_registration ~= 1)
-	end)
+	end) end
 	if back then
 		button(w, "Back", go_back)
 	end
@@ -2039,12 +2082,17 @@ local function server_entries()
 	add("Mine", "Account", "account", function()
 		account_page(top_back())
 	end)
-	-- The users list arriving says admin (the server answers no one else)
+	-- The users list arriving says a moderator or the admin (the server
+	-- answers no one else); a moderator's is the Accounts page only
 	if M.users then
-		add("Admin", "Accounts", "accounts", function()
+		local admin = M.users.level >= 40
+		add(admin and "Admin" or "Moderation", "Accounts", "accounts",
+				function()
 			M.admin("list")
 			users_page(top_back())
 		end, #(M.users.approvals or {}))
+	end
+	if M.users and M.users.level >= 40 then
 		if M.hello.announce == 1 then
 			for _, x in ipairs({{"Starports", "starports"},
 					{"Listing", "listing"}, {"ID logins", "ids"}}) do

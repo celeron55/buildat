@@ -131,9 +131,11 @@ Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
     trust                  a helper and up: name, on -- an account
                            trusted (a member), or no longer; a helper
                            takes back only its own, within 7 days
-    role                   name, role ("helper", "moderator" or ""): a
-                           moderator makes helpers, the admin moderators
-    staff                  a helper and up: the helpers and moderators
+    level                  name, level (a number): one below the asker's
+                           own, from a moderator -- a moderator makes
+                           helpers, the admin moderators
+    staff                  a helper and up: name and level of each
+                           helper and up
     account                name: its level, its messages; to its owner
                            its trust counts; to a helper and up who
                            trusted it and whom it trusted
@@ -202,23 +204,28 @@ Limits
 ------
 A title is 200 bytes at most, a message 20000, a topic's name 80; no
 control characters but a tab, and a line break where lines are allowed.
-A level is worked out at each post:
+A level is worked out at each post. Accounts saves it as the number;
+the names shown (Guest, Resident, Keeper, Steward, Host) are
+accounts::level_name()'s and accounts.lua's LEVEL_NAMES, changed
+together:
 
-    0  a new account: 2 threads a day, 10 messages an hour, links to
+    0  a new account (Guest): 2 threads a day, 10 messages an hour, links to
        the tracker domains only (others held, above)
-   10  a member: trusted, and none of its messages hidden by a
+   10  a member (Resident): trusted, and none of its messages hidden by a
        moderator in the last 30 days: 10 threads a day, 60 messages an
-       hour. Trusted is an accounts privilege: by 5 active days -- a
+       hour. Trusted is level 10 in accounts: by 5 active days -- a
        day (UTC) is active if the account read a thread or wrote a
        message that stands on it, and counts once it is over, so more
        on one day is no more trust -- or by a helper's or a
        moderator's approval
-   20  a helper, made by a moderator: 20 threads a day, 120 messages an
+   20  a helper (Keeper), made by a moderator: 20 threads a day, 120 messages an
        hour; sees the queue, approves or rejects held links and trusts
        accounts, 20 a day; nothing else of a moderator's
-   30  a moderator, made by the admin: no limit; the queue, the topics,
-       the tracker domains, a file deleted, helpers made and unmade
-   40  the admin: a moderator's, and what is server-wide -- the files'
+   30  a moderator (Steward), made by the admin: no limit; the queue,
+       the topics, the tracker domains, a file deleted, helpers made
+       and unmade; the Server window's Accounts page (kick, ban,
+       invites, levels below its own, Starport IDs let in)
+   40  the admin (Host): a moderator's, and what is server-wide -- the files'
        settings, the release sources, moderators made and unmade
 
 The levels are spaced so one added later goes between two. An edit

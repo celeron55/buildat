@@ -18,13 +18,16 @@
 //   is the admin. A new account needs an invite from an admin, unless
 //   registration is open, which it is by default only on a server the
 //   launcher started. Open registration takes at most 5 untrusted
-//   accounts made in 30 days from one network (has_priv "trusted").
+//   accounts made in 30 days from one network (below LV_MEMBER).
 // - The launcher's own user of a server it started (launch parameter
 //   launcher=1, from 127.0.0.1 or ::1) joins by name alone, and is the
 //   first admin.
 // - Failed logins wait, doubling, per address's network; every login is
 //   logged. A kept login lasts 90 days from its last use.
-// - An admin kicks, bans and unbans, and manages the accounts and invites.
+// - An admin kicks, bans and unbans, and manages the accounts and invites;
+//   a moderator (LV_MODERATOR) does the same in the Server window's
+//   Accounts page, beside deleting an account, resetting a password,
+//   adding one and the settings.
 //
 // The client's side is builtin/accounts/client_lua/accounts.lua: the join
 // dialog, and the calls a game's admin pages make.
@@ -41,6 +44,18 @@ namespace accounts
 		ss_ name;
 		Login(PeerId peer, const ss_ &name): peer(peer), name(name){}
 	};
+
+	// [TRUST_LADDER] The trust levels. Numbers with room between them for
+	// more; their names are only shown, from level_name() and accounts.lua's
+	// LEVEL_NAMES, which are changed together.
+	static const int LV_NEW = 0, LV_MEMBER = 10, LV_HELPER = 20,
+			LV_MODERATOR = 30, LV_ADMIN = 40;
+	inline ss_ level_name(int lv)
+	{
+		return lv >= LV_ADMIN ? "Host" : lv >= LV_MODERATOR ? "Steward" :
+				lv >= LV_HELPER ? "Keeper" : lv >= LV_MEMBER ? "Resident" :
+				"Guest";
+	}
 
 	struct Interface
 	{
@@ -125,14 +140,15 @@ namespace accounts
 		// app's can go.
 		virtual bool offer_smtp(const ss_ &url, const ss_ &from,
 				const ss_ &user, const ss_ &password) = 0;
-		// [TRUST_LADDER] An account's privileges beside "admin", which goes
-		// with it when it is deleted: "trusted" (an app's word that it is
-		// no new account any more, which frees its place in open
-		// registration's quota of untrusted accounts per network), and an
-		// app's roles ("helper", "moderator"). set_priv: "" when done, else
-		// why not; "admin" is not set so.
-		virtual bool has_priv(const ss_ &name, const ss_ &priv) = 0;
-		virtual ss_ set_priv(const ss_ &name, const ss_ &priv, bool on) = 0;
+		// [TRUST_LADDER] An account's trust level, a number (LV_*): the
+		// admin's is LV_ADMIN; the others' are saved, and go with the
+		// account. LV_MEMBER and up is trusted, which frees its place in
+		// open registration's quota of untrusted accounts per network.
+		virtual int level(const ss_ &name) = 0;
+		// "" when done, else why not. With `by`, as by does it: one sets only
+		// below one's own level, and from LV_MODERATOR. LV_ADMIN is made in
+		// the Server window only.
+		virtual ss_ set_level(const ss_ &name, int lv, const ss_ &by = "") = 0;
 	};
 
 	inline bool access(interface::Server *server,

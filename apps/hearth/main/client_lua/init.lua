@@ -922,7 +922,7 @@ show_thread = function(id, at)
 					" · " .. ago(m.created) .. (m.edited ~= 0 and " · edited" or "")
 			local body = m.body
 			if m.hidden then
-				body = (m.hidden_text or "Hidden by a moderator: " ..
+				body = (m.hidden_text or "Hidden: " ..
 						m.hidden_reason) ..
 						(body ~= "" and "\n\n" .. body or "")
 			end
@@ -1353,9 +1353,8 @@ show_account = function(name)
 	req("account", {name = name}, function(a)
 		local w = open(a.name)
 		local lv = a.level or 0
-		text(w, lv >= 40 and "The admin" or lv >= 30 and "A moderator" or
-				lv >= 20 and "A helper" or lv >= 10 and "A member" or
-				"A new account", DIM, W)
+		local ln = accounts.level_name
+		text(w, ln(lv), DIM, W)
 		-- [TRUST_LADDER] What a helper and up does to an account
 		local function act(cmd, args, done)
 			args.name = a.name
@@ -1368,24 +1367,25 @@ show_account = function(name)
 			local b = row(w)
 			if lv < 10 then
 				button(b, "Trust", function()
-					act("trust", {on = true}, a.name .. " is a member now.")
+					act("trust", {on = true}, a.name .. " is a " .. ln(10) ..
+							" now.")
 				end)
 			elseif lv < 20 then
 				button(b, "Take back the trust", function()
-					act("trust", {on = false}, a.name .. " is a new account again.")
+					act("trust", {on = false}, a.name .. " is a " .. ln(0) ..
+							" again.")
 				end)
 			end
-			if me.moderator and lv < 30 then
-				button(b, lv >= 20 and "No longer a helper" or "Make a helper",
-						function()
-					act("role", {role = lv >= 20 and "" or "helper"}, "Saved.")
-				end)
-			end
-			if me.admin and lv < 40 then
-				button(b, lv >= 30 and "No longer a moderator" or
-						"Make a moderator", function()
-					act("role", {role = lv >= 30 and "" or "moderator"}, "Saved.")
-				end)
+			-- Each role below one's own level, from a moderator
+			for _, l in ipairs({20, 30}) do
+				if me.moderator and l < (me.level or 0) and lv < me.level and
+						lv < l + 10 then
+					local on = lv >= l
+					button(b, (on and "No longer a " or "Make a ") .. ln(l),
+							function()
+						act("level", {level = on and l - 10 or l}, "Saved.")
+					end)
+				end
 			end
 		end
 		for _, x in ipairs(a.approved_by or {}) do
@@ -1398,11 +1398,12 @@ show_account = function(name)
 		end
 		if a.trust and lv < 10 then
 			local tr = a.trust
-			text(w, "A new account posts less, and its links wait for a " ..
-					"helper's approval, until it has been active on five " ..
-					"days -- a day it read a thread or wrote a message that " ..
-					"stands, counted once the day is over (" ..
-					(tr.days or 0) .. " so far) -- or a helper trusts it; " ..
+			text(w, "A " .. ln(0) .. " posts less, and its links wait for " ..
+					"a " .. ln(20) .. "'s approval, until it has been active " ..
+					"on five days -- a day it read a thread or wrote a " ..
+					"message that stands, counted once the day is over (" ..
+					(tr.days or 0) .. " so far) -- or a " .. ln(20) ..
+					" trusts it; " ..
 					"and with none of its messages hidden in 30 days (" ..
 					tr.hidden .. " hidden).", nil, W)
 		end
@@ -1468,8 +1469,8 @@ show_report = function(m, kind)
 		req(kind, {message = m.id, [kind == "appeal" and "text" or "reason"] =
 				e:GetText()}, function()
 			message = kind == "appeal" and
-					"The appeal is waiting for a moderator." or
-					"Reported; a moderator will look at it."
+					"The appeal is waiting for a " .. accounts.level_name(30) .. "." or
+					"Reported; a " .. accounts.level_name(30) .. " will look at it."
 			back()
 		end)
 	end, true)
@@ -1508,7 +1509,8 @@ show_queue = function()
 						redraw)
 			end
 			if r.kind == "held" then
-				text(panel, "A new account's link, waiting in " .. r.title, WARN,
+				text(panel, "A " .. accounts.level_name(0) .. "'s link, waiting in " ..
+						r.title, WARN,
 						pw)
 				text(panel, r.author .. ": " .. r.body, nil, pw)
 				local b = row(panel)
@@ -1522,7 +1524,7 @@ show_queue = function()
 				text(panel, (r.kind == "domain" and "Tracker domain " .. r.reason
 						or r.author .. ": " .. r.body) .. " -- " .. r.kind ..
 						" by " .. r.by .. ": " .. r.reason ..
-						"\n\nA moderator decides.", DIM, pw)
+						"\n\nA " .. accounts.level_name(30) .. " decides.", DIM, pw)
 				return
 			end
 			if r.kind == "domain" then
@@ -1830,7 +1832,8 @@ accounts.on_joined = function()
 			topics = tr.topics
 			draw_sidebar()
 			-- BUILDAT_HEARTH_OPEN=<thread>: a scripted client opens it, as a
-			-- click on it would; "queue" or "account:<name>" a page
+			-- click on it would; "queue" or "account:<name>" a page, and
+			-- "server:<key>" a Server window page
 			local open_page = buildat.get_env("BUILDAT_HEARTH_OPEN") or ""
 			local open_ = tonumber(open_page)
 			-- **"Feedback..." on an app** ([PACKAGE_SUBJECT]): the launch grid
@@ -1874,6 +1877,10 @@ accounts.on_joined = function()
 				end)
 			else
 				enter("home", function() show_home() end)
+			end
+			-- "server:<page>": the Server window's page over it
+			if open_page:match("^server:") then
+				accounts.server_window(open_page:sub(8))
 			end
 			-- After the page's own requests, so a scripted "thread" is the
 			-- one left open; numbered from 1001

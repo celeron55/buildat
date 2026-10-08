@@ -95,7 +95,7 @@ client bob bobpass1234 "$t/bob.log" '{"cmd":"reply","thread":1,"body":"bob was h
 {"cmd":"answered","thread":1,"message":3}'
 answer "$t/bob.log" 1001 | grep -q '"ok":true' ||
 	fail "bob's reply: $(answer "$t/bob.log" 1001) ($(grep -a "accounts" "$t/bob.log" | tail -2))"
-answer "$t/bob.log" 1002 | grep -q "only a moderator" || fail "bob added a topic"
+answer "$t/bob.log" 1002 | grep -q "only a Steward" || fail "bob added a topic"
 answer "$t/bob.log" 1003 | grep -q "only its author" || fail "bob edited the admin's"
 answer "$t/bob.log" 1004 | grep -q "control character" || fail "a control character went in"
 answer "$t/bob.log" 1005 | grep -q "only whoever started" || fail "bob marked the answer"
@@ -207,7 +207,7 @@ answer "$t/admin6.log" 1003 | grep -q '"ok":true' || fail "the hide: $(answer "$
 answer "$t/admin6.log" 1004 | grep -q '"ok":true' || fail "the dismissal"
 answer "$t/admin6.log" 1005 | grep -q '"result":\[\]' || fail "the queue after"
 get / > /dev/null; grep -q 'href="/t/2"' "$t/page" && fail "a hidden thread on the portal"
-[ "$(get /t/2)" = 200 ] && grep -q "Hidden by a moderator: Advertising" "$t/page" ||
+[ "$(get /t/2)" = 200 ] && grep -q "Hidden by a Steward: Advertising" "$t/page" ||
 	fail "the hidden thread's page"
 grep -q "Cheap lamps" "$t/page" && fail "a hidden message's text on its page"
 get "/search?q=cheap" > /dev/null; grep -q '/t/2#' "$t/page" && fail "search finds a hidden message"
@@ -235,7 +235,7 @@ client admin checkpass12 "$t/admin7.log" '{"cmd":"moderate","report":3,"action":
 answer "$t/admin7.log" 1001 | grep -q "restored or dismissed" || fail "an appeal hidden"
 answer "$t/admin7.log" 1002 | grep -q '"ok":true' || fail "the restore: $(answer "$t/admin7.log" 1002)"
 get /t/2 > /dev/null; grep -q "Cheap lamps for everyone" "$t/page" &&
-	! grep -q "Hidden by a moderator" "$t/page" || fail "the restored thread"
+	! grep -q "Hidden by a Steward" "$t/page" || fail "the restored thread"
 get "/search?q=cheap" > /dev/null; grep -q '/t/2#m6' "$t/page" || fail "search after the restore"
 n429=0
 for _ in $(seq 40); do
@@ -313,7 +313,7 @@ client bob bobpass1234 "$t/bob_files.log" '{"cmd":"upload","name":"a.txt","data"
 {"cmd":"file_settings","budget":0}'
 answer "$t/bob_files.log" 1001 | grep -q "no files yet" ||
 	fail "a new account's upload: $(answer "$t/bob_files.log" 1001)"
-answer "$t/bob_files.log" 1002 | grep -q "only the admin" ||
+answer "$t/bob_files.log" 1002 | grep -q "only the Host" ||
 	fail "bob set the budget: $(answer "$t/bob_files.log" 1002)"
 client admin checkpass12 "$t/admin_files.log" "{\"cmd\":\"upload\",\"name\":\"far.jpg\",\"data\":\"$(cat "$t/up_jpg")\"}
 {\"cmd\":\"upload\",\"name\":\"dot.png\",\"data\":\"$(cat "$t/up_png")\"}
@@ -389,7 +389,7 @@ answer "$t/tr_dave3.log" 1001 | grep -q '"ok":true' ||
 	fail "the waiting tracker link: $(answer "$t/tr_dave3.log" 1003 | cut -c1-300)"
 [ "$(get /t/$D)" = 200 ] && grep -q "^+two" "$t/page" && grep -q "codeberg.org/dave" "$t/page" &&
 	! grep -q "Tracker:" "$t/page" && ! grep -q "evil.example" "$t/page" &&
-	grep -q "Waiting for a helper to approve its link" "$t/page" ||
+	grep -q "Waiting for a Keeper to approve its link" "$t/page" ||
 	fail "the ticket's page before the domain: $(grep -c . "$t/page") lines"
 MS=4000 client admin checkpass12 "$t/tr_admin2.log" '{"cmd":"queue"}'
 R=$(res "$t/tr_admin2.log" 1001 '[x["id"] for x in r["result"] if x["kind"] == "domain" and x["reason"] == "git.dave.example"][0]')
@@ -466,14 +466,14 @@ held=$(num "$t/erin12.log" 1001)
 answer "$t/erin12.log" 1002 | grep -q "waiting for approval already" ||
 	fail "a second held link: $(answer "$t/erin12.log" 1002)"
 get /m/$held > /dev/null; grep -q "erinlamps.example" "$t/page" && fail "a held link on the page"
-client admin checkpass12 "$t/admin12.log" '{"cmd":"role","name":"carol","role":"helper"}'
+client admin checkpass12 "$t/admin12.log" '{"cmd":"level","name":"carol","level":20}'
 answer "$t/admin12.log" 1001 | grep -q '"ok":true' || fail "carol made a helper: $(answer "$t/admin12.log" 1001)"
 client carol carolpass1234 "$t/carol12.log" '{"cmd":"queue"}
-{"cmd":"role","name":"bob","role":"helper"}
+{"cmd":"level","name":"bob","level":20}
 {"cmd":"me"}'
 R=$(res "$t/carol12.log" 1001 '[x["id"] for x in r["result"] if x["kind"] == "held" and x["message"] == '"$held"'][0]')
 [ -n "$R" ] || fail "the held link not in a helper's queue: $(answer "$t/carol12.log" 1001 | cut -c1-300)"
-answer "$t/carol12.log" 1002 | grep -q "only a moderator" || fail "a helper made a helper"
+answer "$t/carol12.log" 1002 | grep -q "only levels below one's own" || fail "a helper made a helper"
 answer "$t/carol12.log" 1003 | grep -q '"level":20' || fail "carol's level: $(answer "$t/carol12.log" 1003)"
 client carol carolpass1234 "$t/carol12b.log" "{\"cmd\":\"moderate\",\"report\":$R,\"action\":\"approve\"}
 {\"cmd\":\"account\",\"name\":\"erin\"}
@@ -495,7 +495,7 @@ rep dave davepass1234 dave12.log
 # A helper's, 3, hides it until a moderator looks; dismissed, it is
 # shown again, and the helper's next report weighs nothing
 rep carol carolpass1234 carol12c.log
-get /m/$B1 > /dev/null; grep -q "Reported; hidden until a moderator looks" "$t/page" ||
+get /m/$B1 > /dev/null; grep -q "Reported; hidden until a Steward looks" "$t/page" ||
 	fail "a helper's report did not hide it ($(answer "$t/carol12c.log" 1001))"
 R2=$(num "$t/carol12c.log" 1001)
 client admin checkpass12 "$t/admin12b.log" "{\"cmd\":\"moderate\",\"report\":$R2,\"action\":\"dismiss\"}"
@@ -505,6 +505,20 @@ rep carol carolpass1234 carol12d.log
 [ "$(get /m/$B1)" = 200 ] && ! grep -q "Reported; hidden" "$t/page" ||
 	fail "a report weighed after its reporter's was overturned"
 echo "ok: held links approved by a helper, reports by network"
+# A Steward (a moderator): in the Server window's Accounts page, levels
+# below its own and kicks and bans, but no password reset
+client admin checkpass12 "$t/admin12c.log" '{"cmd":"level","name":"dave","level":30}'
+answer "$t/admin12c.log" 1001 | grep -q '"ok":true' || fail "dave made a Steward: $(answer "$t/admin12c.log" 1001)"
+client dave davepass1234 "$t/dave12b.log" '{"cmd":"me"}' "BUILDAT_HEARTH_ADMIN=level bob 20
+level carol 30
+password bob newpass1234
+level erin 0"
+grep -aq "accounts listed" "$t/dave12b.log" || fail "no accounts list for a Steward"
+grep -aq "admin result: bob is a Keeper" "$t/dave12b.log" || fail "a Steward made a Keeper: $(grep -a "admin result" "$t/dave12b.log")"
+grep -aq "admin result: One sets only levels below one's own" "$t/dave12b.log" || fail "a Steward made a Steward"
+grep -aq "admin result: Only the Host does that" "$t/dave12b.log" || fail "a Steward reset a password"
+grep -aq "admin result: erin is a Guest" "$t/dave12b.log" || fail "a Steward took back a trust"
+echo "ok: a Steward's Accounts page"
 
 [ $n429 -gt 0 ] || fail "no page limit per address"
-echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; files crushed, served and swept; a patch ticket by a new account applied with git am; a long thread read in parts; read positions, following, an account page, a topic edited; a held link approved by a helper, reports weighed by network; pages limited"
+echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; files crushed, served and swept; a patch ticket by a new account applied with git am; a long thread read in parts; read positions, following, an account page, a topic edited; a held link approved by a helper, reports weighed by network, a Steward's Accounts page; pages limited"
