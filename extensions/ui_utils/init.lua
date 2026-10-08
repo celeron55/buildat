@@ -407,6 +407,13 @@ end
 local drop_open = false
 -- One closed its popup on this frame's Escape
 local escape_taken = false
+-- The one closed last by a pick or Escape, for its focus back on the next
+-- frame: a modal popup takes the dropdown's top-level element along under
+-- the modal root and puts it back as it closes, the focus is lost on the
+-- way, and a screen under it may take it before this does
+local refocus = nil
+-- The one whose closing was told on this frame
+local closed_now = nil
 
 -- The pages that took the keys, newest last: only the newest one still
 -- shown answers, so a page over another does not share its keys
@@ -469,7 +476,8 @@ local function arrange(page)
 		if e:HasFocus() then
 			inside = true
 		end
-		if e:GetTypeName() == "Button" then
+		local t = e:GetTypeName()
+		if t == "Button" or t == "DropDownList" then
 			first = first or e
 		end
 	end
@@ -1110,6 +1118,7 @@ local message_handle = nil
 -- scrolled when neither holds it. Returns the DropDownList, and the row
 -- holding it and its label when there is one.
 local drops = {} -- live dropdowns
+local drops_update, drops_sub -- below
 local drop_serial = 0
 function M.safe.dropdown(parent, choices, current, on_choose, options)
 	options = options or {}
@@ -1137,11 +1146,11 @@ function M.safe.dropdown(parent, choices, current, on_choose, options)
 	arrow.text = "▼"
 	arrow:SetFontSize(12)
 	arrow.color = magic.Color(M.safe.rgb("dim"))
-	-- Its own text, the placeholder's being the client's
+	-- The placeholder's own text, which Urho3D shows while nothing is
+	-- selected, the arrows' highlight included
 	local none = nil
 	if options.none then
-		none = drop.placeholder:CreateChild("Text")
-		none:SetStyleAuto()
+		none = drop.placeholder:GetChild(0)
 		none.text = options.none
 		none.color = magic.Color(M.safe.rgb("error"))
 		none.verticalAlignment = VA_CENTER
@@ -1179,8 +1188,6 @@ function M.safe.dropdown(parent, choices, current, on_choose, options)
 	-- Urho3D chooses the first one added when none is: none again
 	if not index then
 		drop.listView:ClearSelection()
-	elseif none then
-		none.visible = false
 	end
 	local w = options.width or
 			math.max(widest + 40, options.min_width or 0)
@@ -1199,30 +1206,45 @@ function M.safe.dropdown(parent, choices, current, on_choose, options)
 	-- Escape and a press elsewhere take it away, and the arrows may have
 	-- moved the selection: put back
 	magic.SubscribeToEvent(drop, "ItemSelected", function(_, _, data)
+		-- A pick closes it twice: the popup's closing loses the focus,
+		-- and Menu closes it again on that, inside the first
+		if closed_now == drop then
+			return
+		end
+		closed_now = drop
+		refocus = nil
 		if not drop:HasFocus() then
 			if index then
 				drop:SetSelection(index - 1)
+			else
+				drop.listView:ClearSelection()
 			end
 			if magic.input:GetKeyPress(KEY_ESCAPE) then
 				escape_taken = true
 				uistack.take_key(KEY_ESCAPE)
-				drop:SetFocus(true)
+				refocus = drop
 			end
 			if options.on_dismiss then
 				options.on_dismiss()
 			end
 			return
 		end
+		refocus = drop
 		local i = data:GetInt("Selection") + 1
 		if i ~= index and values[i] ~= nil then
 			index = i
-			if none then
-				none.visible = false
-			end
 			on_choose(values[i], i)
+			-- Moved on purpose (a page drawn again, a field to fill)
+			if not drop:HasFocus() then
+				refocus = nil
+			end
 		end
 	end)
 	drops[#drops + 1] = drop
+	if drops_sub then
+		magic.UnsubscribeFromEvent("Update", drops_sub)
+	end
+	drops_sub = magic.SubscribeToEvent("Update", drops_update)
 	return drop, row
 end
 
@@ -1242,9 +1264,17 @@ function M.safe.close_dropdowns()
 end
 
 -- Each frame: the popups' room set for their next opening, which is
--- where Urho3D picks under or over, and the dropdowns removed forgotten
-magic.SubscribeToEvent("Update", function()
+-- where Urho3D picks under or over, and the dropdowns removed forgotten.
+-- Subscribed again by each dropdown made: a handler goes with the sandbox
+-- that subscribed it, and this module outlives the screen that first
+-- loaded it (the launcher's, left for a server and drawn again)
+drops_update = function()
 	escape_taken = false
+	closed_now = nil
+	if refocus and not gone(refocus) and refocus.visible then
+		refocus:SetFocus(true)
+	end
+	refocus = nil
 	if #drops == 0 then
 		drop_open = false
 		return
@@ -1267,7 +1297,7 @@ magic.SubscribeToEvent("Update", function()
 		end
 	end
 	drops, drop_open = kept, open
-end)
+end
 
 -- on_close is optional and is called when the dialog goes away, however it
 -- goes: what wants it is a message that is the last thing before something

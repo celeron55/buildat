@@ -362,6 +362,13 @@ end
 __buildat_client_keys = {[KEY_F9] = true, [KEY_F10] = true, [KEY_F11] = true,
 		[KEY_F12] = true}
 local overlay_key = KEY_F9
+-- **A key taken for the rest of its frame** ([UI_DROPDOWN]): the Escape
+-- that closed a dropdown's popup, which no KeyDown handler hears, an
+-- app's own included; uistack sets it and clears it each Update
+local key_taken = nil
+function __buildat_take_key(key)
+	key_taken = key
+end
 -- **Rebound in the key store** ([LAUNCH_MENU_V2] step 3, api.lua's
 -- set_client_key): the set changes in place, as safe_classes reads it, and
 -- the engine's own three are told (app.cpp's on_keydown). A key unbound
@@ -517,6 +524,11 @@ function Safe.SubscribeToEvent(x, y, z)
 		-- own handler is subscribed on the mux directly.
 		if (sub_event_type == "KeyDown" or sub_event_type == "KeyUp") and
 				__buildat_client_keys[unsafe_event_data["Key"]:GetInt()] then
+			return
+		end
+		-- A key taken for the rest of its frame (uistack.take_key)
+		if sub_event_type == "KeyDown" and key_taken ==
+				unsafe_event_data["Key"]:GetInt() then
 			return
 		end
 		current_thing, current_data = event_type_thing, unsafe_event_data

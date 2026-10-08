@@ -63,6 +63,8 @@ client(){
 }
 tabs(){ for _ in $(seq "$1"); do echo "keypress Tab"; done; }
 backs(){ for _ in $(seq "$1"); do echo "keypress BackSpace"; done; }
+# A dropdown: open it and pick its first choice
+pick1(){ echo "delay 100"; echo "keypress Space"; echo "delay 500"; echo "keypress Down"; echo "delay 100"; echo "keypress Return"; echo "delay 300"; }
 said(){ grep -aqF "text \"$2" "$t/$1.log"; }
 OPEN=("delay 5000" "text publish" "delay 1500" "keypress Return" "delay 1500")
 
@@ -79,7 +81,7 @@ mapfile -t cmds < <(
 	tabs 4; echo "text Bad"; echo "delay 500"; echo "event scan"
 	backs 3; echo "text tester"
 	tabs 3; echo "text Says hello."
-	tabs 1; echo "keypress Space"; tabs 1; echo "keypress Space"
+	tabs 1; pick1; tabs 1; pick1
 	# Audience, Home Hearth, Changelog, Save, Next
 	tabs 5; echo "keypress Return"; echo "delay 1500"
 	# Page 2: "Create my publishing key" has the focus
@@ -103,9 +105,10 @@ mapfile -t cmds < <(
 	tabs 1; echo "keypress Return"; echo "delay 1500"
 	tabs 2; echo "keypress Return"; echo "delay 1000"
 	echo "text hello_ext"; echo "keypress Return"; echo "delay 1500"
-	# hello, hello_ext, New app, New extension, Open folder, Author
-	tabs 5; echo "text tester"; tabs 3; echo "text Says hello too."
-	tabs 1; echo "keypress Space"; tabs 1; echo "keypress Space"
+	# Package, New app, New extension, Open folder, Author; a frame on
+	# the field before typing, the focus coming from a dropdown
+	tabs 4; echo "delay 100"; echo "text tester"; tabs 3; echo "text Says hello too."
+	tabs 1; pick1; tabs 1; pick1
 	tabs 5; echo "keypress Return"; echo "delay 3000"
 	tabs 2; echo "keypress Return"; echo "delay 4000"; echo "event scan"
 	echo "shot extension.png"

@@ -309,9 +309,11 @@ end)
 M.key_taken = nil
 function M.safe.take_key(key)
 	M.key_taken = key
+	__buildat_take_key(key)
 end
 magic.SubscribeToEvent("Update", function()
 	M.key_taken = nil
+	__buildat_take_key(nil)
 end)
 
 M.world_scan = false

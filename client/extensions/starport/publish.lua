@@ -17,9 +17,9 @@
 -- of the Aitta (GET /api/aitta/info?key=).
 return function(h)
 local M, network, magic, uistack = h.M, h.network, h.magic, h.uistack
-local open_window, add_text, add_label, add_row, add_button, add_edit =
-		h.open_window, h.add_text, h.add_label, h.add_row, h.add_button,
-		h.add_edit
+local open_window, add_text, add_label, add_row, add_button, add_edit,
+		add_dropdown = h.open_window, h.add_text, h.add_label, h.add_row,
+		h.add_button, h.add_edit, h.add_dropdown
 local WARN, DIM = h.WARN, h.DIM
 local OK = magic.Color(0.5, 0.9, 0.5)
 local USER = __buildat_get_path("user")
@@ -171,17 +171,18 @@ page_package = function(message)
 	end
 	local pr = add_row(w)
 	add_label(pr, #entries == 0 and "None yet in dev_apps:" or "Package:", 110)
+	local names = {}
 	for _, e in ipairs(entries) do
-		local b = add_button(pr, e.name .. (e.kind == "extension" and
-				" (ext.)" or ""), function()
+		names[#names + 1] = {e.name .. (e.kind == "extension" and
+				" (ext.)" or ""), e.name}
+	end
+	if #names > 0 then
+		add_dropdown(pr, names, st.selected, function(name)
 			uistack.main:pop(root)
-			st.selected = e.name
+			st.selected = name
 			st.result = nil
 			page_package()
 		end)
-		if e.name == st.selected then
-			b:GetChild(0).color = OK
-		end
 	end
 	local nr = add_row(w)
 	add_button(nr, "New app...", function()
@@ -256,18 +257,11 @@ page_package = function(message)
 				recheck()
 			end)
 		else
-			-- A choice: the button steps through the list
-			local list = kind == "licence" and licences or AUDIENCES
-			local b
-			b = add_button(r, tostring(m[k] or "(choose)"), function()
-				m[k] = list[(find(list, m[k]) or 0) % #list + 1]
-				b:GetChild(0).text = m[k]
+			add_dropdown(r, kind == "licence" and licences or AUDIENCES,
+					m[k], function(v)
+				m[k] = v
 				recheck()
-			end)
-			b.minWidth = 160
-			if kind == "licence" then
-				add_label(r, "press to choose", 0).color = DIM
-			end
+			end, {min_width = 160, none = "(choose)"})
 		end
 		why_of[k] = add_text(w, " ", WARN)
 	end
@@ -400,16 +394,11 @@ page_publish = function(message)
 	if #list > 1 then
 		local ar = add_row(w)
 		add_label(ar, "Publish on:", 110)
-		for _, a in ipairs(list) do
-			local b = add_button(ar, a, function()
-				st.aitta = a
-				uistack.main:pop(root)
-				page_publish()
-			end)
-			if a == st.aitta then
-				b:GetChild(0).color = OK
-			end
-		end
+		add_dropdown(ar, list, st.aitta, function(a)
+			st.aitta = a
+			uistack.main:pop(root)
+			page_publish()
+		end)
 	end
 	local url = st.aitta
 	local info = url and st.info[url]

@@ -657,22 +657,23 @@ end
 -- what this file adds or shows re-seals it (reseal()), and any other
 -- change closes the dialog. No text and no size: a status line changes
 -- both, and the window centres itself again. A field's insides are its
--- own (the cursor blinks).
+-- own (the cursor blinks), and so is what a dropdown shows of its insides
+-- (its texts come and go with the choice, the arrows' included).
 local guards = {} -- {root = wrapper, raw = unsafe, seen = picture}
 local function raw_of(w)
 	local m = getmetatable(w)
 	return m and m.unsafe
 end
-local function shape(e, depth, out)
+local function shape(e, depth, out, in_drop)
 	local t = e:GetTypeName()
 	out[#out + 1] = table.concat({depth, t, e:GetName(),
 			e:GetNumChildren(false), string.format("%.3f", e:GetOpacity()),
-			depth > 0 and tostring(e:IsVisible()) or ""}, "|")
+			depth > 0 and not in_drop and tostring(e:IsVisible()) or ""}, "|")
 	if t == "LineEdit" then
 		return
 	end
 	for i = 0, e:GetNumChildren(false) - 1 do
-		shape(e:GetChild(i), depth + 1, out)
+		shape(e:GetChild(i), depth + 1, out, in_drop or t == "DropDownList")
 	end
 end
 local function picture(g)
@@ -779,6 +780,14 @@ local function add_text(parent, text, color)
 end
 
 -- A label in a row: one line, at least min_width wide
+-- A choice of one: ui_utils' dropdown ([UI_DROPDOWN])
+local function add_dropdown(parent, choices, current, on_choose, options)
+	local d, row = require("buildat/extension/ui_utils").safe.dropdown(
+			parent, choices, current, on_choose, options)
+	reseal(parent)
+	return d, row
+end
+
 local function add_label(parent, text, min_width)
 	local t = add_text(parent, text)
 	t:SetWordwrap(false)
@@ -2389,20 +2398,19 @@ end
 local function open_report_row(row)
 	local root, w = open_window("starport report", 620)
 	add_text(w, "Report " .. tostring(row.name) .. " (" .. row.address .. ")")
-	local reason = nil
-	local buttons = {}
+	local reason, suggest = nil, nil
+	local rr = add_row(w)
+	add_label(rr, "Reason", 240)
+	local choices = {}
 	for _, r in ipairs(REASONS) do
-		buttons[r[1]] = add_button(w, r[2], function()
-			reason = r[1]
-			for k, b in pairs(buttons) do
-				b:GetChild(0).color = k == reason and WARN or
-						magic.Color(1, 1, 1)
-			end
-		end)
+		choices[#choices + 1] = {r[2], r[1]}
 	end
+	add_dropdown(rr, choices, nil, function(v) reason = v end,
+			{none = "(choose)"})
 	local sr = add_row(w)
 	add_label(sr, "Wrong rating: audience should be", 240)
-	local suggest = add_edit(sr, "")
+	add_dropdown(sr, AUDIENCES, nil, function(v) suggest = v end,
+			{none = "(say if so)"})
 	add_text(w, "What is wrong (optional):")
 	local text = add_edit(w, "")
 	-- 2b: the whole fleet, where the server is in one
@@ -2438,9 +2446,8 @@ local function open_report_row(row)
 			n = n + 1
 			local body = {listing = id, reason = reason, text = text:GetText(),
 				whole_fleet = whole_fleet, evidence = evidence}
-			local a = suggest:GetText()
-			if reason == "category" and a ~= "" then
-				body.suggest = {audience = a}
+			if reason == "category" and suggest then
+				body.suggest = {audience = suggest}
 			end
 			if s.send_key then
 				body.key = key_for(url)
@@ -2637,7 +2644,7 @@ dofile(__buildat_extension_path("starport") .. "/publish.lua")({M = M,
 	network = network, magic = magic, uistack = uistack,
 	open_window = open_window, add_text = add_text, add_label = add_label,
 	add_row = add_row, add_button = add_button, add_edit = add_edit,
-	effective = effective, WARN = WARN, DIM = DIM})
+	add_dropdown = add_dropdown, effective = effective, WARN = WARN, DIM = DIM})
 -- The verb itself in this file, the extension's surface, which is what
 -- the sandbox scan holds an extension's verbs to; publish.lua's is what
 -- it calls
