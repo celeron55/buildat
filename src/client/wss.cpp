@@ -7,6 +7,7 @@
 #include <mbedtls/entropy.h>
 #include <mbedtls/x509_crt.h>
 #include <mbedtls/base64.h>
+#include "interface/address.h"
 #include <mbedtls/error.h>
 #include <mbedtls/net_sockets.h>
 #ifdef _WIN32
@@ -19,24 +20,13 @@ namespace client {
 
 bool parse_secure_address(const ss_ &address, ss_ *host, ss_ *port)
 {
-	ss_ a;
-	if(address.compare(0, 8, "https://") == 0)
-		a = address.substr(8);
-	else if(address.compare(0, 6, "wss://") == 0)
-		a = address.substr(6);
-	else
+	interface::Url u;
+	if(!interface::parse_url(address, &u) ||
+			(u.scheme != "https" && u.scheme != "wss"))
 		return false;
-	a = a.substr(0, a.find('/'));
-	*port = "443";
-	const size_t colon = a.rfind(':');
-	if(colon != ss_::npos && (a[0] != '[' || colon > a.find(']'))){
-		*port = a.substr(colon + 1);
-		a = a.substr(0, colon);
-	}
-	if(a.size() > 2 && a[0] == '[' && a.back() == ']')
-		a = a.substr(1, a.size() - 2);
-	*host = a;
-	return !a.empty() && !port->empty();
+	*host = u.host;
+	*port = u.port;
+	return true;
 }
 
 static ss_ tls_error(int r)

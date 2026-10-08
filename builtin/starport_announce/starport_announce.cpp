@@ -21,6 +21,7 @@
 // simplified: a shared secret and HMAC, not a public key; Ed25519 when a
 // library for it is in the tree. No stop announce: a Starport lets a
 // listing go when its announces stop.
+#include "interface/address.h"
 #include "core/log.h"
 #include "core/json.h"
 #include "core/version.h"
@@ -264,13 +265,9 @@ struct Module: public interface::Module, public Interface
 			u.pop_back();
 		if(u.find("://") == ss_::npos)
 			u = "http://"+u;
-		if(u.compare(0, 7, "http://") == 0){
-			const ss_ hostport = u.substr(7);
-			const bool v6 = !hostport.empty() && hostport[0] == '[';
-			const size_t close = v6 ? hostport.find(']') : 0;
-			if(hostport.find(':', v6 ? close : 0) == ss_::npos)
-				u += ":29595";
-		}
+		interface::Url p;
+		if(interface::parse_url(u, &p) && p.scheme == "http" && !p.port_given)
+			u = "http://"+interface::join_host_port(p.host, "29595")+p.path;
 		return u;
 	}
 

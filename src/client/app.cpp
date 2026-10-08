@@ -110,6 +110,7 @@ EM_JS(void, web_dgram_close, (int id), {
 #include "interface/voxel.h"
 #include "interface/thread_pool.h"
 #include "interface/http.h"
+#include "interface/address.h"
 #include <map>
 #include <atomic>
 #include <cctype>
@@ -2112,10 +2113,10 @@ struct CApp: public App, public magic::Application
 				address == "127.0.0.1:"+g_local_server_port))
 			return;
 		// The address as the network extension writes it: tcp://host:port
-		ss_ hostport = address;
-		if(hostport.find(':', hostport[0] == '[' ? hostport.find(']') : 0) ==
-				ss_::npos)
-			hostport += ":29500";
+		ss_ host, port;
+		if(!interface::split_host_port(address, &host, &port, "29500"))
+			return;
+		const ss_ hostport = interface::join_host_port(host, port);
 		for(char c : hostport)
 			if(!(isalnum((unsigned char)c) || c == '.' || c == '-' ||
 					c == ':' || c == '[' || c == ']'))
@@ -2711,15 +2712,13 @@ struct CApp: public App, public magic::Application
 			const char *join = getenv("BUILDAT_JOIN");
 			if(join && *join){
 				const ss_ a = join;
-				const size_t colon = a.rfind(':');
-				bool ok = colon != ss_::npos && colon > 0 &&
-						a.size() - colon >= 2 && a.size() - colon <= 6 &&
-						a.size() <= 260;
-				for(size_t i = 0; ok && i < a.size(); i++){
-					const char c = a[i];
-					ok = i > colon ? isdigit((unsigned char)c) != 0 :
-							i == colon || isalnum((unsigned char)c) ||
-							c == '.' || c == '-';
+				ss_ host, port;
+				bool ok = a.size() <= 260 &&
+						interface::split_host_port(a, &host, &port, "") &&
+						!port.empty();
+				for(size_t i = 0; ok && i < host.size(); i++){
+					const char c = host[i];
+					ok = isalnum((unsigned char)c) || c == '.' || c == '-';
 				}
 				if(ok)
 					run_script_no_sandbox("__buildat_join_listed('"+a+"')");
@@ -5272,7 +5271,7 @@ struct CApp: public App, public magic::Application
 			const int64_t port = v.get("port").as_integer();
 			if(port < 1 || port > 65535)
 				continue;
-			const ss_ key = from+":"+itos(port);
+			const ss_ key = interface::join_host_port(from, itos(port));
 			auto it = self->m_lan.find(key);
 			if(it == self->m_lan.end()){
 				if(self->m_lan.size() >= 32){
@@ -5302,11 +5301,12 @@ struct CApp: public App, public magic::Application
 				continue;
 			}
 			const LanEntry &e = it->second;
-			const size_t colon = it->first.rfind(':');
+			ss_ host, port;
+			interface::split_host_port(it->first, &host, &port, "");
 			lua_newtable(L);
-			lua_pushstring(L, it->first.substr(0, colon).c_str());
+			lua_pushstring(L, host.c_str());
 			lua_setfield(L, -2, "host");
-			lua_pushstring(L, it->first.substr(colon + 1).c_str());
+			lua_pushstring(L, port.c_str());
 			lua_setfield(L, -2, "port");
 			lua_pushstring(L, e.name.c_str());
 			lua_setfield(L, -2, "name");

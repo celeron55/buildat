@@ -6,6 +6,7 @@
 #include "client/config.h"
 #include "client/wss.h"
 #include "interface/tcpsocket.h"
+#include "interface/address.h"
 #include "interface/packet_stream.h"
 #include "interface/sha1.h"
 #include "interface/fs.h"
@@ -469,24 +470,10 @@ struct CState: public State
 #endif
 			return connect_host_port(host, port, error);
 		}
-		c55::Strfnd f(address);
-		if(address[0] == '['){
-			f.next("[");
-			host = f.next("]");
-			f.next(":");
-			port = f.next("");
-		} else {
-			host = f.next(":");
-			port = f.next("");
-		}
-
-		if(host == ""){
+		if(!interface::split_host_port(address, &host, &port, "29500")){
 			if(error)
-				*error = "Cannot connect to empty host";
+				*error = "Not an address: \""+address+"\"";
 			return false;
-		}
-		if(port == ""){
-			port = "29500";
 		}
 		return connect_host_port(host, port, error);
 	}

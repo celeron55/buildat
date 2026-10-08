@@ -1,5 +1,6 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+#include "interface/address.h"
 #include "interface/aitta.h"
 #include "interface/bignum.h"
 #include "interface/compress.h"
@@ -200,9 +201,9 @@ static bool plain_name(const ss_ &s, bool dots)
 // An http(s) address with no space, quote or angle bracket in it
 static bool address_ok(const ss_ &a)
 {
-	const size_t at = a.compare(0, 8, "https://") == 0 ? 8 :
-			a.compare(0, 7, "http://") == 0 ? 7 : 0;
-	if(at == 0 || a.size() == at || a.size() > 200)
+	interface::Url u;
+	if(a.size() > 200 || !interface::parse_url(a, &u) ||
+			(u.scheme != "http" && u.scheme != "https"))
 		return false;
 	for(char c : a)
 		if(c <= ' ' || c > '~' || c == '"' || c == '<' || c == '>' ||

@@ -1,5 +1,6 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
+#include "interface/address.h"
 #include "network/api.h"
 #include "core/log.h"
 #include "core/json.h"
@@ -1051,9 +1052,11 @@ struct Module: public interface::Module, public network::Interface
 			return false;
 		if(!loopback(local_address))
 			return true;
-		const ss_ name = web::lower(host.substr(0, host[0] == '[' ?
-				host.find(']') + 1 : host.find(':')));
-		return name == "localhost" || name == "[::1]" ||
+		ss_ name, port;
+		if(!interface::split_host_port(host, &name, &port, ""))
+			return false;
+		name = web::lower(name);
+		return name == "localhost" || name == "::1" ||
 				name.compare(0, 4, "127.") == 0;
 	}
 
