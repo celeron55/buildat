@@ -17,45 +17,16 @@ if type(accounts) ~= "table" then
 	error("aitta: could not load accounts.lua: " .. tostring(accounts_err))
 end
 
--- JSON out; in is buildat.parse_json
-local encode = require("buildat/extension/network").write_json
-
-local next_id = 1
-local waiting = {}
-local function req(cmd, args, on)
-	local q = args or {}
-	q.cmd = cmd
-	q.id = next_id
-	waiting[next_id] = on or function() end
-	next_id = next_id + 1
-	buildat.send_packet("ai:req", encode(q))
-end
-
 local message = nil
 local home
+local req = accounts.requester("ai", function(why)
+	message = why
+	home()
+end, (buildat.get_env("BUILDAT_AITTA_REQS") or "") ~= "")
 -- **From the launcher's publish screen** ([AITTA_PUBLISH_UI]): the
 -- author name and key it made, to fill the form with; a client from
 -- before it has no aitta_bind
 local offer = buildat.aitta_bind and buildat.aitta_bind()
-
-buildat.sub_packet("ai:res", function(data)
-	local res = buildat.parse_json(data)
-	if type(res) ~= "table" then
-		return
-	end
-	if (buildat.get_env("BUILDAT_AITTA_REQS") or "") ~= "" then
-		log:info("ai: " .. data)
-	end
-	local on = waiting[res.id]
-	waiting[res.id] = nil
-	if not res.ok then
-		message = tostring(res.error)
-		return home()
-	end
-	if on then
-		on(res.result)
-	end
-end)
 
 local YELLOW = magic.Color(1.0, 0.8, 0.4)
 local GREY = magic.Color(0.7, 0.7, 0.7)
@@ -138,9 +109,7 @@ accounts.on_joined = function()
 	for line in script:gmatch("[^\n]+") do
 		local q = buildat.parse_json(line)
 		if type(q) == "table" then
-			q.id = next_id
-			next_id = next_id + 1
-			buildat.send_packet("ai:req", encode(q))
+			req(q.cmd, q)
 		end
 	end
 	home()

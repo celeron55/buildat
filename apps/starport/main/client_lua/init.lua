@@ -30,44 +30,17 @@ local encode = require("buildat/extension/network").write_json
 --
 -- Requests
 --
-local next_id = 1
-local waiting = {}
-
--- on(result) on success; a failure is shown on the page that asked
-local function req(cmd, args, on)
-	local q = args or {}
-	q.cmd = cmd
-	q.id = next_id
-	waiting[next_id] = on or function() end
-	next_id = next_id + 1
-	buildat.send_packet("sp:req", encode(q))
-end
-
 local redraw = nil   -- the page open, drawn again
 local page_back = nil -- its Back, for a page inside a page
 local message = nil  -- a line for the top of the next page drawn
 
-buildat.sub_packet("sp:res", function(data)
-	local res = buildat.parse_json(data)
-	if type(res) ~= "table" then
-		return
+-- on(result) on success; a failure is shown on the page that asked
+local req = accounts.requester("sp", function(why)
+	message = why
+	if redraw then
+		redraw()
 	end
-	local on = waiting[res.id]
-	waiting[res.id] = nil
-	if (buildat.get_env("BUILDAT_SP_REQS") or "") ~= "" then
-		log:info("sp: " .. data)
-	end
-	if not res.ok then
-		message = tostring(res.error)
-		if redraw then
-			redraw()
-		end
-		return
-	end
-	if on then
-		on(res.result)
-	end
-end)
+end, (buildat.get_env("BUILDAT_SP_REQS") or "") ~= "")
 
 --
 -- Pages
@@ -882,9 +855,7 @@ accounts.on_joined = function()
 		for line in script:gmatch("[^\n]+") do
 			local q = buildat.parse_json(line)
 			if type(q) == "table" then
-				q.id = next_id
-				next_id = next_id + 1
-				buildat.send_packet("sp:req", encode(q))
+				req(q.cmd, q)
 			end
 		end
 	end

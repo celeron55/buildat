@@ -99,6 +99,39 @@ function M.level_name(lv)
 	return LEVEL_NAMES[#LEVEL_NAMES][2]
 end
 
+-- An app's JSON requests: "<p>:req" {cmd, id, ...} out, "<p>:res" {id, ok,
+-- result or error} back. Returns req(cmd, args, on, on_error): on(result)
+-- on success; a failure goes to on_error(why) when given, else fail(why).
+-- log: each answer logged as "<p>: ...", for a check to read
+function M.requester(p, fail, log_them)
+	local write_json = require("buildat/extension/network").write_json
+	local next_id, waiting = 1, {}
+	buildat.sub_packet(p .. ":res", function(data)
+		local res = buildat.parse_json(data)
+		if type(res) ~= "table" then
+			return
+		end
+		if log_them then
+			log:info(p .. ": " .. data)
+		end
+		local on = waiting[res.id]
+		waiting[res.id] = nil
+		if not res.ok then
+			return (on and on[2] or fail)(tostring(res.error))
+		end
+		if on then
+			on[1](res.result)
+		end
+	end)
+	return function(cmd, args, on, on_error)
+		local q = args or {}
+		q.cmd, q.id = cmd, next_id
+		waiting[next_id] = {on or function() end, on_error}
+		next_id = next_id + 1
+		buildat.send_packet(p .. ":req", write_json(q))
+	end
+end
+
 local opts = {}
 local window = nil
 -- The account page open, for the packets that redraw it; see M.users_page

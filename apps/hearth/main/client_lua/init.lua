@@ -29,44 +29,14 @@ local encode = require("buildat/extension/network").write_json
 local scripted = (buildat.get_env("BUILDAT_HEARTH_REQS") or "") ~= "" or
 		(buildat.get_env("BUILDAT_HEARTH_OPEN") or "") ~= "" or
 		buildat.get_env("BUILDAT_HEARTH_RESUME") == "1"
-local next_id = 1
-local waiting = {}
 -- What the last request said, for the page drawn next; say() puts it on
 -- the page open
 local message = nil
 local say
 
--- on_error(why): instead of the reason said on the page open
-local function req(cmd, args, on, on_error)
-	local q = args or {}
-	q.cmd = cmd
-	q.id = next_id
-	waiting[next_id] = {on or function() end, on_error}
-	next_id = next_id + 1
-	buildat.send_packet("hr:req", encode(q))
-end
-
-buildat.sub_packet("hr:res", function(data)
-	local res = buildat.parse_json(data)
-	if type(res) ~= "table" then
-		return
-	end
-	if scripted then
-		log:info("hr: " .. data)
-	end
-	local on = waiting[res.id]
-	waiting[res.id] = nil
-	if not res.ok then
-		if on and on[2] then
-			return on[2](tostring(res.error))
-		end
-		-- On the page as it is: what was typed stays
-		return say(tostring(res.error))
-	end
-	if on then
-		on[1](res.result)
-	end
-end)
+-- on(result); on_error(why): instead of the reason said on the page open,
+-- where what was typed stays
+local req = accounts.requester("hr", function(why) say(why) end, scripted)
 
 local function C(name) return magic.Color(ui.rgb(name)) end
 local DIM, WARN, MAIN = C("dim"), C("warn"), C("main")
