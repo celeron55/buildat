@@ -309,7 +309,10 @@ local SUN_DIR = {x = -0.6, y = -1.0, z = 0.8}
 -- rendered pitch black under it. 0.003 puts that field's probe at a
 -- median of 39 of 255 in the render with the sky still at 0, which is
 -- [PT_NIGHT]'s target; the same number is LUM_RANGE in
--- pathtrace_render.py.
+-- pathtrace_render.py. **0.015 caps the gain at 12x**
+-- ([CAVE_EXPOSURE_FLOOR], user 2026-10-08: a cave dark on the screen,
+-- not metered up to grey). pbr_pair.sh's medians: a closed cave 49
+-- (101 at 0.003), its moonlit snow field 37 (74); at 0.04 31 and 24.
 -- **The top is vp5_1000's own key** (user, 2026-10-01: its greenery sets
 -- a good snow exposure, and a field of snow and ice should keep it rather
 -- than be metered down to dull): 7.04 there, measured as the ratio of the
@@ -318,7 +321,7 @@ local SUN_DIR = {x = -0.6, y = -1.0, z = 0.8}
 -- cap changes none of them; pathtrace_render.py's 100 is left alone.
 local AUTO_EXPOSURE = {
 	adapt_rate = 0.6,
-	lum_range = {0.003, 7.0},
+	lum_range = {0.015, 7.0},
 	middle_grey = 0.18,
 	-- Frames left before the rate goes back after a reset; in this
 	-- table since the chunk is at Lua 5.1's two hundred locals

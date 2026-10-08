@@ -3,12 +3,15 @@
 # tier: full
 # [LC_PBR_PARITY]: the same scene in both clients' pbr -- a platform high
 # in the air at noon, at dusk looking at the sun, at night, and a closed
-# stone room lit by a torch -- vanilla being the reference. One fixture
+# stone room lit by a torch, and [CAVE_EXPOSURE_FLOOR]'s two probes: a
+# closed stone room with no light (a cave) and a snow
+# field under the moon -- vanilla being the reference. One fixture
 # builds the scene for both (vanilla's own server, a Luanti server for
 # luanti_client). The shots land in local/pbr_pair/<client>/, each pair
 # side by side in local/pbr_pair/side_<n>.png (vanilla left); printed per
-# pair is the mean luma of the frame and of its top third (the sky and
-# its clouds), and a pair whose frames differ by more than a fifth fails.
+# pair is the mean and the median luma of the frame and the mean of its
+# top third (the sky and its clouds), and a pair whose frames' means
+# differ by more than a fifth fails.
 # Needs the Luanti checkout and its server binary for luanti_client.
 #
 #   builtin/luanti/test/pbr_pair.sh [vanilla|ext]   (both by default)
@@ -26,6 +29,8 @@ fixture='core.settings:set("time_speed", "0")
 core.settings:set("mobs_spawn", "false")
 local P = {x = 0, y = 100, z = 0} -- the platform
 local C = {x = 60, y = 100, z = 0} -- the room
+local K = {x = 60, y = 100, z = 30} -- the cave: the room with no torch
+local N = {x = 0, y = 100, z = 60} -- the snow field
 local function build()
 	for x = -20, 20 do
 		for z = -20, 20 do
@@ -38,21 +43,30 @@ local function build()
 		core.set_node({x = P.x, y = P.y + y, z = P.z + 6},
 				{name = "mcl_core:stone"})
 	end
-	-- The room: stone all round, 7x5x7 inside, a torch on its floor
-	for x = -4, 4 do
-		for y = -1, 5 do
-			for z = -4, 4 do
-				local edge = math.abs(x) == 4 or math.abs(z) == 4 or
-						y == -1 or y == 5
-				core.set_node({x = C.x + x, y = C.y + y, z = C.z + z},
-						{name = edge and "mcl_core:stone" or "air"})
+	-- The rooms: stone all round, 7x5x7 inside, a torch on the floor of
+	-- the room; the cave is closed
+	for _, R in ipairs({C, K}) do
+		for x = -4, 4 do
+			for y = -1, 5 do
+				for z = -4, 4 do
+					local edge = math.abs(x) == 4 or math.abs(z) == 4 or
+							y == -1 or y == 5
+					core.set_node({x = R.x + x, y = R.y + y, z = R.z + z},
+							{name = edge and "mcl_core:stone" or "air"})
+				end
 			end
+		end
+	end
+	for x = -20, 20 do
+		for z = -20, 20 do
+			core.set_node({x = N.x + x, y = N.y - 1, z = N.z + z},
+					{name = "mcl_core:snowblock"})
 		end
 	end
 	core.set_node({x = C.x, y = C.y, z = C.z + 3}, {name = "mcl_torches:torch",
 			param2 = 1})
 	core.fix_light({x = P.x - 25, y = P.y - 5, z = P.z - 25},
-			{x = C.x + 10, y = C.y + 10, z = C.z + 25})
+			{x = C.x + 10, y = C.y + 10, z = N.z + 25})
 end
 -- step: time of day, where, yaw, pitch (Luanti: up is negative)
 local steps = {
@@ -60,11 +74,13 @@ local steps = {
 	{0.77, P, math.pi / 2, -0.05},
 	{0.0, P, 0, -0.15},
 	{0.5, C, 0, 0.3},
+	{0.5, K, 0, 0.3},
+	{0.0, N, 0, 0.5},
 }
 core.register_on_joinplayer(function(player)
 	local name = player:get_player_name()
 	core.set_timeofday(0.5)
-	core.emerge_area({x = -30, y = 90, z = -30}, {x = 80, y = 110, z = 30},
+	core.emerge_area({x = -30, y = 90, z = -30}, {x = 80, y = 110, z = 90},
 			function(_, _, left)
 		if left > 0 then return end
 		build()
@@ -85,7 +101,7 @@ core.register_on_joinplayer(function(player)
 end)'
 cmds(){ # out-dir
 	local i
-	for i in 1 2 3 4; do
+	for i in 1 2 3 4 5 6; do
 		echo "wait_log 240000 chat: pbr_pair: step $i"
 		echo "delay 2000"; echo "screenshot $1/s$i.png"
 	done
@@ -105,7 +121,7 @@ run_vanilla(){
 		{ echo "FAIL: the server did not start"; exit 1; }
 	local srv=$SERVER_PID
 	cmds "$o" > "$o/cmds.txt"
-	BUILDAT_LUANTI_PBR=pbr timeout 240 bin/buildat -s localhost:29797 \
+	BUILDAT_LUANTI_PBR=pbr timeout 330 bin/buildat -s localhost:29797 \
 		-w 1280x720 -l 3 -o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1
 	kill -INT "$srv" 2>/dev/null
 	for _i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
@@ -132,7 +148,7 @@ run_ext(){
 	sleep 3
 	cmds "$o" > "$o/cmds.txt"
 	BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=pp \
-		BUILDAT_LUANTI_CONNECT=1 BUILDAT_LUANTI_PBR=pbr timeout 240 \
+		BUILDAT_LUANTI_CONNECT=1 BUILDAT_LUANTI_PBR=pbr timeout 330 \
 		"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 \
 		-o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1
 	kill "$srv" 2>/dev/null
@@ -145,18 +161,20 @@ python3 - "$out" <<'PY'
 import os, sys
 from PIL import Image, ImageStat
 out = sys.argv[1]
-names = ["noon", "dusk", "night", "room"]
+names = ["noon", "dusk", "night", "room", "cave", "snow"]
 bad = []
-for n in range(1, 5):
+for n in range(1, 7):
     shots = ["%s/%s/s%d.png" % (out, c, n) for c in ("vanilla", "ext")]
     if not all(os.path.exists(s) for s in shots):
         bad.append("%s: no shot" % names[n - 1]); continue
     ims = [Image.open(s).convert("L") for s in shots]
     w, h = ims[0].size
     whole = [ImageStat.Stat(i).mean[0] for i in ims]
+    med = [ImageStat.Stat(i).median[0] for i in ims]
     top = [ImageStat.Stat(i.crop((0, 0, w, h // 3))).mean[0] for i in ims]
-    print("%-5s  frame vanilla %5.1f ext %5.1f   top vanilla %5.1f ext %5.1f"
-          % (names[n - 1], whole[0], whole[1], top[0], top[1]))
+    print("%-5s  frame vanilla %5.1f ext %5.1f   median vanilla %3d ext %3d"
+          "   top vanilla %5.1f ext %5.1f" % (names[n - 1], whole[0],
+          whole[1], med[0], med[1], top[0], top[1]))
     if abs(whole[1] - whole[0]) > max(whole[0], 8) / 5:
         bad.append(names[n - 1])
     side = Image.new("RGB", (w * 2, h))
