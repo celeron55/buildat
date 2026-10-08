@@ -2644,8 +2644,9 @@ struct Module: public interface::Module
 
 	uint64_t usage(const ss_ &user)
 	{
-		auto it = usage_all().bytes.find(user);
-		return it == m_usage.bytes.end() ? 0 : it->second;
+		const Usage &u = usage_all();
+		auto it = u.bytes.find(user);
+		return it == u.bytes.end() ? 0 : it->second;
 	}
 
 	int level_of(const ss_ &user)
@@ -2661,8 +2662,9 @@ struct Module: public interface::Module
 	ss_ plan_refusal(const ss_ &user, uint64_t more = 0)
 	{
 		if(!is_admin(user)){
-			auto it = usage_all().plans.find(user);
-			if(it != m_usage.plans.end() && it->second >= MAX_PLANS)
+			const Usage &u = usage_all();
+			auto it = u.plans.find(user);
+			if(it != u.plans.end() && it->second >= MAX_PLANS)
 				return "You have "+itos((int)MAX_PLANS)+" plans, as many as "
 						"anyone has: delete one first";
 		}
