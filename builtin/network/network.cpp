@@ -1,6 +1,7 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/address.h"
+#include "interface/web_brand.h"
 #include "network/api.h"
 #include "core/log.h"
 #include "core/json.h"
@@ -2139,11 +2140,8 @@ struct Module: public interface::Module, public network::Interface
 	ss_ page_title()
 	{
 		const ss_ &name = !m_admin_title.empty() ? m_admin_title : m_app_title;
-		ss_ r;
-		for(char c : name.empty() ? ss_() : name+" | ")
-			r += c == '&' ? "&amp;" : c == '<' ? "&lt;" : c == '>' ? "&gt;" :
-					ss_(1, c);
-		return r+"Buildat";
+		return interface::web_brand::html(name.empty() ? ss_() : name+" | ")+
+				"Buildat";
 	}
 
 	bool claimed(const ss_ &target)

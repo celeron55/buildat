@@ -139,21 +139,7 @@ static ss_ text_ok(const ss_ &s, size_t max, bool lines, const char *what)
 	return "";
 }
 
-static ss_ html(const ss_ &s)
-{
-	ss_ r;
-	for(char c : s){
-		switch(c){
-		case '&': r += "&amp;"; break;
-		case '<': r += "&lt;"; break;
-		case '>': r += "&gt;"; break;
-		case '"': r += "&quot;"; break;
-		case '\'': r += "&#39;"; break;
-		default: r += c;
-		}
-	}
-	return r;
-}
+using interface::web_brand::html;
 
 static ss_ url_decode(const ss_ &s)
 {

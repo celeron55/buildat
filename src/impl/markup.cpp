@@ -1,6 +1,7 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 #include "interface/markup.h"
+#include "interface/web_brand.h"
 #include <md4c.h>
 #include <cctype>
 
@@ -9,16 +10,7 @@ namespace markup {
 
 static void escape(ss_ &r, const char *s, size_t n)
 {
-	for(size_t i = 0; i < n; i++){
-		switch(s[i]){
-		case '&': r += "&amp;"; break;
-		case '<': r += "&lt;"; break;
-		case '>': r += "&gt;"; break;
-		case '"': r += "&quot;"; break;
-		case '\'': r += "&#39;"; break;
-		default: r += s[i];
-		}
-	}
+	r += web_brand::html(ss_(s, n));
 }
 
 // A destination a page may hold: http, https, mailto, or no scheme at all
