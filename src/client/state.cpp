@@ -138,6 +138,15 @@ struct CState: public State
 	// The announced files are being read and hashed on a worker; see the
 	// core:announce_files handler
 	bool m_announce_checking = false;
+	// core:run_script that came while announced files were still on their
+	// way: a file the server announces alone after connect (luanti's shared
+	// client Lua, at its module's start) is not in the wait the server's
+	// first scripts are sent after, and a script ran before the file it
+	// loads was in ([VL_INV_PARITY])
+	sv_<ss_> m_held_scripts;
+	// And what came after it for the handlers it starts, kept in order
+	// until it has run: a game's packets with nobody to take them were lost
+	std::deque<std::pair<ss_, ss_>> m_deferred;
 	// Connecting is possible only once. After that has happened, the whole
 	// state has to be recreated for making a new connection.
 	// In actuality the whole client application has to be recreated because
@@ -281,6 +290,8 @@ struct CState: public State
 		m_packet_stream = interface::PacketStream();
 		m_file_hashes.clear();
 		m_waiting_files.clear();
+		m_held_scripts.clear();
+		m_deferred.clear();
 		m_tell_after_all_files_transferred_requested = false;
 		m_connected = false;
 		m_disconnected = false;
@@ -522,6 +533,25 @@ struct CState: public State
 			log_v(MODULE, "files: %zu of %zu", got, m_files_asked);
 	}
 
+	void run_held_scripts()
+	{
+		if(!m_waiting_files.empty() || m_announce_checking ||
+				m_held_scripts.empty())
+			return;
+		sv_<ss_> scripts;
+		scripts.swap(m_held_scripts);
+		for(const ss_ &script : scripts){
+			if(m_app)
+				m_app->run_script(script);
+		}
+		// Ahead of what has been read since, in the order they came
+		for(auto it = m_deferred.rbegin(); it != m_deferred.rend(); ++it){
+			m_parsed_bytes += it->second.size();
+			m_parsed.push_front(std::move(*it));
+		}
+		m_deferred.clear();
+	}
+
 	void announce_checked(CheckAnnouncedTask &task)
 	{
 		m_announce_checking = false;
@@ -551,6 +581,7 @@ struct CState: public State
 		if(m_tell_after_all_files_transferred_requested &&
 				m_waiting_files.empty())
 			send_packet("core:all_files_transferred", "");
+		run_held_scripts();
 	}
 
 	ss_ get_file_path(const ss_ &name, ss_ *dst_file_hash)
@@ -655,7 +686,13 @@ struct CState: public State
 					"read: "+e.what());
 			return;
 		}
-		auto dispatch = [&](const std::pair<ss_, ss_> &p){
+		auto dispatch = [&](std::pair<ss_, ss_> &p){
+			if(!m_held_scripts.empty() &&
+					p.first.compare(0, 5, "core:") != 0 &&
+					p.first.compare(0, 8, "network:") != 0){
+				m_deferred.push_back(std::move(p));
+				return;
+			}
 			try {
 				handle_packet(p.first, p.second);
 			} catch(std::exception &e){
@@ -677,7 +714,7 @@ struct CState: public State
 						std::move(p));
 			}
 			m_parsed = std::move(rest);
-			for(const auto &p : first){
+			for(auto &p : first){
 				m_parsed_bytes -= p.second.size();
 				dispatch(p);
 			}
@@ -810,6 +847,13 @@ void CState::setup_packet_handlers()
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
 		log_i(MODULE, "Asked to run script:\n----\n%s\n----", cs(data));
+		if(!m_waiting_files.empty() || m_announce_checking ||
+				!m_held_scripts.empty()){
+			log_i(MODULE, "The script waits for %zu files still coming",
+					m_waiting_files.size());
+			m_held_scripts.push_back(data);
+			return;
+		}
 		if(m_app)
 			m_app->run_script(data);
 	};
@@ -938,6 +982,7 @@ void CState::setup_packet_handlers()
 			send_packet("core:all_files_transferred", "");
 			m_tell_after_all_files_transferred_requested = false;
 		}
+		run_held_scripts();
 	};
 
 	m_packet_handlers["replicate:create_node"] =
