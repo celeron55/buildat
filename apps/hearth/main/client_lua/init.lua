@@ -858,7 +858,9 @@ show_topic = function(id)
 		for i, o in ipairs(ORDERS) do
 			if o[1] == state.order then oat = i end
 		end
-		choice(view, "Order: ", ORDERS, oat, function(o)
+		-- A phone has no room for the two side by side
+		choice(narrow and row(w) or view, "Order: ", ORDERS, oat,
+				function(o)
 			state.order = o
 			redraw()
 		end)
