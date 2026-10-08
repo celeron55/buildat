@@ -461,6 +461,20 @@ static const char *SCHEMA =
 		"message INTEGER NOT NULL, PRIMARY KEY(file, message)) "
 		"WITHOUT ROWID;";
 
+// [DB_INDEXES]: what the pages, the limits and the queue look up by.
+// After COLUMNS_ADDED, whose columns some of them are on.
+static const char *INDEXES =
+	"CREATE INDEX IF NOT EXISTS threads_topic ON threads(topic, hidden, last);"
+	"CREATE INDEX IF NOT EXISTS threads_last ON threads(hidden, last);"
+	"CREATE INDEX IF NOT EXISTS threads_author ON threads(author, created);"
+	"CREATE INDEX IF NOT EXISTS edits_editor ON edits(editor, time);"
+	"CREATE INDEX IF NOT EXISTS edits_message ON edits(message);"
+	"CREATE INDEX IF NOT EXISTS reports_by ON reports(by, time);"
+	"CREATE INDEX IF NOT EXISTS reports_state ON reports(state);"
+	"CREATE INDEX IF NOT EXISTS follows_thread ON follows(thread);"
+	"CREATE INDEX IF NOT EXISTS reads_thread ON reads(thread);"
+	"CREATE INDEX IF NOT EXISTS topics_parent ON topics(parent);";
+
 static const char *const COLUMNS_ADDED[][3] = {
 	{"threads", "answer", "INTEGER NOT NULL DEFAULT 0"},
 	{"threads", "hidden", "INTEGER NOT NULL DEFAULT 0"},
@@ -756,6 +770,11 @@ struct Module: public interface::Module
 					exec("UPDATE reads SET last = (SELECT ifnull(max(id), 0) "
 							"FROM messages WHERE thread = reads.thread)");
 			}
+		}
+		if(sqlite3_exec(m_db, INDEXES, nullptr, nullptr, &err) != SQLITE_OK){
+			const ss_ e = err ? err : "";
+			sqlite3_free(err);
+			throw Exception("hearth: the indexes: "+e);
 		}
 		// A file from before file_links: its links from every message once
 		if(fill_links){
