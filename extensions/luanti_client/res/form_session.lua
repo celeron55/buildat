@@ -18,9 +18,9 @@
 --                         index}
 --   drop(count, from)     optional: the carried stack thrown away; without
 --                         it a stack let go of off the form goes back
---   craft()               optional: a click on craftpreview crafts, and
---                         the hand carries craftresult; without it the
---                         preview is a slot like any other
+--   craft(count, location) optional: a click on craftpreview crafts count,
+--                         and the hand carries craftresult; without it
+--                         the preview is a slot like any other
 --   item_description(name) -> the text over a slot, or nil
 --   item_image(name)      -> a texture resource for the stack in hand
 --   white                 a white pixel's resource, for an item with none
@@ -334,21 +334,32 @@ function M.new(env)
 		end
 	end
 
-	local function take_from(slot, button)
-		if env.craft and slot.list == "craftpreview" then
-			-- The grid's answer: a craft makes it into craftresult, and
-			-- that is what the hand then carries and puts down as a move
-			-- (Luanti's GUIFormSpecMenu does the same two steps)
-			env.craft()
-			self.form.state.held = {location = slot.location,
-					list = "craftresult", index = 1,
-					count = slot.stack.count or 1, name = slot.stack.name}
+	-- The grid's answer: a craft makes it into craftresult, and that is
+	-- what the hand then carries and puts down as a move; a further click
+	-- crafts onto what is held (Luanti's GUIFormSpecMenu: one, ten with the
+	-- middle button, and updateSelectedItem holding craftresult). The craft
+	-- is the server's and cannot be put back. simplified: shift's stack
+	-- and its move to the inventory are not read.
+	local function craft_from(slot, button)
+		local held = self.form.state.held
+		local times = button == "middle" and 10 or 1
+		env.craft(times, slot.location)
+		local n = (slot.stack.count or 1) * times
+		if held then
+			held.count = held.count + n
 		else
 			self.form.state.held = {location = slot.location,
-					list = slot.list, index = slot.index,
-					count = take_count(slot.stack.count, button),
+					list = "craftresult", index = 1, count = n,
 					name = slot.stack.name}
 		end
+		self.form.stale = true
+	end
+
+	local function take_from(slot, button)
+		self.form.state.held = {location = slot.location,
+				list = slot.list, index = slot.index,
+				count = take_count(slot.stack.count, button),
+				name = slot.stack.name}
 		self.form.stale = true
 	end
 
@@ -460,11 +471,24 @@ function M.new(env)
 		if slot then
 			log:verbose("form: slot "..slot.list.." "..slot.index..
 					" at "..lx..","..ly)
-			if form.state.held then
+			local held = form.state.held
+			if env.craft and slot.list == "craftpreview" then
+				-- Crafted onto a held result of the same, as Luanti; with
+				-- anything else in hand the click does nothing
+				if slot.stack and slot.stack.name and
+						slot.stack.name ~= "" and (not held or
+						held.list == "craftresult" and
+						held.name == slot.stack.name) then
+					craft_from(slot, button)
+				end
+			elseif held then
 				put_into(slot, button)
 			elseif slot.stack and slot.stack.name and
 					slot.stack.name ~= "" then
 				take_from(slot, button)
+				-- Picked up by this press: its release over another slot
+				-- is a drag
+				form.state.held.pressed = true
 			end
 			return true
 		end
@@ -493,9 +517,13 @@ function M.new(env)
 	function self:release(button)
 		local form = self.form
 		local held = form and form.drawn and form.state.held
-		if not held or not mouse_at then
+		-- Only a stack this press picked up: one already in hand was put
+		-- by the click, and putting it again on the release laid two
+		-- where a right click lays one
+		if not held or not held.pressed or not mouse_at then
 			return
 		end
+		held.pressed = nil
 		local lx, ly = local_xy(mouse_at[1], mouse_at[2])
 		local slot = slot_at(lx, ly)
 		if slot and not (slot.location == held.location and

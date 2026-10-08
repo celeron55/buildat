@@ -410,11 +410,24 @@ function M.new(magic, buildat, log, ctx)
 						magic.Color(0.6, 0.6, 0.2, 0.55) or layout.slot_bg or
 						magic.Color(0, 0, 0, 0.45))
 				local stack = list and list.items[index] or nil
-				draw_stack(parent, x, y, slot, stack)
+				-- The slot a stack is held from shows what is left in it,
+				-- nothing after the whole was taken (Luanti draws it less
+				-- m_selected_amount)
+				local shown = stack
+				if in_hand and stack and stack.count then
+					local left = stack.count - (held.count or 0)
+					shown = nil
+					if left > 0 then
+						shown = {}
+						for k, v in pairs(stack) do shown[k] = v end
+						shown.count = left
+					end
+				end
+				draw_stack(parent, x, y, slot, shown)
 				slots[#slots + 1] = {
 					location = e.fields[1], list = e.fields[2],
 					index = index, x = x, y = y, size = slot,
-					stack = stack,
+					stack = shown,
 				}
 			end
 		end

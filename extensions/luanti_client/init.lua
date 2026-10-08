@@ -2297,6 +2297,9 @@ local function show_client(host, port, name, password, mode, origin)
 						from.list, from.index, inv_location(to.location),
 						to.list, to.index)
 			end,
+			craft = function(count, location)
+				client:send_inventory_craft(count, inv_location(location))
+			end,
 			-- The game turns it into an item entity in front of the player
 			drop = function(count, from)
 				client:send_inventory_drop(count, inv_location(from.location),

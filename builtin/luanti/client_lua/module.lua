@@ -3255,9 +3255,9 @@ local function S()
 				to.location, to.list, tostring(to.index), tostring(count),
 			}, {"array", "string"}))
 		end,
-		craft = function()
+		craft = function(count)
 			buildat.send_packet("luanti:inv_action", cereal.binary_output(
-					{"craft", "1"}, {"array", "string"}))
+					{"craft", tostring(count)}, {"array", "string"}))
 		end,
 		item_description = function(name)
 			local desc = M.item_description(name)

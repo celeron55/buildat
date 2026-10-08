@@ -1510,6 +1510,12 @@ function M.new(socket, options, log)
 				(from_i - 1).." "..to_inv.." "..to_list.." "..(to_i - 1))
 	end
 
+	-- Crafting count times out of the craft grid of an inventory into its
+	-- craftresult. See ICraftAction::serialize.
+	function self:send_inventory_craft(count, inv)
+		send_command(TOSERVER.INVENTORY_ACTION, "Craft "..count.." "..inv.." ")
+	end
+
 	-- Throwing a stack away, which the game turns into an item entity in
 	-- front of the player. Same text shape as the move above; a count of
 	-- zero is the whole stack. See IDropAction::serialize.
