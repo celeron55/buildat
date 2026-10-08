@@ -1536,7 +1536,9 @@ function M.new(magic, buildat, log, ctx)
 						local t = label(window, x, y, w,
 								formspec.strip_escapes(text), 13,
 								markup_color(text) or color)
+						-- The width after the wrap, or it is the line's
 						t:SetWordwrap(true)
+						t:SetFixedWidth(math.floor(w))
 					end
 					if above ~= "" then
 						label(window, x, y - 15, nil,

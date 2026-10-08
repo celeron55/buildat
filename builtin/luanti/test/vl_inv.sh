@@ -5,13 +5,16 @@
 # in both clients, beside official Luanti's own
 # (local/luanti_inventory_reference/, the user's): the inventory, the
 # recipe book, help, the achievements and their second entry. A fixture
-# shows each form as its button would -- the inventory as the inventory
-# key's form -- six seconds apart, and the client shoots each. The shots
-# land in local/vl_inv/<client>/, each beside its reference in
+# opens the inventory as the inventory key would, again every six
+# seconds, and the client clicks what a player would -- the recipe
+# book's, help's and the achievements' buttons, then the list's second
+# row -- and shoots each form the game answers with. The shots land in
+# local/vl_inv/<client>/, each beside its reference in
 # local/vl_inv/side_<n>.png (reference left, vanilla, luanti_client);
-# what to compare is the eye's, so this asserts only that every form
-# was shot. Needs the Luanti checkout and its server binary for
-# luanti_client, as ext_hotbar.sh does.
+# what to compare is the eye's. Asserted: every form shot, and every
+# click reached the game as the field it names. Needs the Luanti
+# checkout and its server binary for luanti_client, as ext_hotbar.sh
+# does.
 #
 #   builtin/luanti/test/vl_inv.sh [vanilla|ext]   (both by default)
 set -u
@@ -28,36 +31,60 @@ if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null ||
 fi
 fixture='core.settings:set("creative_mode", "false")
 core.settings:set("enable_damage", "false")
+-- First of the handlers, once all are in: one of the game returns true
+-- and ends the rest
+core.register_on_mods_loaded(function()
+	table.insert(core.registered_on_player_receive_fields, 1,
+			function(player, formname, fields)
+		local keys = {}
+		for k, v in pairs(fields) do keys[#keys + 1] = k .. "=" .. v end
+		table.sort(keys)
+		core.log("action", "vl_inv: fields " .. table.concat(keys, " "))
+	end)
+end)
 core.register_on_joinplayer(function(player)
 	local name = player:get_player_name()
 	core.set_timeofday(0.5)
 	player:get_inventory():add_item("main", "mcl_core:tree")
-	local steps = {
-		function() core.show_formspec(name, "",
-				player:get_inventory_formspec()) end,
-		function() mcl_craftguide.show(name) end,
-		function() doc.show_doc(name) end,
-		function() awards.show_to(name, name, 1, false) end,
-		function() awards.show_to(name, name, 2, false) end,
-		function() core.close_formspec(name, "") end,
-	}
-	for i, f in ipairs(steps) do
+	-- The inventory for the first four; the fifth is a click in the
+	-- achievements the fourth opened
+	for i = 1, 5 do
 		core.after(10 + 6 * (i - 1), function()
-			f()
+			if i < 5 then
+				core.show_formspec(name, "", player:get_inventory_formspec())
+			end
 			core.chat_send_player(name, "vl_inv: step " .. i)
 		end)
 	end
+	core.after(10 + 6 * 5, function() core.close_formspec(name, "") end)
 end)'
-# The client shoots two seconds into each step, which the fixture says in
-# chat: neither the server's timers nor a client's join line keep time
-# with the other end
+# Each step starts on the chat line the fixture sends with it: neither
+# the server's timers nor a client's join line keep time with the other
+# end. Where the inventory's buttons and the list's second row are, at
+# 1280x720, is the same in both clients; what each click must send.
+clicks=("" "698 318" "758 318" "878 318" "700 243")
+sent=("" "__mcl_craftguide=" "__mcl_doc=" "__mcl_achievements=" "awards=CHG:2")
 cmds(){ # out-dir
 	for i in 1 2 3 4 5; do
 		echo "wait_log 240000 chat: vl_inv: step $i"
+		echo "delay 1000"
+		if [ -n "${clicks[$((i - 1))]}" ]; then
+			echo "mouse_pos ${clicks[$((i - 1))]}"; echo "delay 200"
+			echo "mouse_click left"
+		fi
 		echo "delay 2000"; echo "screenshot $1/s$i.png"
 	done
 	echo quit
 }
+# Whether each click reached the game: the server log, the fields line
+check_sent(){ # client server-log
+	local i
+	for i in 2 3 4 5; do
+		grep -aq "vl_inv: fields .*${sent[$((i - 1))]}" "$2" ||
+			failed+=("$1: step $i sent no ${sent[$((i - 1))]}")
+	done
+}
+failed=()
 
 run_vanilla(){
 	local o="$out/vanilla" save=buildat_test_vl_inv
@@ -76,6 +103,7 @@ run_vanilla(){
 		-o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1
 	kill -INT "$srv" 2>/dev/null
 	for _i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+	check_sent vanilla "$o/srv.log"
 }
 
 run_ext(){
@@ -106,11 +134,13 @@ run_ext(){
 		-o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1
 	kill "$srv" 2>/dev/null
 	for _i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+	check_sent ext "$o/luanti_srv.log"
 }
 
 [ "$which" = ext ] || run_vanilla
 [ "$which" = vanilla ] || run_ext
-python3 - "$out" "$ref" <<'PY'
+for f in "${failed[@]}"; do echo "FAIL: $f"; done
+python3 - "$out" "$ref" <<'PY' || exit 1
 import os, sys
 from PIL import Image
 out, ref = sys.argv[1], sys.argv[2]
@@ -133,3 +163,4 @@ if missing:
     sys.exit(1)
 print("PASS: the five forms shot, beside the reference in " + out)
 PY
+[ ${#failed[@]} -eq 0 ] || exit 1
