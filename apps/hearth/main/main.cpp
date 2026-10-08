@@ -2613,8 +2613,10 @@ struct Module: public interface::Module
 			}
 			return v;
 		}
+		// "topics" is the sidebar, which a client redraws with a thread
+		// open; the client drops an "hr:new" for a thread it has left
 		if(cmd != "thread" && cmd != "reply" && cmd != "edit" &&
-				cmd != "answered" && cmd != "follow")
+				cmd != "answered" && cmd != "follow" && cmd != "topics")
 			m_viewing.erase(peer);
 		if(cmd == "topics"){
 			json::Value v = json::object();
