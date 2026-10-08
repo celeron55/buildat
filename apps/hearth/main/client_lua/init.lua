@@ -212,9 +212,13 @@ assert(html_text('<p><strong>b</strong> <a href="https://x/?a=1&amp;b">x</a> ' .
 		"b x (https://x/?a=1&b) #1\n\n  - i")
 
 -- The markup's buttons and Preview in a row under the field `e`; `show`
--- gets the preview's text. `extra` adds the row's last buttons (Send).
+-- gets the preview's text. `extra` adds the row's first buttons (Send):
+-- first, as a phone's page cuts the row's end ([PLAYTEST_1008])
 local function markup_buttons(parent, e, show, extra)
 	local r = row(parent)
+	if extra then
+		extra(r)
+	end
 	for _, b in ipairs(MARKUP) do
 		button(r, b[1], function()
 			insert_at_cursor(e, b[2])
@@ -236,9 +240,6 @@ local function markup_buttons(parent, e, show, extra)
 			show("No preview: " .. why)
 		end)
 	end)
-	if extra then
-		extra(r)
-	end
 	return r
 end
 
