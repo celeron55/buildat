@@ -615,7 +615,6 @@ static json::Value default_settings()
 	// [WEB_ID_TRUST]: web pages besides a listed server's own that
 	// /authorize sends a token to, as origins ("https://play.example.org")
 	s.set("web_clients", json::array());
-	s.set("moderators", json::array());
 	s.set("trusted_flaggers", json::array());
 	// [STARPORT_RECOMMENDS]: the Hearth a client's "Discuss" joins, and
 	// the Aittas a client is offered, as addresses
@@ -857,6 +856,25 @@ struct Module: public interface::Module
 				m_settings = next;
 				put("settings", "settings", m_settings);
 			}
+		}
+		// [SHARED_HELPERS]: the moderators' list, from before, onto
+		// accounts' levels once
+		const json::Value old_mods = m_settings.get("moderators");
+		if(!old_mods.is_undefined()){
+			for(unsigned i = 0; old_mods.is_array() && i < old_mods.size(); i++){
+				const ss_ n = old_mods.at(i).is_string() ?
+						old_mods.at(i).as_string() : "";
+				if(!n.empty() && !is_moderator(n))
+					accounts::access(m_server, [&](accounts::Interface *a){
+						const ss_ why = a->set_level(n, accounts::LV_MODERATOR);
+						log_i(MODULE, "moderator %s: %s", cs(n),
+								why.empty() ? "a Steward now" : cs(why));
+					});
+			}
+			json::Value next = m_settings.deepcopy();
+			next.del_key("moderators");
+			m_settings = next;
+			put("settings", "settings", m_settings);
 		}
 		network::access(m_server, [&](network::Interface *iface){
 			iface->claim_http_path("/authorize");
@@ -2947,15 +2965,14 @@ struct Module: public interface::Module
 		});
 		return admin;
 	}
+	// A Steward or the Host in accounts' levels ([TRUST_LADDER])
 	bool is_moderator(const ss_ &name)
 	{
-		if(is_admin(name))
-			return true;
-		const json::Value &m = setting("moderators");
-		for(unsigned i = 0; m.is_array() && i < m.size(); i++)
-			if(m.at(i).is_string() && m.at(i).as_string() == name)
-				return true;
-		return false;
+		int lv = accounts::LV_NEW;
+		accounts::access(m_server, [&](accounts::Interface *a){
+			lv = a->level(name);
+		});
+		return lv >= accounts::LV_MODERATOR;
 	}
 
 	void on_req(const network::Packet &packet)
@@ -3012,6 +3029,16 @@ struct Module: public interface::Module
 		const bool admin = is_admin(name);
 		if(cmd == "me")
 			return cmd_me(name, mod, admin);
+		// {name, level}: accounts' rules, one sets only below one's own
+		if(cmd == "level"){
+			ss_ why;
+			accounts::access(m_server, [&](accounts::Interface *a){
+				why = a->set_level(jstr(q, "name"), jint(q, "level"), name);
+			});
+			if(!why.empty())
+				throw Exception(why);
+			return json::Value(true);
+		}
 		if(cmd == "set_email")
 			return cmd_set_email(name, jstr(q, "email"));
 		if(cmd == "confirm_email")

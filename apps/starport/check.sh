@@ -23,7 +23,7 @@
 #      approval; a Starport removed from the file withdraws the listing at
 #      once. (5 has the setup code make an ID the server's first admin.)
 #   8. The Overview ([STARPORT_UI]): the admin sets a high notice, makes
-#      "mod" a moderator and hides the first listing; mod's Overview has
+#      "mod" a moderator (a Steward, accounts' level) and hides the first listing; mod's Overview has
 #      the notice and the hide, unseen, and the next one has it seen.
 #   9. The hide's second appeal waits for the first; mod's list cannot
 #      make the admin's listing a publisher it did not offer.
@@ -296,20 +296,20 @@ grep -q "Withdrawn from" "$tmp/an.log" ||
 echo "ok: a Starport removed from the file withdraws the listing at once"
 
 # 8
-BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass \
-BUILDAT_SP_ADMIN="add mod modpass1234" \
-BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"moderators\":[\"mod\"],\"notice\":{\"text\":\"Check notice\",\"priority\":\"high\"}}}
-{\"cmd\":\"act\",\"listing\":\"$id\",\"action\":\"hide\",\"reason\":\"other\",\"text\":\"for the check\",\"days\":0}" \
-	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
-	-s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/cl6.log" 2>&1
-[ "$(grep -c 'sp: {"id":[0-9]*,"ok":true' "$tmp/cl6.log")" -ge 2 ] ||
+sp_reqs(){ # account password requests log
+	BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=$1 BUILDAT_SP_PASSWORD=$2 \
+	BUILDAT_SP_REQS=$3 timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
+		-w 800x600 -l 3 -s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/$4" 2>&1
+}
+BUILDAT_SP_ADMIN="add mod modpass1234" sp_reqs admin checkpass '{"cmd":"me"}' cl6a.log
+sp_reqs admin checkpass "{\"cmd\":\"set_settings\",\"settings\":{\"notice\":{\"text\":\"Check notice\",\"priority\":\"high\"}}}
+{\"cmd\":\"level\",\"name\":\"mod\",\"level\":30}
+{\"cmd\":\"act\",\"listing\":\"$id\",\"action\":\"hide\",\"reason\":\"other\",\"text\":\"for the check\",\"days\":0}" cl6.log
+[ "$(grep -c 'sp: {"id":[0-9]*,"ok":true' "$tmp/cl6.log")" -ge 3 ] ||
 	fail "the notice, the moderator or the hide (cl6.log)"
-BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=mod BUILDAT_SP_PASSWORD=modpass1234 \
-BUILDAT_SP_REQS='{"cmd":"me"}
+sp_reqs mod modpass1234 '{"cmd":"me"}
 {"cmd":"overview"}
-{"cmd":"overview"}' \
-	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
-	-s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/cl7.log" 2>&1
+{"cmd":"overview"}' cl7.log
 python3 - "$tmp/cl7.log" <<'PY' || fail "mod's Overview (cl7.log)"
 import json, re, sys
 res = {}
@@ -326,11 +326,6 @@ assert second["seen"] >= hide[0]["ts"], second
 PY
 echo "ok: the Overview: the notice, another's hide unseen, then seen"
 # 9
-sp_reqs(){ # account password requests log
-	BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=$1 BUILDAT_SP_PASSWORD=$2 \
-	BUILDAT_SP_REQS=$3 timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
-		-w 800x600 -l 3 -s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/$4" 2>&1
-}
 sp_reqs admin checkpass '{"cmd":"me"}' cl8.log
 st=$(grep -o '"id":"[0-9a-f]*","listing":"'"$id"'"' "$tmp/cl8.log" |
 	head -1 | cut -d'"' -f4)
