@@ -3100,378 +3100,14 @@ local function send_chat()
 end
 
 --
--- The HUD a game draws itself
+-- The HUD a game draws itself: luanti/hud_draw.lua, the renderer both
+-- Luanti clients share ([LUANTI_SHARED]); this feeds it the textures, the
+-- scale, the camera and the player's inventory.
 --
--- Luanti's own elements: an image, a line of text, a bar of icons. Where
--- they go is `pos` as a fraction of the screen plus `offset` in pixels,
--- with `align` saying which corner of the element lands there -- which is
--- Luanti's drawLuaElements, and what a game's hearts and bars are made of.
---
--- A waypoint and an image_waypoint are the two that are not over a corner of
--- the screen but over a place in the world; the camera says where that is.
---
--- simplified: the styles inside a line of text -- bold, italic, monospace
--- -- are not drawn; each missing kind is named once in the log so that a
--- game asking for one says so rather than silently missing it.
-local hud_root = magic.ui.root:CreateChild("UIElement")
-hud_root:SetPosition(0, 0)
-local hud_missing = {}
--- The elements that are over a place in the world rather than over a corner
--- of the screen: where they go changes as the player moves, so they are
--- placed every frame and not only when the game changes one.
-local hud_waypoints = {}
--- And the compasses, which turn with the player for the same reason
-local hud_compasses = {}
-
--- How wide a picture is for its height, which is what a compass strip is
--- scaled by
-local function tex_aspect(tex)
-	if tex == nil or tex.height == nil or tex.height <= 0 then
-		return 1
-	end
-	return tex.width / tex.height
-end
-
-local function parse_v2(str, dx, dy)
-	if type(str) ~= "string" then
-		return dx, dy
-	end
-	local x, y = string.match(str, "^([^,]*),(.*)$")
-	return tonumber(x) or dx, tonumber(y) or dy
-end
-
-local function parse_v3(str)
-	if type(str) ~= "string" then
-		return nil
-	end
-	local x, y, z = string.match(str, "^([^,]*),([^,]*),(.*)$")
-	x, y, z = tonumber(x), tonumber(y), tonumber(z)
-	if x == nil or y == nil or z == nil then
-		return nil
-	end
-	return x, y, z
-end
-
--- Where a place in the world is on the screen, in pixels, or nil for one
--- behind the camera -- which Luanti does not draw a waypoint for either.
--- The scene's coordinates are the game's node coordinates, so a world_pos
--- goes in as it came.
-local function screen_of(x, y, z)
-	if camera == nil then
-		return nil
-	end
-	local eye = camera_node.position
-	local dir = camera_node:GetWorldDirection()
-	local ahead = (x - eye.x) * dir.x + (y - eye.y) * dir.y +
-			(z - eye.z) * dir.z
-	if ahead <= 0 then
-		return nil
-	end
-	local p = camera:WorldToScreenPoint(magic.Vector3(x, y, z))
-	return p.x * magic.ui.root.width, p.y * magic.ui.root.height
-end
-
--- Where an element sits: the anchor is position times the screen plus the
--- offset, and align slides it by its own size from there. Luanti's hud.cpp
--- does that as `(align - 1) * size / 2` everywhere it places anything -- so
--- align -1 puts the element's right edge on the anchor, 0 centres it and +1
--- puts its left edge there. **The sign was the other way round here**, which
--- is invisible at align 0, the default and what every element that was
--- looked at used; a status line asking for the top right corner was drawn
--- eight pixels off the right edge of the screen instead.
-local function hud_place(element, e, w, h)
-	-- Which UI element it was placed as, for the scan's rectangles
-	-- ([SCAN_EVENT]); on the game's own table, this file being at Lua's
-	-- 200 locals
-	e.__placed = element
-	local px, py = parse_v2(e.pos, 0, 0)
-	local ox, oy = parse_v2(e.offset, 0, 0)
-	local ax, ay = parse_v2(e.align, 0, 0)
-	-- The offset a game gives is in Luanti's screen pixels and is scaled
-	-- the way every other number it gives is; the size it slides by is
-	-- already in this UI's units, having been scaled where it was read
-	local scale = hud_scale()
-	element:SetPosition(
-			math.floor(px * magic.ui.root.width + ox * scale +
-					(ax - 1) * 0.5 * w),
-			math.floor(py * magic.ui.root.height + oy * scale +
-					(ay - 1) * 0.5 * h))
-end
-
-local function hud_colour(number)
-	local n = tonumber(number)
-	if n == nil or n == 0 then
-		return magic.Color(1, 1, 1)
-	end
-	return magic.Color(
-			math.floor(n / 65536) % 256 / 255,
-			math.floor(n / 256) % 256 / 255,
-			n % 256 / 255)
-end
-
--- A line of text, in as many pieces as it has colours in it: a game writes
--- core.colorize() into a HUD line and Luanti draws each piece in its own
--- colour. One piece is the common case and is one Text like any other.
---
--- simplified: the style field -- bold, italic, monospace -- is not read.
--- Everything here is drawn in the one monospace font the client has, and
--- bold and italic want font files it does not ship.
--- The size a HUD text element is drawn at. Luanti multiplies its own
--- default font size by the element's size.X when that is set
--- (`hud.cpp`, HUD_ELEM_TEXT), so this is what a game's `size = {x = 2}`
--- comes to ([UI_PARITY]).
---
--- simplified: the style field -- mono, bold, italic -- is not read. This
--- draws everything in the mono font already, and the sandbox has one font
--- per name rather than a face with weights.
-local HUD_FONT = 15
-
-local function draw_hud_text(e)
-	local base = hud_colour(e.number)
-	local block = hud_root:CreateChild("UIElement")
-	local w, h = 0, 0
-	-- The module's HUD elements carry their fields as the strings the
-	-- packet sent, the same as pos, offset and align: parse_v2, not an
-	-- array
-	local size = HUD_FONT
-	local sx = parse_v2(e.size, 0, 0)
-	if sx > 0 then
-		size = math.floor(HUD_FONT * sx)
-	end
-	local lines = {}
-	for line in (tostring(e.text or "") .. "\n"):gmatch("([^\n]*)\n") do
-		local row = block:CreateChild("UIElement")
-		local lw, lh = draw_text_line(row, line, 0, 0, base, size)
-		lines[#lines + 1] = {row, lw, math.floor(h)}
-		w = math.max(w, lw)
-		h = h + (lh > 0 and lh or size)
-	end
-	-- Each line aligned on its own about the point, as Luanti's
-	-- (align - 1) * line width / 2 ([UI_PARITY] 9): inside the block that
-	-- is its share of what it is short of the widest
-	local ax = parse_v2(e.align, 0, 0)
-	for _, l in ipairs(lines) do
-		l[1]:SetPosition(math.floor((1 - ax) * (w - l[2]) / 2), l[3])
-	end
-	block.size = magic.IntVector2(math.floor(w), math.floor(h))
-	hud_place(block, e, w, h)
-end
-
-local function draw_hud_image(e)
-	local resource = luanti.texture(e.text or "")
-	local tex = resource and game_texture(resource)
-	if not tex then
-		if not hud_missing[e.text or ""] then
-			hud_missing[e.text or ""] = true
-			log:info("the game's HUD wants an image called \"" ..
-					tostring(e.text) .. "\", which is not there")
-		end
-		return
-	end
-	local sx, sy = parse_v2(e.scale, 1, 1)
-	local scale = hud_scale()
-	-- A negative scale is a fraction of the screen rather than of the image,
-	-- which is how Luanti's own scale works; a positive one is the picture
-	-- at so many of Luanti's screen pixels per pixel of its own
-	local w = sx < 0 and (-sx * 0.01 * magic.ui.root.width) or
-			(tex.width * sx * scale)
-	local h = sy < 0 and (-sy * 0.01 * magic.ui.root.height) or
-			(tex.height * sy * scale)
-	local img = hud_root:CreateChild("BorderImage")
-	img.texture = tex
-	img.size = magic.IntVector2(math.floor(w), math.floor(h))
-	hud_place(img, e, w, h)
-end
-
--- A row of the player's own inventory, which is what a game that draws its
--- own hotbar puts on the HUD: the list is the player's, number is how many
--- of its slots to draw and item is the one to mark. The slots look like the
--- client's own hotbar, because they are the same thing.
-local function draw_hud_inventory(e)
-	local list_name = e.text or ""
-	local stacks = luanti.inventory and luanti.inventory[list_name]
-	if stacks == nil then
-		if not hud_missing["inv:" .. list_name] then
-			hud_missing["inv:" .. list_name] = true
-			log:info("the game's HUD wants the inventory list \"" ..
-					list_name .. "\", which this player has not got")
-		end
-		return
-	end
-	local n = math.floor(tonumber(e.number) or #stacks)
-	if n > #stacks then
-		n = #stacks
-	end
-	if n <= 0 then
-		return
-	end
-	-- Luanti's drawItems() draws this with the hotbar's own numbers and
-	-- does not read the element's size, so the slots are the same squares
-	-- the client's own hotbar is made of
-	local imagesize, padding, slot = hotbar_metrics()
-	local selected = math.floor(tonumber(e.item) or 0)
-	-- Luanti's dir: 0 right, 1 left, 2 down, 3 up
-	local dir = math.floor(tonumber(e.dir) or 0)
-	local white = game_texture(WHITE)
-	local row = hud_root:CreateChild("UIElement")
-	for i = 1, n do
-		local name, count = parse_stack(stacks[i])
-		local frame = row:CreateChild("BorderImage")
-		if white then
-			frame.texture = white
-		end
-		frame.color = (i == selected) and
-				magic.Color(0.9, 0.9, 0.7, 0.75) or
-				magic.Color(0.1, 0.1, 0.12, 0.55)
-		frame.size = magic.IntVector2(slot, slot)
-		-- A row that runs the other way is the same row of squares with
-		-- the slots in the other order, which is what drawItems() does:
-		-- the element is where it is and the direction is inside it
-		local at = ((dir == 1 or dir == 3) and (n - i) or (i - 1)) * slot
-		if dir == 2 or dir == 3 then
-			frame:SetPosition(0, at)
-		else
-			frame:SetPosition(at, 0)
-		end
-		local tex = name and game_texture(luanti.item_texture(name))
-		if tex then
-			local image = frame:CreateChild("BorderImage")
-			image.texture = tex
-			image:SetPosition(padding, padding)
-			image.size = magic.IntVector2(imagesize, imagesize)
-		end
-		if count and count > 1 then
-			local t = frame:CreateChild("Text")
-			t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 12)
-			t:SetTextEffect(magic.TE_SHADOW)
-			t.effectColor = magic.Color(0, 0, 0, 0.9)
-			t.horizontalAlignment = magic.HA_RIGHT
-			t.verticalAlignment = magic.VA_BOTTOM
-			t:SetPosition(-3, -2)
-			t:SetText(tostring(count))
-		end
-	end
-	local w = (dir <= 1) and (n * slot) or slot
-	local h = (dir <= 1) and slot or (n * slot)
-	row.size = magic.IntVector2(w, h)
-	hud_place(row, e, w, h)
-end
-
--- Where a waypoint's own element goes: the place on the screen its world
--- position is at, plus the offset, with the alignment saying which corner of
--- it lands there. The same as hud_place() but for pos, which a waypoint does
--- not have.
--- The same placement over a point in the world rather than a point on the
--- screen; see hud_place() for what align does.
-local function hud_place_at(element, e, w, h, sx, sy)
-	local ox, oy = parse_v2(e.offset, 0, 0)
-	local ax, ay = parse_v2(e.align, 0, 0)
-	element:SetPosition(
-			math.floor(sx + ox + (ax - 1) * 0.5 * w),
-			math.floor(sy + oy + (ay - 1) * 0.5 * h))
-end
-
--- A label over a place in the world, with how far away it is. Luanti keeps
--- the precision in the item field -- item is precision + 1, and zero means
--- ten -- and text is the unit the distance is written in.
-local function waypoint_text(e)
-	local text = luanti.strip_escapes(e.name or "")
-	local item = math.floor(tonumber(e.item) or 0)
-	local precision = (item == 0) and 10 or (item - 1)
-	if precision <= 0 then
-		return text
-	end
-	local wx, wy, wz = parse_v3(e.world_pos)
-	local eye = camera_node.position
-	local dx, dy, dz = wx - eye.x, wy - eye.y, wz - eye.z
-	local distance = math.sqrt(dx * dx + dy * dy + dz * dz)
-	local decimals = math.max(0,
-			math.ceil(math.log(precision) / math.log(10)))
-	return text .. string.format("%." .. decimals .. "f",
-			math.floor(distance * precision) / precision) .. (e.text or "")
-end
-
-local function draw_hud_waypoint(e)
-	if parse_v3(e.world_pos) == nil then
-		return
-	end
-	local t = hud_root:CreateChild("Text")
-	t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
-	t:SetTextEffect(magic.TE_SHADOW)
-	t.effectColor = magic.Color(0, 0, 0, 0.85)
-	t.color = hud_colour(e.number)
-	hud_waypoints[#hud_waypoints + 1] = {element = t, e = e, text = true}
-end
-
--- The same place in the world, with a picture on it instead of a label
-local function draw_hud_image_waypoint(e)
-	if parse_v3(e.world_pos) == nil then
-		return
-	end
-	local resource = luanti.texture(e.text or "")
-	local tex = resource and game_texture(resource)
-	if not tex then
-		return
-	end
-	local scx, scy = parse_v2(e.scale, 1, 1)
-	local w, h = tex.width * scx, tex.height * scy
-	local img = hud_root:CreateChild("BorderImage")
-	img.texture = tex
-	img.size = magic.IntVector2(math.floor(w), math.floor(h))
-	hud_waypoints[#hud_waypoints + 1] = {element = img, e = e, w = w, h = h}
-end
-
--- Luanti's compass: a picture that turns with the player, or a strip that
--- scrolls past. dir says which -- 0 turns, 1 turns the other way, 2 scrolls,
--- 3 scrolls the other way -- and number is an angle added to the camera's.
---
--- The strip is drawn as the copies of itself that fall inside the element,
--- each cut to what shows: Urho3D's UI clips nothing by itself, and a copy
--- that hangs out of the element would be drawn over whatever is beside it.
-local function draw_hud_compass(e)
-	local resource = luanti.texture(e.text or "")
-	local tex = resource and game_texture(resource)
-	if not tex then
-		return
-	end
-	local w, h = parse_v2(e.size, 0, 0)
-	-- A negative size is a percentage of the screen, as an image's scale is
-	if w < 0 then
-		w = -w * 0.01 * magic.ui.root.width
-	end
-	if h < 0 then
-		h = -h * 0.01 * magic.ui.root.height
-	end
-	w, h = math.floor(w), math.floor(h)
-	if w <= 0 or h <= 0 then
-		return
-	end
-	local block = hud_root:CreateChild("UIElement")
-	block.size = magic.IntVector2(w, h)
-	local dir = math.floor(tonumber(e.dir) or 0)
-	local turning = (dir == 0 or dir == 1)
-	local piece = nil
-	if turning then
-		-- A Sprite turns about its hot spot and is drawn with that point
-		-- where it sits, so it hangs under an element at the middle of this
-		-- one with its own middle as the hot spot
-		local holder = block:CreateChild("UIElement")
-		holder:SetPosition(math.floor(w / 2), math.floor(h / 2))
-		piece = holder:CreateChild("Sprite")
-		piece:SetTexture(tex)
-		piece:SetFixedSize(w, h)
-		piece.hotSpot = magic.IntVector2(math.floor(w / 2), math.floor(h / 2))
-	end
-	hud_place(block, e, w, h)
-	hud_compasses[#hud_compasses + 1] = {block = block, sprite = piece,
-			e = e, tex = tex, w = w, h = h, dir = dir}
-end
-
--- Luanti's minimap element: the world around the player, from above --
--- the module both Luanti clients share, luanti_client/res/minimap.lua,
--- served as luanti/minimap.lua ([EXT_HUD_PARITY]). Official's V walks its
--- modes; on sky_now, since the file is at Lua's 200-local line.
-local minimaps = {}
+-- Official's minimap: the module both Luanti clients share,
+-- luanti_client/res/minimap.lua, served as luanti/minimap.lua
+-- ([EXT_HUD_PARITY]). Official's V walks its modes; on sky_now, since the
+-- file is at Lua's 200-local line.
 sky_now.minimap = (function(ok, err, lib)
 	if not ok or type(lib) ~= "table" then
 		log:warning("minimap.lua: " .. tostring(err))
@@ -3480,243 +3116,88 @@ sky_now.minimap = (function(ok, err, lib)
 	return lib
 end)(buildat.run_script_file("luanti/minimap.lua"))
 sky_now.minimap_mode = 1  -- hidden until V; see [MINIMAP_OFF]
+
+local hud_r = (function(ok, err, lib)
+	if not ok or type(lib) ~= "table" then
+		error("hud_draw.lua: " .. tostring(err))
+	end
+	local function load(name)
+		local ok2, err2, m = buildat.run_script_file(name)
+		if not ok2 or type(m) ~= "table" then
+			error(name .. ": " .. tostring(err2))
+		end
+		return m
+	end
+	return lib.new(magic, log, {
+		hud = load("luanti/hud.lua"),
+		formspec = load("luanti/formspec.lua"),
+		parent = magic.ui.root,
+		scale = hud_scale,
+		texture = function(name)
+			local resource = luanti.texture(name)
+			return resource and game_texture(resource)
+		end,
+		font = magic.cache:GetResource("Font", buildat.font_mono),
+		font_size = 15,
+		white = game_texture(WHITE),
+		slots = hotbar_metrics,
+		inventory = function(list_name)
+			local stacks = luanti.inventory and luanti.inventory[list_name]
+			if stacks == nil then
+				return nil
+			end
+			local out = {}
+			for i, s in ipairs(stacks) do
+				local name, count = parse_stack(s)
+				out[i] = {count = count,
+						texture = name and
+						game_texture(luanti.item_texture(name))}
+			end
+			return out
+		end,
+		eye = function()
+			local p = camera_node.worldPosition
+			return p.x, p.y, p.z
+		end,
+		-- Where a place in the world is on the screen, or nil behind the
+		-- camera, which Luanti does not draw a waypoint for either. The
+		-- scene's coordinates are the game's node coordinates.
+		screen_of = function(x, y, z)
+			if camera == nil then
+				return nil
+			end
+			local eye = camera_node.position
+			local dir = camera_node:GetWorldDirection()
+			if (x - eye.x) * dir.x + (y - eye.y) * dir.y +
+					(z - eye.z) * dir.z <= 0 then
+				return nil
+			end
+			local p = camera:WorldToScreenPoint(magic.Vector3(x, y, z))
+			return p.x * magic.ui.root.width, p.y * magic.ui.root.height
+		end,
+		yaw = function() return yaw end,
+		minimap = sky_now.minimap and function(parent, w, h)
+			local m = sky_now.minimap.new{magic = magic, scene = scene,
+					parent = parent, render_path = world_render_path,
+					w = w, h = h, zone = zone}
+			m:set_mode(sky_now.minimap_mode)
+			return m
+		end,
+		hud_flag = luanti.hud_flag,
+	})
+end)(buildat.run_script_file("luanti/hud_draw.lua"))
 function sky_now.apply_minimap_mode()
-	for _, m in ipairs(minimaps) do
+	for _, m in ipairs(hud_r.minimaps) do
 		m:set_mode(sky_now.minimap_mode)
 	end
-end
-
-local function draw_hud_minimap(e)
-	-- A game that has turned the minimap off does not get one from its own
-	-- element either, which is Luanti's rule for this kind
-	if not luanti.hud_flag("minimap") or not sky_now.minimap then
-		return
-	end
-	local w, h = parse_v2(e.size, 128, 128)
-	-- A negative size is a percentage of the screen, as a compass's is;
-	-- a positive one is in Luanti's screen pixels
-	if w < 0 then
-		w = -w * 0.01 * magic.ui.root.width
-	else
-		w = w * hud_scale()
-	end
-	if h < 0 then
-		h = -h * 0.01 * magic.ui.root.height
-	else
-		h = h * hud_scale()
-	end
-	w, h = math.floor(w), math.floor(h)
-	if w <= 0 or h <= 0 then
-		return
-	end
-	local m = sky_now.minimap.new{magic = magic, scene = scene,
-			parent = hud_root, render_path = world_render_path, w = w, h = h,
-			zone = zone}
-	hud_place(m.view, e, w, h)
-	minimaps[#minimaps + 1] = m
-	sky_now.apply_minimap_mode()
-end
-
--- Over the player, and drawn again a few times a second
-local function follow_minimaps(dt)
-	if #minimaps == 0 then
-		return
-	end
-	local p = camera_node.worldPosition
-	for _, m in ipairs(minimaps) do
-		m:follow(p, dt)
-	end
-end
-
--- Where every compass is pointing now. Once a frame, like a waypoint: what
--- moves is the player.
-local function turn_compasses()
-	for _, c in ipairs(hud_compasses) do
-		-- Luanti's own: the camera's horizontal angle, the other way round,
-		-- plus what the game asked for
-		local angle = (-yaw + (tonumber(c.e.number) or 0)) % 360
-		if c.dir == 1 or c.dir == 3 then
-			angle = (360 - angle) % 360
-		end
-		if c.sprite then
-			c.sprite.rotation = angle
-		else
-			-- The strip: as wide as the picture is at this height, scrolled
-			-- by the angle and repeated until the element is covered
-			local sw = math.floor(c.h * tex_aspect(c.tex))
-			c.block:RemoveAllChildren()
-			local x = -math.floor(angle * sw / 360)
-			while x > 0 do
-				x = x - sw
-			end
-			while x < c.w do
-				local left = math.max(0, -x)
-				local right = math.min(sw, c.w - x)
-				if right > left then
-					local img = c.block:CreateChild("BorderImage")
-					img.texture = c.tex
-					img.size = magic.IntVector2(right - left, c.h)
-					img:SetPosition(x + left, 0)
-					-- The part of the picture that shows, in its own pixels
-					img.imageRect = magic.IntRect(
-							math.floor(left * c.tex.width / sw), 0,
-							math.floor(right * c.tex.width / sw),
-							c.tex.height)
-				end
-				x = x + sw
-			end
-		end
-	end
-end
-
--- Where every waypoint is now. Once a frame, because what moves is the
--- player: the game changes the element only when it has something new to
--- say, and the distance in a waypoint's label changes with every step.
-local function place_waypoints()
-	for _, w in ipairs(hud_waypoints) do
-		local wx, wy, wz = parse_v3(w.e.world_pos)
-		local sx, sy = nil, nil
-		if wx ~= nil then
-			sx, sy = screen_of(wx, wy, wz)
-		end
-		if sx == nil then
-			w.element.visible = false
-		else
-			w.element.visible = true
-			if w.text then
-				w.element:SetText(waypoint_text(w.e))
-				hud_place_at(w.element, w.e, w.element.width,
-						w.element.height, sx, sy)
-			else
-				hud_place_at(w.element, w.e, w.w, w.h, sx, sy)
-			end
-		end
-	end
-end
-
--- A row of icons, each one either whole or half: hearts, bubbles, a bar of
--- armour. number is the value in halves and item is how many halves the bar
--- holds; text2 is the icon a game draws for what is missing.
-local function draw_hud_statbar(e)
-	local resource = luanti.texture(e.text or "")
-	local tex = resource and game_texture(resource)
-	if not tex then
-		return
-	end
-	local value = math.floor(tonumber(e.number) or 0)
-	local total = math.floor(tonumber(e.item) or value)
-	local sw, sh = parse_v2(e.size, 0, 0)
-	local scale = hud_scale()
-	local w = (sw > 0 and sw or tex.width) * scale
-	local h = (sh > 0 and sh or tex.height) * scale
-	-- Luanti's dir: 0 right, 1 left, 2 down, 3 up
-	local dir = math.floor(tonumber(e.dir) or 0)
-	-- What a square that has been lost wears, if the game gave one
-	local bg = nil
-	if e.text2 ~= nil and e.text2 ~= "" then
-		bg = game_texture(luanti.texture(e.text2))
-		if bg == nil and not hud_missing[e.text2] then
-			hud_missing[e.text2] = true
-			log:info("the game's HUD wants a picture called \"" ..
-					tostring(e.text2) .. "\" for what a bar has lost, " ..
-					"which is not there")
-		end
-	end
-	local whole = math.floor(total / 2)
-	local row = hud_root:CreateChild("UIElement")
-	-- Where the i'th square of the row sits, which is where drawStatbar()
-	-- has stepped to by then
-	local function square(i)
-		local step = i - 1
-		if dir == 1 then return -step * w, 0 end
-		if dir == 2 then return 0, step * h end
-		if dir == 3 then return 0, -step * h end
-		return step * w, 0
-	end
-	-- A square of the row: the whole picture, or the half of it the bar
-	-- runs out of (near) or into (far). Luanti cuts both the picture and
-	-- the square across the way the bar runs, so the half that is left
-	-- keeps its own side and what is gone is drawn in the other half.
-	local function piece(tex_i, i, near)
-		if tex_i == nil then
-			return
-		end
-		local x, y = square(i)
-		local iw, ih = w, h
-		local rx, ry = 0, 0
-		local rw, rh = tex_i.width, tex_i.height
-		if near ~= nil then
-			-- Whether this half is the one at the lower coordinate: the
-			-- near half of a row running right is its left half, and of
-			-- one running left its right half
-			local low = (near == (dir == 0 or dir == 2))
-			if dir <= 1 then
-				iw, rw = w / 2, math.floor(tex_i.width / 2)
-				if not low then
-					x, rx = x + w / 2, math.floor(tex_i.width / 2)
-				end
-			else
-				ih, rh = h / 2, math.floor(tex_i.height / 2)
-				if not low then
-					y, ry = y + h / 2, math.floor(tex_i.height / 2)
-				end
-			end
-		end
-		local icon = row:CreateChild("BorderImage")
-		icon.texture = tex_i
-		icon.size = magic.IntVector2(math.floor(iw), math.floor(ih))
-		if near ~= nil then
-			icon.imageRect = magic.IntRect(rx, ry, rx + rw, ry + rh)
-		end
-		icon:SetPosition(math.floor(x), math.floor(y))
-	end
-	-- simplified: a bar whose whole length is an odd number of halves ends
-	-- in a half square, which is not drawn here. Luanti draws it; every bar
-	-- there is asks for an even length.
-	for i = 1, whole do
-		if value >= i * 2 then
-			piece(tex, i, nil)
-		elseif value == i * 2 - 1 then
-			piece(tex, i, true)
-			piece(bg, i, false)
-		else
-			piece(bg, i, nil)
-		end
-	end
-	local total_w = (dir <= 1) and whole * w or w
-	local total_h = (dir <= 1) and h or whole * h
-	row.size = magic.IntVector2(math.floor(total_w), math.floor(total_h))
-	-- **A statbar is the one kind align is not read for**: Luanti's
-	-- drawStatbar() is given the element's pos and offset and nothing else,
-	-- and a game that asks for one alignment or another gets the row in the
-	-- same place either way. A size of zero here is what takes align out of
-	-- hud_place()'s arithmetic. VoxeLibre asks for -1 on the row left of
-	-- the middle, which slid its hearts a whole row further left.
-	hud_place(row, e, 0, 0)
 end
 
 -- What the game last sent, so that the HUD can be drawn again when
 -- something it is about -- the player's own inventory -- has changed
 local hud_elements = {}
-local hud_has_inventory = false
 
 local function draw_hud(elements, flags)
 	hud_elements = elements
-	hud_has_inventory = false
-	hud_root:RemoveAllChildren()
-	hud_waypoints = {}
-	hud_compasses = {}
-	-- The elements go with the HUD; the cameras they put in the world are
-	-- this one's to take away
-	for _, m in ipairs(minimaps) do
-		m.camera:Remove()
-	end
-	minimaps = {}
-	-- As big as the screen, because an element aligned to the centre or the
-	-- bottom is aligned inside this and an element of no size puts every
-	-- one of them in the top left corner
-	hud_root.size = magic.IntVector2(magic.ui.root.width,
-			magic.ui.root.height)
 	-- The health and the breath are the game's to draw and not the client's:
 	-- Luanti's own builtin puts hearts and bubbles on the screen as statbar
 	-- elements out of the engine's textures, which are served now, and a
@@ -3725,44 +3206,20 @@ local function draw_hud(elements, flags)
 	--
 	-- The game can take the client's own away, and what it draws instead is
 	-- these elements; see luanti.hud_flag()
-	hud_root.visible = hud_shown
+	hud_r.root.visible = hud_shown
 	crosshair.visible = hud_shown and luanti.hud_flag("crosshair")
 	chat_block.visible = chat_shown and luanti.hud_flag("chat")
 	hotbar_shown = hud_shown and luanti.hud_flag("hotbar")
 	draw_hotbar()
 	wielded_text.visible = hotbar_shown
-	for id, e in pairs(elements) do
-		local kind = e.type or "text"
-		if kind == "text" then
-			draw_hud_text(e)
-		elseif kind == "image" then
-			draw_hud_image(e)
-		elseif kind == "statbar" then
-			draw_hud_statbar(e)
-		elseif kind == "compass" then
-			draw_hud_compass(e)
-		elseif kind == "minimap" then
-			draw_hud_minimap(e)
-		elseif kind == "inventory" then
-			hud_has_inventory = true
-			draw_hud_inventory(e)
-		elseif kind == "waypoint" then
-			draw_hud_waypoint(e)
-		elseif kind == "image_waypoint" then
-			draw_hud_image_waypoint(e)
-		elseif not hud_missing[kind] then
-			hud_missing[kind] = true
-			log:info("the game asked for a \"" .. kind ..
-					"\" HUD element, which is not drawn")
-		end
-	end
+	hud_r:draw(elements)
 	-- Official's own minimap ([VIEW_KEYS]): the engine draws one at the
 	-- top right whether or not the game adds a minimap element, under the
 	-- minimap HUD flag, and V walks its modes; here the same element as a
 	-- game's, 128 Luanti pixels, hidden while the mode is "off"
-	if #minimaps == 0 and hud_shown and luanti.hud_flag("minimap") then
-		draw_hud_minimap({pos = "1,0", offset = "-10,10", align = "-1,1",
-				size = "128,128"})
+	if #hud_r.minimaps == 0 and hud_shown then
+		hud_r:draw_one({type = "minimap", pos = "1,0", offset = "-10,10",
+				align = "-1,1", size = "128,128"})
 	end
 end
 
@@ -3800,7 +3257,7 @@ luanti.sub_hud(function()
 end)
 
 hud_follows_inventory = function()
-	if hud_has_inventory then
+	if hud_r.has_inventory then
 		draw_hud(hud_elements)
 	end
 end
@@ -4888,9 +4345,7 @@ function frame_peak.update(dt)
 			camera_node.rotation = magic.Quaternion(-pitch, yaw + 180, 0)
 		end
 	end
-	place_waypoints()
-	turn_compasses()
-	follow_minimaps(dt)
+	hud_r:update(dt)
 	update_underwater(buildat.Vector3(player.x,
 			player.y + player_physics.EYE_HEIGHT, player.z))
 end
@@ -4975,9 +4430,7 @@ magic.SubscribeToEvent("ScreenMode", function()
 	if hotbar_ui then
 		hotbar_ui:relayout()
 	end
-	if hud_root then
-		hud_root.size = magic.IntVector2(w, h)
-	end
+	hud_r.root.size = magic.IntVector2(w, h)
 	draw_hotbar()
 end)
 

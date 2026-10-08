@@ -1149,8 +1149,8 @@ struct Module: public interface::Module, public luanti::Interface
 				"/extensions/luanti_client/res";
 		for(const char *name : {"camera_motion.lua", "key_editor.lua",
 				"minimap.lua", "hotbar.lua", "texmod.lua",
-				"formspec.lua", "formspec_ui.lua", "hud.lua", "sounds.lua",
-				"particles.lua"}){
+				"formspec.lua", "formspec_ui.lua", "hud.lua", "hud_draw.lua",
+				"sounds.lua", "particles.lua"}){
 			const ss_ path = shared+"/"+name;
 			if(interface::fs::path_exists(path)){
 				client_file::access(m_server, [&](client_file::Interface *i){

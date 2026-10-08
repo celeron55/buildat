@@ -55,6 +55,7 @@ local inventory = buildat.run_extension_file("inventory.lua")
 local objmesh = buildat.run_extension_file("objmesh.lua")
 local b3dmesh = buildat.run_extension_file("b3dmesh.lua")
 local luanti_hud = buildat.run_extension_file("res/hud.lua")
+luanti_hud.draw = buildat.run_extension_file("res/hud_draw.lua")
 -- On the HUD module's table rather than a local of its own: the connect
 -- callback below is at Lua's 60-upvalue line ([EXT_HUD_PARITY])
 luanti_hud.minimap = buildat.run_extension_file("res/minimap.lua")
@@ -1854,7 +1855,6 @@ local function show_client(host, port, name, password, mode, origin)
 			style = style,
 			white = "luanti_client/res/white.png",
 			formspec = formspec,
-			hud = luanti_hud,
 			-- Where a list[] element's slots come from: the player's own
 			-- inventory, one the server has detached, or the one that hangs
 			-- off a voxel, which is what a chest's slots are.
@@ -1911,23 +1911,24 @@ local function show_client(host, port, name, password, mode, origin)
 		local hud = nil
 		local hud_key = nil
 		local hotbar_look = nil
+		local function hud_texture(name)
+			if not name or name == "" then
+				return nil
+			end
+			local resource = media_texture(name)
+			local tex = resource and
+					magic.cache:GetResource("Texture2D", resource)
+			if tex then
+				tex.filterMode = magic.FILTER_NEAREST
+			end
+			return tex
+		end
 		local hotbar_row = luanti_hud.hotbar.new{
 			magic = magic, buildat = buildat, log = log,
 			white = magic.cache:GetResource("Texture2D",
 					"luanti_client/res/white.png"),
 			font = magic.cache:GetResource("Font", buildat.font_mono),
-			texture = function(name)
-				if not name or name == "" then
-					return nil
-				end
-				local resource = media_texture(name)
-				local tex = resource and
-						magic.cache:GetResource("Texture2D", resource)
-				if tex then
-					tex.filterMode = magic.FILTER_NEAREST
-				end
-				return tex
-			end,
+			texture = hud_texture,
 			stack = function(stack)
 				if not stack or stack.count == 0 then
 					return nil, nil, nil
@@ -1949,7 +1950,47 @@ local function show_client(host, port, name, password, mode, origin)
 		-- crosshair and chat off with, which a game that draws its own does.
 		local hud_elements = {}
 		local hud_flags = luanti_hud.FLAGS_DEFAULT
-		local game_hud = nil
+		-- Drawn by res/hud_draw.lua, the renderer both Luanti clients share
+		-- ([LUANTI_SHARED]).
+		-- simplified: no camera, yaw or minimap in its ctx, so a waypoint,
+		-- an image waypoint, a compass and a game's minimap element are
+		-- counted as not drawn; view.minimap is official's own
+		local game_hud = luanti_hud.draw.new(magic, log, {
+			hud = luanti_hud, formspec = formspec, parent = magic.ui.root,
+			-- What a screen pixel is in this UI's units, which is what
+			-- Luanti multiplies a HUD element's sizes and offsets by
+			-- ([EXT_HOTBAR])
+			scale = function()
+				return magic.ui.root.width / math.max(1,
+						buildat.logical_size() or magic.graphics.width)
+			end,
+			texture = hud_texture,
+			font = magic.cache:GetResource("Font", buildat.font_mono),
+			font_size = 14,
+			white = magic.cache:GetResource("Texture2D",
+					"luanti_client/res/white.png"),
+			slots = function() return hotbar_row:metrics() end,
+			inventory = function(list_name)
+				local list = inv and inv[list_name]
+				if not list then
+					return nil
+				end
+				local out = {}
+				for i = 1, list.size or #list.items do
+					local stack = list.items[i]
+					local resource = stack and stack.count > 0 and
+							item_image(stack.name)
+					local tex = resource and
+							magic.cache:GetResource("Texture2D", resource)
+					if tex then
+						tex.filterMode = magic.FILTER_NEAREST
+					end
+					out[i] = {count = stack and stack.count or 0,
+							texture = tex or nil}
+				end
+				return out
+			end,
+		})
 		local game_hud_stale = true
 		local game_hud_size = nil
 		local game_hud_missing = false
@@ -2082,18 +2123,7 @@ local function show_client(host, port, name, password, mode, origin)
 				game_hud_stale = false
 				game_hud_size = size
 
-				if game_hud then
-					game_hud:Remove()
-				end
-				local missing
-				local images
-				-- What a screen pixel is in this UI's units, which is what
-				-- Luanti multiplies a HUD element's sizes and offsets by
-				-- ([EXT_HOTBAR])
-				game_hud, missing, images = ui:hud_elements(ui_root,
-						hud_elements, ui_root.width, ui_root.height,
-						ui_root.width / math.max(1, buildat.logical_size() or
-						magic.graphics.width))
+				local missing, images = game_hud:draw(hud_elements)
 				-- The lowest of the game's own image elements, which for a
 				-- game that draws its hotbar's background itself is that
 				-- background; the check reads it against the row
@@ -2112,14 +2142,14 @@ local function show_client(host, port, name, password, mode, origin)
 				if not game_hud_missing and next(missing) then
 					game_hud_missing = true
 					local names = {}
-					for type_id, count in pairs(missing) do
-						names[#names + 1] = count.." of type "..type_id
+					for kind, count in pairs(missing) do
+						names[#names + 1] = count.." "..kind
 					end
 					log:info("HUD element types not drawn: "..
 							table.concat(names, ", "))
 				end
 			end
-			game_hud.visible = on
+			game_hud.root.visible = on
 
 			local show_hotbar = on and luanti_hud.has_flag(hud_flags,
 					luanti_hud.FLAG.hotbar)
@@ -3724,10 +3754,8 @@ local function show_client(host, port, name, password, mode, origin)
 				hud:Remove()
 				hud = nil
 			end
-			if game_hud then
-				game_hud:Remove()
-				game_hud = nil
-			end
+			game_hud:draw({})
+			game_hud.root:Remove()
 			for _, bar in ipairs(crosshair) do
 				bar:Remove()
 			end
