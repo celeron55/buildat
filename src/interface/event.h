@@ -9,7 +9,7 @@
 	if(type == event_type){ \
 		auto p0 = dynamic_cast<const param_type*>(p); \
 		if(p0) handler(*p0); \
-		else if(p == nullptr) Exception(ss_()+"Missing parameter to "+ \
+		else if(p == nullptr) throw Exception(ss_()+"Missing parameter to "+ \
 				__PRETTY_FUNCTION__+"::" #handler " (parameter type: " \
 				#param_type ")"); \
 		else throw Exception(ss_()+"Invalid parameter to "+__PRETTY_FUNCTION__+ \

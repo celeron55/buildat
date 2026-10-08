@@ -1,0 +1,38 @@
+#!/bin/bash
+# tier: quick
+# cost: ~2s (2026-10-08)
+# covers: src/interface/event.h
+# [REWORK_FIXES]: EVENT_TYPE given no parameter throws "Missing parameter",
+# where it built the exception and dropped it, so the handler was skipped
+# without a word.
+#   util/event_dispatch_check.sh
+set -eu
+here=$(cd "$(dirname "$0")/.." && pwd)
+t=$(mktemp -d)
+trap 'rm -rf "${t:?}"' EXIT
+cat > "$t/c.cpp" <<'CPP'
+#include "core/types.h"
+#include "interface/event.h"
+#include <cassert>
+struct Param { virtual ~Param(){} };
+static int called = 0;
+static void handler(const Param &){ called++; }
+static void dispatch(int type, const Param *p)
+{
+	EVENT_DISPATCH_TYPE(1, handler, Param)
+}
+int main()
+{
+	Param x;
+	dispatch(1, &x);
+	assert(called == 1);
+	bool threw = false;
+	try { dispatch(1, nullptr); } catch(Exception &e){
+		threw = ss_(e.what()).find("Missing parameter") != ss_::npos;
+	}
+	assert(threw && called == 1);
+	return 0;
+}
+CPP
+c++ -std=c++11 -I"$here/src" -I"$here" "$t/c.cpp" -o "$t/c" && "$t/c"
+echo "PASS: a missing event parameter throws"

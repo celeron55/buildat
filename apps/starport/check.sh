@@ -89,6 +89,9 @@ echo "ok: listed as $id and verified"
 api "localhost:$SP/api/list" | grep -q "\"$id\"" &&
 	fail "an unclaimed listing was served"
 echo "ok: unclaimed, not served"
+# A port out of int64's range is refused, not cast ([REWORK_FIXES])
+api -d '{"unlisted":true,"access":"open","port":1e300}' "localhost:$SP/api/announce" |
+	grep -q '"port: 1 to 65535"' || fail "a port of 1e300 was not refused"
 
 key=$(head -c32 /dev/urandom | od -An -tx1 | tr -d ' \n')
 receipt=$(api -d "{\"listing\":\"$id\",\"reason\":\"spam\",\"key\":\"$key\"}" \

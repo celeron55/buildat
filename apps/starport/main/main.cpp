@@ -152,8 +152,11 @@ static ss_ jstr(const json::Value &v, const char *k, const ss_ &def = "")
 static int64_t jint(const json::Value &v, const char *k, int64_t def = 0)
 {
 	const json::Value &x = v.get(k);
-	return x.is_integer() ? x.as_integer() : x.is_real() ? (int64_t)x.as_real() :
-			def;
+	if(x.is_integer())
+		return x.as_integer();
+	// out of int64's range (or NaN): the default, not undefined behaviour
+	const double d = x.is_real() ? x.as_real() : 0;
+	return x.is_real() && d > -9e18 && d < 9e18 ? (int64_t)d : def;
 }
 static double jnum(const json::Value &v, const char *k, double def = 0)
 {
