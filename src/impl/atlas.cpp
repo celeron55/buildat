@@ -3,6 +3,7 @@
 #include <sstream>
 #include "interface/atlas.h"
 #include "core/log.h"
+#include "core/json.h"
 #include "interface/os.h"
 #include <Context.h>
 #include <ResourceCache.h>
@@ -678,17 +679,6 @@ struct CAtlasRegistry: public AtlasRegistry
 		return &seg_cache;
 	}
 
-	static ss_ json_escaped(const ss_ &in)
-	{
-		ss_ out;
-		for(char c : in){
-			if(c == '"' || c == '\\')
-				out += '\\';
-			out += c;
-		}
-		return out;
-	}
-
 	ss_ describe_segments()
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
@@ -715,8 +705,8 @@ struct CAtlasRegistry: public AtlasRegistry
 				const int y0 = iy * seg_size.y_ * 2 + seg_size.y_ / 2;
 				os<<(first ? "\n" : ",\n")<<"{\"atlas\":"<<a<<",\"texture\":"
 						<<tex<<",\"segment\":"<<i<<",\"x\":"<<x0<<",\"y\":"<<y0<<",\"w\":"<<seg_size.x_
-						<<",\"h\":"<<seg_size.y_<<",\"resource\":\""
-						<<json_escaped(sd.resource_name)<<"\",\"select\":["
+						<<",\"h\":"<<seg_size.y_<<",\"resource\":"
+						<<json::Value(sd.resource_name).stringify()<<",\"select\":["
 						<<sd.select_segment.x_<<","<<sd.select_segment.y_
 						<<"],\"of\":["<<sd.total_segments.x_<<","
 						<<sd.total_segments.y_<<"]}";
