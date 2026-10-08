@@ -819,6 +819,12 @@ struct Module: public interface::Module, public Interface
 		return ids_mode() != "off";
 	}
 
+	sv_<ss_> starports()
+	{
+		const json::Value c = config();
+		return is_on(c) ? urls_of(c) : sv_<ss_>();
+	}
+
 	// starport.json written whole, then read back as any edit is
 	ss_ write_config(const json::Value &c)
 	{

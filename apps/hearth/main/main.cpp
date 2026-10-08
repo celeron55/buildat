@@ -61,6 +61,7 @@
 #include "client_file/api.h"
 #include "network/api.h"
 #include "accounts/api.h"
+#include "starport_announce/api.h"
 #include <sqlite3.h>
 #include <ctime>
 #include <cstring>
@@ -707,6 +708,13 @@ struct Module: public interface::Module
 	std::set<ss_> m_rknown;       // releases with a thread, or given up on
 	sv_<ReleaseFound> m_rfound;
 	std::thread m_rthread;
+	// [HEARTH_VISITOR_FLOW]: the Starports this server announces to (from
+	// starport_announce, by the module), the servers they list (by the
+	// poller, every few minutes) and the Aitta that lists each package
+	sv_<ss_> m_starports;
+	json::Value m_slist = json::array();
+	std::map<ss_, ss_> m_rpackages;
+	int64_t m_starports_at = -1;  // the module's last look, its clock
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -1001,6 +1009,7 @@ struct Module: public interface::Module
 		for(;;){
 			json::Value src;
 			std::set<ss_> known;
+			sv_<ss_> starports;
 			{
 				std::unique_lock<std::mutex> lock(m_rmutex);
 				m_rwake.wait_for(lock, std::chrono::seconds(60), [this](){
@@ -1011,12 +1020,46 @@ struct Module: public interface::Module
 				m_rkick = false;
 				src = m_rsources;
 				known = m_rknown;
+				starports = m_starports;
 			}
-			sv_<ReleaseFound> found = poll_releases(src, known);
+			std::map<ss_, ss_> packages;
+			sv_<ReleaseFound> found = poll_releases(src, known, packages);
+			// simplified: every Starport's list every minute, as the
+			// Aittas'; Hearth announces to one or two
+			const json::Value servers = poll_starports(starports);
 			std::lock_guard<std::mutex> lock(m_rmutex);
 			for(ReleaseFound &f : found)
 				m_rfound.push_back(f);
+			m_rpackages = packages;
+			m_slist = servers;
 		}
+	}
+
+	// The servers the Starports list, each with the play page of the
+	// Starport that lists it
+	json::Value poll_starports(const sv_<ss_> &starports)
+	{
+		json::Value out = json::array();
+		for(const ss_ &base : starports){
+			if(stopping())
+				break;
+			json::Value list;
+			try {
+				list = json::load_string(
+						interface::http_get(base+"/api/list").c_str());
+			} catch(std::exception &e){
+				log_w(MODULE, "The servers of %s: %s", cs(base), e.what());
+				continue;
+			}
+			const json::Value &servers = list.get("servers");
+			for(unsigned i = 0; servers.is_array() && i < servers.size();
+					i++){
+				json::Value v = servers.at(i).deepcopy();
+				v.set("play", jstr(list, "play"));
+				out.append(v);
+			}
+		}
+		return out;
 	}
 
 	static sv_<ss_> url_list(const json::Value &v)
@@ -1038,14 +1081,13 @@ struct Module: public interface::Module
 	// The releases new to this Hearth whose home it is
 	// simplified: the whole list of each Aitta every minute; a "since"
 	// on Aitta's list is the upgrade once lists are long
+	// packages: "author/name" -> the first Aitta that lists it
 	sv_<ReleaseFound> poll_releases(const json::Value &src,
-			std::set<ss_> known)
+			std::set<ss_> known, std::map<ss_, ss_> &packages)
 	{
 		sv_<ReleaseFound> found;
 		const sv_<ss_> addr = url_list(src.get("addresses"));
 		const std::set<ss_> addresses(addr.begin(), addr.end());
-		if(addresses.empty())
-			return found;
 		// simplified: twenty releases asked for a minute, found or not; the
 		// rest the next minute
 		int asked = 0;
@@ -1061,6 +1103,8 @@ struct Module: public interface::Module
 			const json::Value &rels = list.get("releases");
 			for(unsigned i = 0; rels.is_array() && i < rels.size(); i++){
 				const json::Value &rel = rels.at(i);
+				packages.emplace(jstr(rel, "author")+"/"+jstr(rel, "name"),
+						base);
 				const ss_ key = release_key(rel);
 				if(!addresses.count(norm_url(jstr(rel, "home_hearth"))) ||
 						known.count(key))
@@ -1111,6 +1155,22 @@ struct Module: public interface::Module
 	{
 		if(m_db && now_s() - m_files_swept >= 3600)
 			sweep_files();
+		// Read on the module's thread; the poller fetches their lists
+		if(m_starports_at < 0 || now_s() - m_starports_at >= 60 ||
+				now_s() < m_starports_at){
+			m_starports_at = now_s();
+			sv_<ss_> urls;
+			starport_announce::access(m_server,
+					[&](starport_announce::Interface *a){
+				urls = a->starports();
+			});
+			std::lock_guard<std::mutex> lock(m_rmutex);
+			if(urls != m_starports){
+				m_starports = urls;
+				m_rkick = true;
+				m_rwake.notify_all();
+			}
+		}
 		sv_<ReleaseFound> found;
 		{
 			std::lock_guard<std::mutex> lock(m_rmutex);
@@ -1414,6 +1474,73 @@ struct Module: public interface::Module
 		t.set("list", list);
 		t.set("more", more);
 		return t;
+	}
+
+	// "author/name", as an Aitta and ContentDB name a package
+	static bool is_package(const ss_ &pkg)
+	{
+		const size_t slash = pkg.find('/');
+		return pkg.size() <= 81 && slash != ss_::npos && slash != 0 &&
+				slash + 1 != pkg.size() && pkg.find_first_not_of(
+				"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+				"0123456789_-/") == ss_::npos && pkg.find('/', slash + 1) ==
+				ss_::npos;
+	}
+
+	// **What a thread is about, and where it is had** ([HEARTH_VISITOR_FLOW]),
+	// by the subject's kind: a server is a play link when a Starport this
+	// Hearth announces to lists it, with TLS for an https play page; an
+	// app's package links its
+	// place here and its Aitta page; a ContentDB game its ContentDB page;
+	// anything else is its name. Nothing links a page that is not there.
+	ss_ about_html(const ss_ &subject)
+	{
+		if(subject.rfind("server:", 0) == 0){
+			const ss_ hp = subject.substr(7);
+			const size_t colon = hp.rfind(':');
+			const ss_ host = hp.substr(0, colon);
+			const int64_t port = colon == ss_::npos ? 0 :
+					atoll(hp.c_str() + colon + 1);
+			std::lock_guard<std::mutex> lock(m_rmutex);
+			for(unsigned i = 0; i < m_slist.size(); i++){
+				const json::Value &v = m_slist.at(i);
+				// A page over https opens only a secure WebSocket; one
+				// over http, a local Starport's, a plain one too
+				const ss_ play = jstr(v, "play");
+				const bool secure = play.rfind("https://", 0) == 0;
+				if(jstr(v, "host") != host || jint(v, "port") != port ||
+						(!secure && play.rfind("http://", 0) != 0) ||
+						(secure && !v.get("tls").is_true()))
+					continue;
+				return "About the server <a href=\""+html(jstr(v, "play"))+
+						"/?server="+html(hp)+"\" rel=\"nofollow noopener\">"+
+						html(jstr(v, "name"))+"</a>, played in your browser";
+			}
+			return "About the server "+html(hp);
+		}
+		if(subject.rfind("game:contentdb:", 0) == 0){
+			const ss_ pkg = subject.substr(15);
+			if(is_package(pkg))
+				return "About the game <a href=\"https://content.luanti.org/"
+						"packages/"+html(pkg)+"/\" rel=\"nofollow noopener\">"+
+						html(pkg)+"</a> on ContentDB";
+		}
+		if(subject.rfind("game:", 0) == 0)
+			return "About the game "+html(subject.substr(
+					subject.rfind(':') + 1));
+		const ss_ pkg = subject.substr(0, subject.find(' '));
+		if(!is_package(pkg))
+			return "About "+html(subject);
+		ss_ aitta;
+		{
+			std::lock_guard<std::mutex> lock(m_rmutex);
+			auto it = m_rpackages.find(pkg);
+			if(it != m_rpackages.end())
+				aitta = it->second;
+		}
+		return "About <a href=\"/p/"+html(pkg)+"\">"+html(pkg)+"</a>"+
+				(aitta.empty() ? ss_() : ", <a href=\""+html(aitta)+"/p/"+
+				html(pkg)+"\">its page on Aitta</a>");
 	}
 
 	// The thread page a message is on: the `after` its link takes, 0 for
@@ -1826,12 +1953,7 @@ struct Module: public interface::Module
 			// simplified: every key's together; a second key under the same
 			// name is noted, not split
 			const ss_ pkg = path.substr(3);
-			const size_t slash = pkg.find('/');
-			if(pkg.size() > 81 || slash == ss_::npos || slash == 0 ||
-					slash + 1 == pkg.size() || pkg.find_first_not_of(
-					"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-					"0123456789_/") != ss_::npos || pkg.find('/', slash + 1) !=
-					ss_::npos)
+			if(!is_package(pkg))
 				return;
 			Q q(m_db, "SELECT " THREAD_COLUMNS " FROM threads WHERE "
 					"substr(subject, 1, ?) = ? AND hidden = 0 "
@@ -1882,11 +2004,9 @@ struct Module: public interface::Module
 				body += "<p class=\"meta\">Tracker: <a rel=\"nofollow ugc\" "
 						"href=\""+html(jstr(t, "link"))+"\">"+html(jstr(t, "link"))+
 						"</a></p>\n";
-			const ss_ pkg = jstr(t, "subject").substr(0,
-					jstr(t, "subject").find(' '));
-			if(!pkg.empty())
-				body += "<p class=\"meta\">About <a href=\"/p/"+html(pkg)+"\">"+
-						html(pkg)+"</a></p>\n";
+			if(!jstr(t, "subject").empty())
+				body += "<p class=\"meta\">"+about_html(jstr(t, "subject"))+
+						"</p>\n";
 			// The question, its answer, then the rest in order; a later page
 			// marks the answer where it is
 			// simplified: an answer past the first page is not lifted under

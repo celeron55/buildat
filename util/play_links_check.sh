@@ -1,12 +1,16 @@
 #!/bin/bash
 # tier: full
 # cost: 60s (2026-10-07)
-# covers: apps/starport/main/main.cpp builtin/starport_announce/starport_announce.cpp builtin/network/network.cpp extensions/launch_menu/screens.lua src/client/app.cpp
+# covers: apps/starport/main/main.cpp apps/hearth/main/main.cpp builtin/starport_announce/starport_announce.cpp builtin/network/network.cpp extensions/launch_menu/screens.lua src/client/app.cpp
 # [PLAY_LINKS]: a Starport with a play_url hands it out in /api/list and
 # in its answer to an announce; the listed server then lets that page's
 # WebSocket in, and no other page's. A client given BUILDAT_JOIN (the
 # play page's ?server=) joins a server a Starport lists, not one it does
 # not list, and nothing for an address of another shape.
+# [HEARTH_VISITOR_FLOW]: the Hearth's thread pages say where each subject
+# is had -- the Hearth itself, listed, by the play page's link; a server
+# not listed, an unknown game, as text; a package by its place here; a
+# ContentDB game by its ContentDB page.
 # Not here: the page at / links a TLS server only, and a local one has
 # no TLS -- seen on the live Starport.
 set -u
@@ -75,6 +79,40 @@ ws "$PLAY" | grep -q " 101 " || fail "the play page's WebSocket refused ($tmp/he
 echo "ok: the play page's WebSocket let in"
 ws "http://127.0.0.1:29684" | grep -q " 101 " && fail "another page's WebSocket let in"
 echo "ok: another page's WebSocket refused"
+
+# The Hearth's threads, one subject of each kind
+hcode=$(grep -ao "setup code [A-Z0-9]*" "$tmp/he.log" | cut -d' ' -f3)
+printf 'delay 4000\nquit\n' > "$tmp/hc"
+BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12 \
+BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_CODE=$hcode \
+BUILDAT_HEARTH_REQS="{\"cmd\":\"new_topic\",\"name\":\"Main\",\"about\":\"x\"}
+{\"cmd\":\"new_thread\",\"server\":true,\"subject\":\"server:127.0.0.1:$HE\",\"title\":\"S\",\"body\":\"s\"}
+{\"cmd\":\"new_thread\",\"topic\":1,\"subject\":\"someone/some-app abc\",\"title\":\"A\",\"body\":\"a\"}
+{\"cmd\":\"new_thread\",\"game\":true,\"subject\":\"game:contentdb:Wuzzy/mineclone2\",\"title\":\"G\",\"body\":\"g\"}
+{\"cmd\":\"new_thread\",\"game\":true,\"subject\":\"game:unknown:mygame\",\"title\":\"U\",\"body\":\"u\"}
+{\"cmd\":\"new_thread\",\"server\":true,\"subject\":\"server:127.0.0.1:29685\",\"title\":\"N\",\"body\":\"n\"}" \
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/hadmin" -w 800x600 -l 3 \
+	-o sound_mute=1 -s 127.0.0.1:$HE -c @"$tmp/hc" > "$tmp/hadmin.log" 2>&1
+grep -aq '"ok":false' "$tmp/hadmin.log" &&
+	fail "the threads: $(grep -ao '"error":"[^"]*"' "$tmp/hadmin.log" | head -1)"
+about() { curl -s -m 5 "http://127.0.0.1:$HE/t/$1" | grep -o '<p class="meta">About.*</p>'; }
+# The Hearth reads the list each minute
+for _ in $(seq 90); do
+	about 1 | grep -qF "<a href=\"$PLAY/?server=127.0.0.1:$HE\"" && break
+	sleep 1
+done
+about 1 | grep -qF "<a href=\"$PLAY/?server=127.0.0.1:$HE\"" ||
+	fail "the listed server's thread: $(about 1) ($tmp/he.log)"
+about 2 | grep -qF '<a href="/p/someone/some-app">' || fail "the app's thread: $(about 2)"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$HE/p/someone/some-app")" = 200 ] ||
+	fail "/p/someone/some-app is not there"
+about 3 | grep -qF '<a href="https://content.luanti.org/packages/Wuzzy/mineclone2/"' ||
+	fail "the ContentDB game's thread: $(about 3)"
+[ "$(about 4)" = '<p class="meta">About the game mygame</p>' ] ||
+	fail "the unknown game's thread: $(about 4)"
+[ "$(about 5)" = '<p class="meta">About the server 127.0.0.1:29685</p>' ] ||
+	fail "the unlisted server's thread: $(about 5)"
+echo "ok: the Hearth's threads link where their subjects are had"
 
 mkdir -p "$tmp/cl"
 echo "{\"starports\": [\"http://127.0.0.1:$SP\"]}" > "$tmp/cl/starport.json"
