@@ -23,18 +23,15 @@ cd "$here/Build"
 [ -x bin/buildat ] || { echo "FAIL: no bin/buildat"; exit 1; }
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
 
-t=$(mktemp -d)
-srv=
-trap '[ -n "$srv" ] && kill $srv 2>/dev/null; rm -rf "$t"' EXIT
+check_tmp starport_tab; t=$CHECK_TMP
 nolog(){ cat "$1"; }
-fail(){ echo "FAIL: $*"; exit 1; }
 
 port=29645
 # The first start compiles the builtin modules (rccpp); allow for it
 start_server "$t/sp.log" "setup code" 90 "$port" \
 	bin/buildat_server -m ../apps/starport -D "$t/sp" -l 3 ||
 	fail "the Starport did not start (sp.log)"
-srv=$SERVER_PID
+CHECK_PIDS+=($SERVER_PID)
 code=$(grep -o "setup code [A-Z0-9]*" "$t/sp.log" | cut -d' ' -f3)
 [ -n "$code" ] || fail "the Starport did not start (sp.log)"
 
