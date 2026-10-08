@@ -242,14 +242,15 @@ local function show_login(error_text)
 	label((opts.title or "Join") .. " v." .. tostring(version) ..
 			(hash and hash ~= "" and ("-" .. hash) or ""))
 	-- Declared here for the Starport ID's button, made before them
-	local password, code, keep = nil, nil, nil
+	local password, code, keep, sb = nil, nil, nil, nil
 	-- [STARPORT] 10c: a Starport ID in place of an account here; the
 	-- token comes from the client's own Starport extension, which asks
 	-- the Starport, so the password never comes here
 	if M.hello.starport == 1 and not is_local then
-		local sb = w:CreateChild("Button")
+		sb = w:CreateChild("Button")
 		sb:SetStyleAuto()
 		sb.minHeight = 30
+		sb:SetFocusMode(magic.FM_FOCUSABLE)
 		local st = sb:CreateChild("Text")
 		st:SetStyleAuto()
 		st:SetText("Sign in with your Starport ID")
@@ -368,7 +369,15 @@ local function show_login(error_text)
 		ct:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 		magic.SubscribeToEvent(cb, "Released", function() show_create(nil) end)
 	end
-	name:SetFocus(true)
+	-- Signed in to a Starport already: its button, so Return signs in
+	-- ([STARPORT_LOGIN_FOCUS]); else the name, to type into
+	local ok, starport = pcall(require, "buildat/extension/starport")
+	if sb and ok and type(starport) == "table" and starport.has_id and
+			starport.has_id() then
+		sb:SetFocus(true)
+	else
+		name:SetFocus(true)
+	end
 end
 
 -- [ACCOUNT_CREATE]: the account-making window -- name, the password twice,

@@ -1022,6 +1022,12 @@ function M.safe.take_id_join()
 	id_join = nil
 	return yes
 end
+-- [STARPORT_LOGIN_FOCUS]: whether an ID is signed in on any Starport,
+-- for the login dialog to make its button the default. One bit, and it
+-- tells the server's code that much: not which Starport, nor the name
+function M.safe.has_id()
+	return next(load_state().ids or {}) ~= nil
+end
 
 -- A package's home Hearth when its manifest names none: the Hearth of the
 -- Starport recommending the Aitta it is from, or with no Aitta given,
@@ -2624,6 +2630,7 @@ M.open_report = M.safe.open_report
 M.open_report_here = M.safe.open_report_here
 M.id_token_here = M.safe.id_token_here
 M.take_id_join = M.safe.take_id_join
+M.has_id = M.safe.has_id
 M.group = M.safe.group
 -- [AITTA_PUBLISH_UI]: the publish screen, drawn with this file's dialogs
 dofile(__buildat_extension_path("starport") .. "/publish.lua")({M = M,
