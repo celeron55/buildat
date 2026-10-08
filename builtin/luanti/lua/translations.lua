@@ -190,13 +190,13 @@ end
 -- resolved the way the client would for that language -- a game sorts or
 -- filters by it (VoxeLibre's creative inventory search and craft guide,
 -- devtest's chest of everything). The resolver is the client's own
--- (client_lua/formspec.lua, self-contained), loaded here once; a
+-- (luanti_client's res/formspec.lua, self-contained), loaded here once; a
 -- language's files are read on the first ask and kept.
 local translator = nil
 local read_for = {}
 function core.get_translated_string(lang_code, s)
 	if translator == nil then
-		translator = dofile(__luanti_module_path .. "/client_lua/formspec.lua")
+		translator = dofile(__luanti_shared_path .. "/formspec.lua")
 	end
 	local lang = tostring(lang_code or ""):gsub("[.@].*$", "")
 	if lang == "" or lang == "C" or lang == "POSIX" then

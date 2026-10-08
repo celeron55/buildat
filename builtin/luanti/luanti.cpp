@@ -8984,6 +8984,11 @@ struct Module: public interface::Module, public luanti::Interface
 		lua_pushlightuserdata(m_lua, (void*)this);
 		lua_setfield(m_lua, LUA_REGISTRYINDEX, "__luanti_module");
 		set_global_string("__luanti_module_path", module_path());
+		// The Lua both clients share, serve_shared_lua()'s; the server's
+		// get_translated_string() runs its formspec.lua too
+		set_global_string("__luanti_shared_path",
+				m_server->get_config().get<ss_>("share_path")+
+				"/extensions/luanti_client/res");
 		set_global_string("__luanti_cache_path", luanti_cache_path());
 		set_global_string("__luanti_game_path", game_path);
 		set_global_string("__luanti_world_path", world_path);

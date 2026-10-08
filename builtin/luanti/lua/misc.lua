@@ -108,7 +108,7 @@ end
 
 -- Luanti's translation and colour markup taken out of a string: an escape
 -- character and then either (something) or one letter. The same code is in
--- the module's client half, client_lua/formspec.lua, where a client that
+-- the clients' shared res/formspec.lua, where a client that
 -- does not translate uses it -- keep the two together.
 function core.strip_escapes(s)
 	if type(s) ~= "string" then
