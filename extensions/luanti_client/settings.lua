@@ -137,7 +137,7 @@ end
 local MODES = {"unlit", "shadows", "pbr"}
 local RANGES = {60, 120, 200, 300, 400}
 
--- The screen: every row cycles its value and saves; back pops
+-- The screen: every row changes its value and saves; back pops
 function M.show()
 	local s = M.load()
 	local root = uistack.main:push({desc = "luanti_client settings"})
@@ -162,18 +162,8 @@ function M.show()
 	end
 	local name_edit = labeled_edit("Player name", s.name)
 	local address_edit = labeled_edit("Last address", s.address)
-	local function cycle(list, value)
-		for i, v in ipairs(list) do
-			if v == value then
-				return list[i % #list + 1]
-			end
-		end
-		return list[1]
-	end
 	local rows = {}
 	local function redraw_rows()
-		rows.mode:GetChild("ButtonText"):SetText("Render mode (next session): "..s.mode)
-		rows.range:GetChild("ButtonText"):SetText("View range (next session): "..s.view_range)
 		rows.bob:GetChild("ButtonText"):SetText("View bobbing: "..
 				(s.view_bobbing ~= 0 and "on" or "off"))
 		rows.shoulder:GetChild("ButtonText"):SetText(
@@ -186,12 +176,17 @@ function M.show()
 		M.save(s)
 		redraw_rows()
 	end
-	rows.mode = menu:add("", function()
-		s.mode = cycle(MODES, s.mode)
+	menu:add_dropdown("Render mode (next session)", MODES, s.mode, function(v)
+		s.mode = v
 		save()
 	end)
-	rows.range = menu:add("", function()
-		s.view_range = cycle(RANGES, s.view_range)
+	local ranges = {}
+	for i, n in ipairs(RANGES) do
+		ranges[i] = {tostring(n), n}
+	end
+	menu:add_dropdown("View range (next session)", ranges, s.view_range,
+			function(v)
+		s.view_range = v
 		save()
 	end)
 	rows.bob = menu:add("", function()
@@ -241,9 +236,6 @@ function M.show_pause(o)
 	local function close()
 		uistack.main:pop(root)
 	end
-	local function label(b, t)
-		b:GetChild("ButtonText"):SetText(t)
-	end
 	menu:add("Continue playing", close, true)
 	menu:add("Key bindings", function()
 		close()
@@ -253,64 +245,41 @@ function M.show_pause(o)
 		close()
 		o.open_chat()
 	end)
-	-- The player's ear, the client's preference: muted, then 0 dB and
-	-- down in 6 dB steps, then muted again ([VOLUME_LAW])
-	local function sound_text()
-		local mute, db = buildat.get_sound()
-		return mute and "Sound: muted" or (db <= -33 and "Sound: off" or
-				string.format("Sound: %d dB", db))
+	-- The player's ear, the client's preference: muted, or 0 dB down to
+	-- -30 in 6 dB steps ([VOLUME_LAW])
+	local sounds = {{"muted", "muted"}}
+	for db = 0, -30, -6 do
+		sounds[#sounds + 1] = {db .. " dB", db}
 	end
-	local sb
-	sb = menu:add(sound_text(), function()
-		local mute, db = buildat.get_sound()
-		if mute then
-			buildat.set_sound(false, 0)
-		elseif db > -30 then
-			buildat.set_sound(false, math.max(-30, db - 6))
-		else
-			buildat.set_sound(true, 0)
-		end
-		label(sb, sound_text())
+	local mute, db = buildat.get_sound()
+	menu:add_dropdown("Sound", sounds, mute and "muted" or db, function(v)
+		buildat.set_sound(v == "muted", v == "muted" and 0 or v)
 	end)
-	-- The 3D at a share of the window's pixels: each press the next step
-	-- down from automatic, round to automatic again
-	local function scale_text()
-		local now, auto = buildat.get_render_scale()
-		return string.format("Render scale: %s%d %%", auto and
-				"automatic, " or "", math.floor(now * 100 + 0.5))
-	end
-	local rs
-	rs = menu:add(scale_text(), function()
-		local now, auto = buildat.get_render_scale()
-		local nxt = auto and SCALES[1] or "auto"
-		if not auto then
-			for _, v in ipairs(SCALES) do
-				if v < now - 0.001 then
-					nxt = v
-					break
-				end
-			end
+	-- The 3D at a share of the window's pixels, or the client's own choice
+	local scales = {{"automatic", "auto"}}
+	local now, auto = buildat.get_render_scale()
+	local scale = auto and "auto" or nil
+	for _, v in ipairs(SCALES) do
+		scales[#scales + 1] = {math.floor(v * 100 + 0.5) .. " %", v}
+		if not auto and math.abs(v - now) < 0.005 then
+			scale = v
 		end
-		buildat.set_render_scale(nxt)
-		label(rs, scale_text())
+	end
+	menu:add_dropdown("Render scale", scales, scale, function(v)
+		buildat.set_render_scale(v)
 	end)
 	-- The settings' view range, now and for the next session.
 	-- simplified: the server's own limit is not known to the client (Luanti
 	-- sends none); past what it sends there is just fog
 	local s = M.load()
-	local vb
-	vb = menu:add("View range: " .. s.view_range, function()
-		local nxt = RANGES[1]
-		for _, n in ipairs(RANGES) do
-			if n > s.view_range then
-				nxt = n
-				break
-			end
-		end
-		s.view_range = nxt
+	local ranges = {}
+	for i, n in ipairs(RANGES) do
+		ranges[i] = {tostring(n), n}
+	end
+	menu:add_dropdown("View range", ranges, s.view_range, function(v)
+		s.view_range = v
 		M.save(s)
-		o.view:set_far_clip(nxt)
-		label(vb, "View range: " .. nxt)
+		o.view:set_far_clip(v)
 	end)
 	menu:add("Settings...", function()
 		close()

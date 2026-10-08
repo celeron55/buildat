@@ -1237,14 +1237,20 @@ local function draw_game_settings(flat, perf)
 			label:SetWordwrap(true)
 			label:SetText(it.label .. (changed[it.name] and "  *" or ""))
 			label:SetTextAlignment(magic.HA_LEFT)
-			if it.type == "bool" or it.type == "enum" then
+			if it.type == "bool" then
+				-- A choice of two flips
+				local b
+				b = button_on(menu, row, value, function()
+					local next_v = (changed[it.name] or it.value) == "true"
+							and "false" or "true"
+					changed[it.name] = next_v
+					b:GetChild("ButtonText"):SetText(next_v)
+					label:SetText(it.label .. "  *")
+				end, control_w)
+			elseif it.type == "enum" then
 				local values = {}
-				if it.type == "bool" then
-					values = {"true", "false"}
-				else
-					for v in it.extra:gmatch("[^,]+") do
-						values[#values + 1] = v
-					end
+				for v in it.extra:gmatch("[^,]+") do
+					values[#values + 1] = v
 				end
 				menu:add(ui_utils.dropdown(row, values, value, function(v)
 					changed[it.name] = v

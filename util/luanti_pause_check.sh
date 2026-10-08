@@ -3,9 +3,9 @@
 # cost: ~40s (2026-10-07)
 # covers: extensions/luanti_client/settings.lua show_pause, init.lua leave()
 # [LUANTI_PAUSE]: luanti_client's pause menu is a screen on the UI stack.
-# On a local devtest Luanti server: Escape opens it, the view range button
-# steps (120 -> 200, live and saved), Escape closes it, and a quit with it
-# open takes it down with the session (leave() popped the session's root
+# On a local devtest Luanti server: Escape opens it, the view range is
+# picked from its dropdown (120 -> 200, saved), Escape closes it, and a
+# quit with it open takes it down with the session (leave() popped the session's root
 # from under it before: "Wrong current_top_root").
 # Needs luanti in PATH and devtest in the desk's games.
 #   util/luanti_pause_check.sh
@@ -42,8 +42,12 @@ cat > "$t/cmds" <<C
 delay 15000
 keypress Escape
 delay 1500
-mouse_pos 400 344
+mouse_pos 380 343
 mouse_click left
+delay 500
+keypress Down
+delay 200
+keypress Return
 delay 500
 event scan
 keypress Escape
@@ -59,11 +63,10 @@ BUILDAT_LUANTI_ADDRESS=127.0.0.1:$P BUILDAT_LUANTI_CONNECT=1 BUILDAT_LUANTI_NAME
 	-o sound_mute=1 -c @"$t/cmds" > "$t/cl.log" 2>&1
 grep -aq 'menu "ui_stack_[0-9_.]*: luanti_client pause"' "$t/cl.log" ||
 	fail "no pause menu after Escape"
-grep -aq 'text "View range: 200"' "$t/cl.log" || fail "the view range did not step"
 grep -aq '"view_range" : 200' "$t/cl/luanti_client/settings.json" 2>/dev/null ||
-	fail "the view range was not saved"
+	fail "the view range was not picked"
 grep -a 'scan scan: menu' "$t/cl.log" | tail -1 | grep -q '"ui_stack_[0-9_.]*: luanti_client"' ||
 	fail "Escape did not close the pause menu"
 grep -aq "Wrong current_top_root\|Runtime error" "$t/cl.log" &&
 	fail "$(grep -a "Wrong current_top_root\|Runtime error" "$t/cl.log" | head -2)"
-echo "PASS: the pause menu opens, steps the view range, closes, and goes with a quit"
+echo "PASS: the pause menu opens, picks a view range, closes, and goes with a quit"

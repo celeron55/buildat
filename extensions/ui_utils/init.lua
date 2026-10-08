@@ -1135,6 +1135,7 @@ local message_handle = nil
 local drops = {} -- live dropdowns
 local drops_update, drops_sub -- below
 local drop_serial = 0
+local drop_labels = {} -- by the dropdown's name: {label, row, fill, width}
 function M.safe.dropdown(parent, choices, current, on_choose, options)
 	options = options or {}
 	local h = options.height or 28
@@ -1155,6 +1156,10 @@ function M.safe.dropdown(parent, choices, current, on_choose, options)
 	local drop = parent:CreateChild("DropDownList")
 	drop_serial = drop_serial + 1
 	drop:SetName("dropdown_" .. drop_serial)
+	if row and not options.label_width then
+		local l = row:GetChild(0)
+		drop_labels[drop:GetName()] = {l, row, options.fill, l.width}
+	end
 	drop:SetStyleAuto()
 	drop:SetFocusMode(magic.FM_FOCUSABLE)
 	drop.resizePopup = true
@@ -1317,6 +1322,20 @@ drops_update = function()
 				if d.placeholder.width ~= d.width - 28 then
 					d.placeholder:SetFixedWidth(d.width - 28)
 				end
+				-- The label as wide as it is drawn. simplified: under a UI
+				-- scale below 1 the letters are drawn wider than measured
+				-- (each advance rounded at the drawn size), taken as 0.7
+				-- px a letter; exact would be measuring at that size
+				local l = drop_labels[d:GetName()]
+				local sc = magic.ui.scale
+				local lw = l and l[4] + (sc < 1 and
+						math.ceil(#l[1].text * 0.7 / sc) or 0)
+				if lw and l[1].width ~= lw then
+					l[1]:SetFixedWidth(lw)
+					if not l[3] then
+						l[2]:SetFixedWidth(lw + 10 + d.width)
+					end
+				end
 				local y = d.screenPosition.y
 				-- simplified: the popup's frame is taken as 8 px
 				d.popup.maxHeight = math.max(root_h - y - d.height, y) - 8
@@ -1324,6 +1343,11 @@ drops_update = function()
 		end
 	end
 	drops, drop_open = kept, open
+	for name, l in pairs(drop_labels) do
+		if gone(l[2]) then
+			drop_labels[name] = nil
+		end
+	end
 end
 
 -- on_close is optional and is called when the dialog goes away, however it
