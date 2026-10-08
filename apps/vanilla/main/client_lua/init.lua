@@ -884,10 +884,17 @@ end
 local body_picture_name, body_picture = {}, {}
 
 local function body_picture_of(slot, name)
-	-- A picture not there yet (a cold cache) is asked for again next
-	-- time, which is the next sky packet or hour
-	if name ~= body_picture_name[slot] or body_picture[slot] == nil then
+	-- No name is the shader's painted square, and nothing to look up
+	if name == nil then
+		return nil
+	end
+	-- A picture not there yet (a cold cache) is asked for again a second
+	-- later; every frame was ~150 us of lookups ([FRAME_WORK])
+	local due = slot .. " due"
+	if name ~= body_picture_name[slot] or (body_picture[slot] == nil and
+			scene.elapsedTime >= (body_picture_name[due] or 0)) then
 		body_picture_name[slot] = name
+		body_picture_name[due] = scene.elapsedTime + 1
 		body_picture[slot] = game_texture(luanti.texture(name))
 	end
 	return body_picture[slot]
@@ -1486,6 +1493,23 @@ end
 -- anything but white would tint the game's own art
 local WHITE_DISC_COLOR = {r = 1, g = 1, b = 1}
 
+-- The experiment knobs the sky reads, once: update_sky() runs every
+-- frame and a get_env is a sandbox call ([FRAME_WORK]). One table, the
+-- chunk being at Lua 5.1's two hundred locals.
+local SKY_ENV = {
+	ablate = buildat.get_env("BUILDAT_LUANTI_ABLATE") or "",
+	predawn_mode = buildat.get_env("BUILDAT_LUANTI_PREDAWN_MODE"),
+	translucency = tonumber(
+			buildat.get_env("BUILDAT_LUANTI_TRANSLUCENCY") or ""),
+	cave_ao_floor = tonumber(
+			buildat.get_env("BUILDAT_CAVE_AO_FLOOR") or "") or 0.04,
+	chamber_light = tonumber(
+			buildat.get_env("BUILDAT_CHAMBER_LIGHT") or "") or 1.0,
+	light_log = buildat.get_env("BUILDAT_LUANTI_LIGHT_LOG") == "1",
+	zone_tint = buildat.get_env("BUILDAT_LUANTI_ZONE_TINT") == "1",
+	cloud_n = tonumber(buildat.get_env("BUILDAT_LUANTI_CLOUD_N") or ""),
+}
+
 -- The sky at this hour: dark at night, the game's own colour by day, and the
 -- dawn colour in between, with the stars fading as the light comes. Luanti
 -- keeps three colours for exactly this and blends between them as the sun
@@ -1757,8 +1781,7 @@ local function apply_sky_of_hour(force)
 		local sky_mean = {r = (5 * zenith_now.r + horizon_now.r) / 6,
 				g = (5 * zenith_now.g + horizon_now.g) / 6,
 				b = (5 * zenith_now.b + horizon_now.b) / 6}
-		local n = tonumber(buildat.get_env("BUILDAT_LUANTI_CLOUD_N") or "")
-				or PHYS.cloud_n
+		local n = SKY_ENV.cloud_n or PHYS.cloud_n
 		local noon_mean = (5 * PHYS.sky_zenith + PHYS.sky_horizon) / 6
 		-- [DUSK_CLOUD]: a dome of radiance L puts pi L on a face, which
 		-- reflects albedo L: the sky's share is the dome's mean as it is.
@@ -1799,7 +1822,7 @@ local function apply_sky_of_hour(force)
 	-- The ablation is here, where the value is set each frame: set from
 	-- the ambient's pass it was overwritten before a frame was drawn
 	voxel_shading.set_specular_emphasis(
-			(buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""):find("ibl")
+			SKY_ENV.ablate:find("ibl")
 			and 0 or (sky_now.unlit and 1.0 or 0.7))
 	-- And what colour that sky is now, which the cube map cannot know: the
 	-- reflection is moved towards the zenith of this hour as the day goes,
@@ -1939,7 +1962,7 @@ local function update_sky(dt)
 				PHYS.sun(height)
 		-- BUILDAT_LUANTI_ABLATE=sun,shadow,amb,bounce,ground,ibl: a term turned
 		-- off for a fit's ablation run ([PBR_FIT]); the sun goes with any
-		local abl0 = buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""
+		local abl0 = SKY_ENV.ablate
 		if sky_now.debug_shadows then abl0 = abl0 .. ",sun,moon" end
 		if abl0:find("sun") then
 			sky_lights.sun.brightness = 0
@@ -1963,7 +1986,7 @@ local function update_sky(dt)
 		sky_lights.moon.brightness = sky_now.unlit and MOON_BRIGHTNESS * moon_up
 				or PHYS.moon_e * moon_up
 		if sky_now.debug_shadows or
-				(buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""):find("moon") then
+				SKY_ENV.ablate:find("moon") then
 			sky_lights.moon.brightness = 0
 		end
 	end
@@ -2015,7 +2038,7 @@ local function update_sky(dt)
 		--       keeps a single shape for the whole day.
 		-- Unset, the pbr path is what it was and no look moves.
 		local f = PHYS.sky(height)
-		local predawn_mode = buildat.get_env("BUILDAT_LUANTI_PREDAWN_MODE")
+		local predawn_mode = SKY_ENV.predawn_mode
 		if predawn_now > 0 and predawn_mode == "light" then
 			f = math.max(f, predawn_now)
 		elseif predawn_now > 0 and predawn_mode == "height" then
@@ -2077,8 +2100,7 @@ local function update_sky(dt)
 				magic.Color(PHYS.lamp * 1.0, PHYS.lamp * 0.6, PHYS.lamp * 0.3),
 				magic.Color(sun_level * suc.r, sun_level * suc.g,
 						sun_level * suc.b))
-		voxel_shading.set_translucency_gain(tonumber(
-				buildat.get_env("BUILDAT_LUANTI_TRANSLUCENCY") or "") or
+		voxel_shading.set_translucency_gain(SKY_ENV.translucency or
 				PHYS.translucency)
 		-- And the ground as the lower hemisphere sees it: its albedo
 		-- times what falls on it, the sky on all of it and a third of
@@ -2105,8 +2127,7 @@ local function update_sky(dt)
 		-- What the camera's own rays say the chamber has, read once: the
 		-- floor below and the bounce term's scale both take it
 		local chamber_read = voxel_shading.chamber_light()
-		local floor_f = tonumber(
-				buildat.get_env("BUILDAT_CAVE_AO_FLOOR") or "") or 0.04
+		local floor_f = SKY_ENV.cave_ao_floor
 		-- **Only where the chamber is dark** (2026-09-25): the floor is
 		-- hour-independent on purpose -- that is what keeps a sealed
 		-- room equal at both hours -- but applied everywhere it lifts
@@ -2136,8 +2157,7 @@ local function update_sky(dt)
 		-- lit round a corner, keeps 87% of its daylight.
 		-- BUILDAT_CHAMBER_LIGHT overrides the gain, above 1 to brighten a
 		-- lit chamber and 0 to leave the shader's floor whole.
-		local chamber_gain = tonumber(
-				buildat.get_env("BUILDAT_CHAMBER_LIGHT") or "") or 1.0
+		local chamber_gain = SKY_ENV.chamber_light
 		local chamber = 1.0
 		if chamber_gain > 0 then
 			chamber = chamber_gain * chamber_read
@@ -2152,7 +2172,7 @@ local function update_sky(dt)
 		-- pbr_debug_light picture, which is what a face actually gets:
 		-- the picture says which term is missing and this says why.
 		-- Once a second, and nothing at all unless it is asked for.
-		if buildat.get_env("BUILDAT_LUANTI_LIGHT_LOG") == "1" and
+		if SKY_ENV.light_log and
 				(sky_now.light_log_due or 0) <= os.time() then
 			sky_now.light_log_due = os.time() + 1
 			-- **Five decimals, not three** ([SKY_COLUMN_CAVE], 2026-09-28):
@@ -2170,14 +2190,14 @@ local function update_sky(dt)
 					string.format(" skyvis mean/lo/hi %.3f/%.3f/%.3f",
 							voxel_shading.sky_vis_stats()))
 		end
-		local abl = buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""
+		local abl = SKY_ENV.ablate
 		if abl:find("amb") then zone.ambientColor = magic.Color(0, 0, 0) end
 		-- BUILDAT_LUANTI_ZONE_TINT=1: the world zone's ambient turned
 		-- bright red ([SKY_COLUMN_CAVE], 2026-09-28). Zeroing it says
 		-- nothing when a surface is already dark, but a surface that does
 		-- not go red is a surface reading somebody else's zone -- which is
 		-- the question a night frame that survives ABLATE=amb asks.
-		if buildat.get_env("BUILDAT_LUANTI_ZONE_TINT") == "1" then
+		if SKY_ENV.zone_tint then
 			zone.ambientColor = magic.Color(1, 0, 0)
 		end
 		if abl:find("bounce") then voxel_shading.set_bounce_light(0, 0, 0) end

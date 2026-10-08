@@ -181,6 +181,31 @@ function M.new(scene, sun_dir, defaults)
 
 	local self = {node = node, material = material}
 
+	-- Each parameter set only when it changes: update_sky() tells the sky
+	-- everything every frame, and a set and its vector are sandbox calls
+	-- ([FRAME_WORK]). One, two or three numbers, a float or a vector.
+	local last = {}
+	local function set(name, x, y, z)
+		local l = last[name]
+		if l and l[1] == x and l[2] == y and l[3] == z then
+			return
+		end
+		if l then
+			l[1], l[2], l[3] = x, y, z
+		else
+			last[name] = {x, y, z}
+		end
+		if z ~= nil then
+			material:SetShaderParameter(name, magic.Vector3(x, y, z))
+		elseif y ~= nil then
+			material:SetShaderParameter(name, magic.Vector2(x, y))
+		else
+			material:SetShaderParameter(name, x)
+		end
+	end
+	-- And the two bodies' pictures, by the same rule
+	local sun_texture_now, moon_texture_now = nil, nil
+
 	-- The cloud colour is a colour here where builtin/voxel_shading takes a
 	-- brightness and has the colour baked in, so both halves are kept and
 	-- the parameter is written from the two together.
@@ -199,55 +224,47 @@ function M.new(scene, sun_dir, defaults)
 					g = c.g + (cloud_tint.g - c.g) * k,
 					b = c.b + (cloud_tint.b - c.b) * k}
 		end
-		material:SetShaderParameter("CloudColor", magic.Vector3(c.r, c.g, c.b))
+		set("CloudColor", c.r, c.g, c.b)
 	end
 
 	-- Everything, at what the sky looked like before any game said anything
-	material:SetShaderParameter("SunDirection", magic.Vector3(
-			-sun_dir.x, -sun_dir.y, -sun_dir.z))
-	material:SetShaderParameter("SkyTop", magic.Vector3(
-			defaults.zenith.r, defaults.zenith.g, defaults.zenith.b))
-	material:SetShaderParameter("SkyHorizon", magic.Vector3(
-			defaults.horizon.r, defaults.horizon.g, defaults.horizon.b))
-	material:SetShaderParameter("SunTint", magic.Vector3(
-			defaults.sun_color.r, defaults.sun_color.g,
-			defaults.sun_color.b))
-	material:SetShaderParameter("SunSize", defaults.sun_half)
-	material:SetShaderParameter("SunOverexposure", SUN_OVEREXPOSURE)
+	set("SunDirection", -sun_dir.x, -sun_dir.y, -sun_dir.z)
+	set("SkyTop", defaults.zenith.r, defaults.zenith.g, defaults.zenith.b)
+	set("SkyHorizon", defaults.horizon.r, defaults.horizon.g, defaults.horizon.b)
+	set("SunTint", defaults.sun_color.r, defaults.sun_color.g,
+			defaults.sun_color.b)
+	set("SunSize", defaults.sun_half)
+	set("SunOverexposure", SUN_OVEREXPOSURE)
 	-- The moon is a body of its own here, drawn opposite the sun. Half its
 	-- width is Luanti's own ratio to the sun's, which the extension carries
 	-- as MOON_HALF.
-	material:SetShaderParameter("MoonSize", M.MOON_HALF)
-	material:SetShaderParameter("MoonTextured", 0.0)
-	material:SetShaderParameter("SunTextured", 0.0)
-	material:SetShaderParameter("StarDensity", 0.0)
-	material:SetShaderParameter("StarColor", magic.Vector3(0.9, 0.9, 1.0))
-	material:SetShaderParameter("StarFade", 0.0)
-	material:SetShaderParameter("CloudCoverage", defaults.cloud_cover)
-	material:SetShaderParameter("CloudAlpha", 1.0)
-	material:SetShaderParameter("CloudWind", magic.Vector2(
-			CLOUD_WIND.x, CLOUD_WIND.y))
+	set("MoonSize", M.MOON_HALF)
+	set("MoonTextured", 0.0)
+	set("SunTextured", 0.0)
+	set("StarDensity", 0.0)
+	set("StarColor", 0.9, 0.9, 1.0)
+	set("StarFade", 0.0)
+	set("CloudCoverage", defaults.cloud_cover)
+	set("CloudAlpha", 1.0)
+	set("CloudWind", CLOUD_WIND.x, CLOUD_WIND.y)
 	-- What a player who cannot see the sky is under, and whether the game
 	-- allows the dimming at all. Luanti's own indoors default is #646464
 	-- and auto_dim_skybox is on; see set_indoors() below and [CAVE_SKY].
-	material:SetShaderParameter("SkyIndoors", magic.Vector3(0.39, 0.39, 0.39))
-	material:SetShaderParameter("SkyAutoDim", 1.0)
+	set("SkyIndoors", 0.39, 0.39, 0.39)
+	set("SkyAutoDim", 1.0)
 	put_cloud()
 
 	-- The gradient's two ends, and how much of the sky is cloud. Anything
 	-- nil is left as it is, which is what the old sky did too.
 	function self:set_look(zenith, horizon, cloud_cover)
 		if zenith then
-			material:SetShaderParameter("SkyTop", magic.Vector3(
-					zenith.r, zenith.g, zenith.b))
+			set("SkyTop", zenith.r, zenith.g, zenith.b)
 		end
 		if horizon then
-			material:SetShaderParameter("SkyHorizon", magic.Vector3(
-					horizon.r, horizon.g, horizon.b))
+			set("SkyHorizon", horizon.r, horizon.g, horizon.b)
 		end
 		if cloud_cover then
-			material:SetShaderParameter("CloudCoverage",
-					math.max(0, math.min(1, cloud_cover)))
+			set("CloudCoverage", math.max(0, math.min(1, cloud_cover)))
 		end
 	end
 
@@ -255,10 +272,8 @@ function M.new(scene, sun_dir, defaults)
 	-- the two vectors the shader adds, computed by the caller from the
 	-- sun and the sky of the hour
 	function self:set_cloud_lit(sun, sky)
-		material:SetShaderParameter("CloudSun",
-				magic.Vector3(sun.r, sun.g, sun.b))
-		material:SetShaderParameter("CloudSky",
-				magic.Vector3(sky.r, sky.g, sky.b))
+		set("CloudSun", sun.r, sun.g, sun.b)
+		set("CloudSky", sky.r, sky.g, sky.b)
 	end
 
 	function self:set_cloud_light(k)
@@ -285,29 +300,26 @@ function M.new(scene, sun_dir, defaults)
 	-- Half the width of the square, and what colour it is. Zero turns it
 	-- off, which is how a game says its sun or its moon is not there.
 	function self:set_sun_look(half, color)
-		material:SetShaderParameter("SunSize", math.max(0, half or 0))
+		set("SunSize", math.max(0, half or 0))
 		if color then
-			material:SetShaderParameter("SunTint", magic.Vector3(
-					color.r or color[1] or 1, color.g or color[2] or 1,
-					color.b or color[3] or 1))
+			set("SunTint", color.r or color[1] or 1, color.g or color[2] or 1,
+					color.b or color[3] or 1)
 		end
 	end
 
 	-- [DAWN_LIGHT]'s glow on the band along the horizon, a radiance
 	-- and tint, the band's share of orange (M.dusk_tint())
 	function self:set_dawn_glow(r, g, b, tint)
-		material:SetShaderParameter("DawnGlow", magic.Vector3(r, g, b))
-		material:SetShaderParameter("DuskBand", magic.Vector3(
-				M.DUSK_BAND * M.DUSK_SKY, M.DUSK_AWAY, tint or 0))
+		set("DawnGlow", r, g, b)
+		set("DuskBand", M.DUSK_BAND * M.DUSK_SKY, M.DUSK_AWAY, tint or 0)
 	end
 
 	-- [DUSK_PARITY]: the band round the low sun, share of it in the
 	-- glow's orange at this many times the sky's level, as on pbr, and
 	-- the glow towards the sun only
 	function self:set_parity_band(band, share, glow)
-		material:SetShaderParameter("DawnGlow",
-				magic.Vector3(glow.r, glow.g, glow.b))
-		material:SetShaderParameter("DuskBand", magic.Vector3(band, 0, share))
+		set("DawnGlow", glow.r, glow.g, glow.b)
+		set("DuskBand", band, 0, share)
 	end
 
 	-- The game's own picture of it, or nil for the shader's painted square.
@@ -316,16 +328,15 @@ function M.new(scene, sun_dir, defaults)
 	-- needs.
 	-- The disc at a radiance, for the pbr path; zero is Luanti's square
 	function self:set_sun_radiance(r, g, b)
-		material:SetShaderParameter("SunRadiance", magic.Vector3(r, g, b))
+		set("SunRadiance", r, g, b)
 	end
 
 	function self:set_sun_texture(texture)
-		if texture then
+		if texture and texture ~= sun_texture_now then
+			sun_texture_now = texture
 			material:SetTexture(magic.TU_DIFFUSE, texture)
-			material:SetShaderParameter("SunTextured", 1.0)
-		else
-			material:SetShaderParameter("SunTextured", 0.0)
 		end
+		set("SunTextured", texture and 1.0 or 0.0)
 	end
 
 	-- The moon is drawn opposite the sun, which is where Luanti puts it, so
@@ -333,16 +344,15 @@ function M.new(scene, sun_dir, defaults)
 	-- says it is there. Its colour is the shader's, a moon having no tint to
 	-- take from the horizon.
 	function self:set_moon_look(half)
-		material:SetShaderParameter("MoonSize", math.max(0, half or 0))
+		set("MoonSize", math.max(0, half or 0))
 	end
 
 	function self:set_moon_texture(texture)
-		if texture then
+		if texture and texture ~= moon_texture_now then
+			moon_texture_now = texture
 			material:SetTexture(magic.TU_NORMAL, texture)
-			material:SetShaderParameter("MoonTextured", 1.0)
-		else
-			material:SetShaderParameter("MoonTextured", 0.0)
 		end
+		set("MoonTextured", texture and 1.0 or 0.0)
 	end
 
 	-- **Where the two skies disagree.** builtin/voxel_shading folds how many
@@ -351,13 +361,11 @@ function M.new(scene, sun_dir, defaults)
 	-- to the density and the night ramp goes to the fade, which is the
 	-- better shape: stars come out rather than appearing one by one.
 	function self:set_star_look(density, color, fade)
-		material:SetShaderParameter("StarDensity", math.max(0, density or 0))
-		material:SetShaderParameter("StarFade",
-				math.max(0, math.min(1, fade or 1)))
+		set("StarDensity", math.max(0, density or 0))
+		set("StarFade", math.max(0, math.min(1, fade or 1)))
 		if color then
-			material:SetShaderParameter("StarColor", magic.Vector3(
-					color.r or color[1] or 0.9, color.g or color[2] or 0.9,
-					color.b or color[3] or 1.0))
+			set("StarColor", color.r or color[1] or 0.9, color.g or color[2] or 0.9,
+					color.b or color[3] or 1.0)
 		end
 	end
 
@@ -365,8 +373,7 @@ function M.new(scene, sun_dir, defaults)
 	-- itself is the other way -- which is what the old sky took too.
 	function self:set_sun_direction(dir)
 		if dir then
-			material:SetShaderParameter("SunDirection", magic.Vector3(
-					-dir.x, -dir.y, -dir.z))
+			set("SunDirection", -dir.x, -dir.y, -dir.z)
 		end
 	end
 
@@ -381,19 +388,18 @@ function M.new(scene, sun_dir, defaults)
 			return
 		end
 		local k = math.max(0, brightness or 1)
-		material:SetShaderParameter("SkyIndoors", magic.Vector3(
-				(color.r or 0.39) * k, (color.g or 0.39) * k,
-				(color.b or 0.39) * k))
+		set("SkyIndoors", (color.r or 0.39) * k, (color.g or 0.39) * k,
+				(color.b or 0.39) * k)
 	end
 
 	function self:set_auto_dim(on)
-		material:SetShaderParameter("SkyAutoDim", on and 1.0 or 0.0)
+		set("SkyAutoDim", on and 1.0 or 0.0)
 	end
 
 	-- The gradient shaped as the path trace's rather than as Luanti's; see
 	-- cSkyPhysical in the shader
 	function self:set_physical(on)
-		material:SetShaderParameter("SkyPhysical", on and 1.0 or 0.0)
+		set("SkyPhysical", on and 1.0 or 0.0)
 	end
 
 	-- How much sky the camera can see, as one number rather than a
@@ -403,8 +409,7 @@ function M.new(scene, sun_dir, defaults)
 	-- every occluder, the visibility cube being camera-local and thirty
 	-- degrees to a cell while the sky is at infinity. See [CAVE_SKY].
 	function self:set_outside(k)
-		material:SetShaderParameter("SkyOutside",
-				math.max(0, math.min(1, k or 1)))
+		set("SkyOutside", math.max(0, math.min(1, k or 1)))
 	end
 
 	function self:enabled(on)
