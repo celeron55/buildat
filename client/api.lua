@@ -509,6 +509,9 @@ __buildat_served_overrides = {
 	launch_save = refused("launch_save"),
 	join_server = refused("join_server"),
 	show_engine_settings = refused("show_engine_settings"),
+	log_path = function() return nil end,
+	open_log_folder = refused("open_log_folder"),
+	recent_errors = function() return nil end,
 	set_shared_key = refused("set_shared_key"),
 	set_client_key = refused("set_client_key"),
 	key_store = function() return nil end,
@@ -1355,6 +1358,22 @@ end
 buildat.safe.show_engine_settings = function()
 	launch_grid.screens("preferences.lua").show()
 	return true
+end
+-- [LOG_REACH] for Settings' "Logs and errors": the log's path ("" with
+-- none, the web's), the folder it is in opened by the system's file
+-- manager (on the user's own click; the path is the native side's), and
+-- the caught errors in full with the version and platform on top
+buildat.safe.log_path = function()
+	return __buildat_get_path("log") or ""
+end
+buildat.safe.open_log_folder = function()
+	if not __buildat_user_activated() then
+		return nil, "open_log_folder: only right after the user's own key or click"
+	end
+	return __buildat_open_log_folder()
+end
+buildat.safe.recent_errors = function()
+	return __buildat_errors_text()
 end
 
 -- **The key store** ([LAUNCH_MENU_V2] step 3): one client-side store of

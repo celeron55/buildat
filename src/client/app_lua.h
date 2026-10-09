@@ -551,6 +551,35 @@
 		return 1;
 	}
 
+	// open_log_folder() -> true, or nil and why: the system's file manager
+	// on the folder the log is in ([LOG_REACH]). No argument: the path is
+	// the native side's own, so nothing a script gives reaches the shell.
+	// Trusted only: launch_menu's Settings.
+	static int l_open_log_folder(lua_State *L)
+	{
+		ss_ dir = g_client_config.get<ss_>("log_path");
+		const size_t slash = dir.find_last_of("/\\");
+		dir = slash == ss_::npos ? ss_() : dir.substr(0, slash);
+		// simplified: a path with a quote (or, on Windows, a '%') is
+		// refused rather than escaped; ShellExecute is the upgrade
+		if(dir.empty() || dir.find_first_of("'\"%\n") != ss_::npos){
+			lua_pushnil(L);
+			lua_pushstring(L, dir.empty() ? "no log file" :
+					"the log's folder has a quote in its path");
+			return 2;
+		}
+#ifdef _WIN32
+		std::replace(dir.begin(), dir.end(), '/', '\\');
+		interface::process::shell_exec("start \"\" \""+dir+"\"");
+#elif defined(__APPLE__)
+		interface::process::shell_exec("open '"+dir+"'");
+#else
+		interface::process::shell_exec("xdg-open '"+dir+"' >/dev/null 2>&1 &");
+#endif
+		lua_pushboolean(L, true);
+		return 1;
+	}
+
 	// aitta_install(zip, sig) -> the directory, or nil and why: a release
 	// fetched from an Aitta, checked and installed under <user>/installed
 	// ([AITTA_MVP]). Trusted only: client/extensions/starport.
@@ -1926,6 +1955,12 @@
 		}
 		if(name == "user"){
 			ss_ path = g_client_config.get<ss_>("user_path");
+			lua_pushlstring(L, path.c_str(), path.size());
+			return 1;
+		}
+		// The client's own log file ([LOG_REACH]); empty with none (the web)
+		if(name == "log"){
+			ss_ path = g_client_config.get<ss_>("log_path");
 			lua_pushlstring(L, path.c_str(), path.size());
 			return 1;
 		}

@@ -359,6 +359,20 @@ end
 -- box's Connect died in its pcall and the screen just went back
 -- (2026-09-22).
 local reported_at = {}
+-- The last caught errors in full, the message and its traceback, for
+-- Copy ([LOG_REACH]): at most 10 and 64 KB, the oldest dropped first
+local recent_errors, recent_bytes = {}, 0
+-- The client's version and platform, then the errors, newest last; or
+-- only err's, given one
+function __buildat_errors_text(err)
+	local list = err and {tostring(err)} or recent_errors
+	local head = "Buildat " .. tostring(__buildat_version()) .. ", " ..
+			tostring(GetPlatform()) .. "\n"
+	if #list == 0 then
+		return head .. "\n(no errors caught since the client started)\n"
+	end
+	return head .. "\n" .. table.concat(list, "\n\n") .. "\n"
+end
 function __buildat_report_error(err)
 	local first = tostring(err):match("^[^\n]*") or tostring(err)
 	local now = os.time()
@@ -366,6 +380,12 @@ function __buildat_report_error(err)
 		return
 	end
 	reported_at[first] = now
+	local full = tostring(err):sub(1, 65536)
+	recent_errors[#recent_errors + 1] = full
+	recent_bytes = recent_bytes + #full
+	while #recent_errors > 10 or recent_bytes > 65536 do
+		recent_bytes = recent_bytes - #table.remove(recent_errors, 1)
+	end
 	local ui_utils = __buildat_loaded_extension("ui_utils") or
 			__buildat_require_extension("ui_utils")
 	if type(ui_utils) ~= "table" or type(ui_utils.safe) ~= "table" then
@@ -377,14 +397,17 @@ function __buildat_report_error(err)
 	local menu = buildat.menu_extension and buildat.menu_extension()
 	local in_app = (menu and menu.in_app and menu.in_app()) or
 			ui_utils.in_app == true
-	local shown = first .. "\n\n(the log has the rest)"
+	local shown = first .. "\n\n(the rest: Copy, or Settings > Logs and errors)"
 	log:info("error shown "..(in_app and "as a notice" or "in a dialog")..": "..first)
 	if in_app then
 		if ui_utils.safe.show_notice then
-			ui_utils.safe.show_notice(first)
+			ui_utils.safe.show_notice(first ..
+					"  (the rest: Settings > Logs and errors)",
+					__buildat_errors_text(err))
 		end
 	elseif ui_utils.safe.show_message_dialog then
-		ui_utils.safe.show_message_dialog(shown)
+		ui_utils.safe.show_message_dialog(shown, nil,
+				__buildat_errors_text(err))
 	end
 end
 

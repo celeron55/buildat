@@ -2389,6 +2389,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(aitta_install)
 		DEF_BUILDAT_FUNC(aitta_dev)
 		DEF_BUILDAT_FUNC(open_url)
+		DEF_BUILDAT_FUNC(open_log_folder)
 		DEF_BUILDAT_FUNC(start_local_server)
 		DEF_BUILDAT_FUNC(list_launchers)
 		DEF_BUILDAT_FUNC(list_installed_games)

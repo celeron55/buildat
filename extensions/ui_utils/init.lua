@@ -1521,22 +1521,58 @@ function M.safe.set_in_game(on)
 	M.in_app = on and true or false
 end
 
-function M.safe.show_notice(text)
-	local t = magic.ui.root:CreateChild("Text")
+-- Text on the OS clipboard, on the user's own key or click: Urho3D's
+-- SetClipboardText keeps it to itself unless told to use the system's
+function M.safe.copy(text)
+	magic.ui:SetUseSystemClipboard(true)
+	magic.ui:SetClipboardText(tostring(text))
+end
+
+-- copy, if given ([LOG_REACH]: the error's full text), gets a "Copy"
+-- button beside the line, which takes no focus and only a click where the
+-- pointer is free; the line then stays 20 s, and while the pointer is on it
+function M.safe.show_notice(text, copy)
+	local t = magic.ui.root:CreateChild("UIElement")
 	t.defaultStyle = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
-	t:SetStyleAuto()
-	t.text = tostring(text)
-	t.color = magic.Color(M.safe.rgb("error"))
+	t:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(0, 0, 0, 0))
 	t:SetAlignment(HA_CENTER, VA_TOP)
-	t:SetPosition(0, 40 + 24 * #notices)
+	t:SetPosition(0, 40 + 28 * #notices)
 	t.priority = 1000
-	notices[#notices + 1] = {element = t, until_us = buildat.get_time_us() + 6000000}
+	local line = t:CreateChild("Text")
+	line:SetStyleAuto()
+	line.text = tostring(text)
+	line.color = magic.Color(M.safe.rgb("error"))
+	line:SetTextEffect(magic.TE_SHADOW)
+	local b, bt
+	if copy then
+		b = t:CreateChild("Button")
+		b:SetStyleAuto()
+		b:SetFocusMode(FM_NOTFOCUSABLE)
+		b:SetLayout(LM_VERTICAL, 0, magic.IntRect(6, 2, 6, 2))
+		bt = b:CreateChild("Text")
+		bt:SetStyleAuto()
+		bt.text = "Copy"
+	end
+	local n = {element = t,
+			until_us = buildat.get_time_us() + (copy and 20000000 or 6000000)}
+	notices[#notices + 1] = n
+	if b then
+		magic.SubscribeToEvent(b, "Released", function()
+			M.safe.copy(copy)
+			bt.text = "Copied"
+		end)
+		magic.SubscribeToEvent(b, "HoverBegin", function() n.held = true end)
+		magic.SubscribeToEvent(b, "HoverEnd", function() n.held = false end)
+	end
 	if #notices == 1 then
 		local sub
 		sub = magic.SubscribeToEvent("Update", function()
 			local now = buildat.get_time_us()
 			local kept = {}
 			for _, n in ipairs(notices) do
+				if n.held then
+					n.until_us = math.max(n.until_us, now + 2000000)
+				end
 				if now >= n.until_us then
 					n.element:Remove()
 				else
@@ -1589,7 +1625,10 @@ function M.safe.menu_button(parent, before, opts)
 	return box
 end
 
-function M.safe.show_message_dialog(message, on_close)
+-- copy, if given, is put on the clipboard by a "Copy" button above "Ok"
+-- ([LOG_REACH]: a caught error's full text); written only, on the user's
+-- own click, as SetClipboardText is
+function M.safe.show_message_dialog(message, on_close, copy)
 	-- Don't stack multiple dialogs
 	if message_handle then
 		-- **A dialog can go without being closed** (2026-09-25): a
@@ -1602,6 +1641,9 @@ function M.safe.show_message_dialog(message, on_close)
 			-- The newest caller is the one whose message is at the
 			-- bottom of the dialog, so its on_close is the one that runs
 			message_handle.on_close = on_close or message_handle.on_close
+			if copy and message_handle.copy then
+				message_handle.copy = message_handle.copy .. "\n" .. tostring(copy)
+			end
 			return
 		end
 		log:warning("show_message_dialog: the last dialog is gone; a new one")
@@ -1638,6 +1680,20 @@ function M.safe.show_message_dialog(message, on_close)
 	end
 	fit_window()
 
+	local copy_button, copy_text
+	if copy then
+		copy_button = window:CreateChild("Button")
+		copy_button:SetStyleAuto()
+		copy_button:SetName("Button")
+		copy_button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
+		copy_button.minHeight = 20
+		copy_text = copy_button:CreateChild("Text")
+		copy_text:SetName("ButtonText")
+		copy_text:SetStyleAuto()
+		copy_text.text = "Copy"
+		copy_text:SetTextAlignment(HA_CENTER)
+	end
+
 	local ok_button = window:CreateChild("Button")
 	ok_button:SetStyle("PrimaryButton")
 	ok_button:SetName("Button")
@@ -1657,6 +1713,7 @@ function M.safe.show_message_dialog(message, on_close)
 			end
 		end,
 		on_close = on_close,
+		copy = copy and tostring(copy),
 	}
 
 	local function close()
@@ -1669,10 +1726,17 @@ function M.safe.show_message_dialog(message, on_close)
 	end
 
 	-- The menu's keys: Enter, and Escape on the "Ok" that is the way back
-	M.safe.bind_button_menu(root, {{ok_button, function()
+	local items = {{ok_button, function()
 		log:info("show_message_dialog: closed")
 		close()
-	end}})
+	end}}
+	if copy_button then
+		table.insert(items, 1, {copy_button, function()
+			M.safe.copy(message_handle.copy)
+			copy_text.text = "Copied"
+		end})
+	end
+	M.safe.bind_button_menu(root, items)
 	ok_button:SetFocus(true)
 end
 

@@ -852,6 +852,53 @@ browse = function(kind, query, by, filter, focus_filter)
 			", by " .. by .. (filters and ", " .. filter or ""))
 end
 
+-- **Logs and errors** ([LOG_REACH]): where the log is, and the caught
+-- errors in full for a report -- a tester's Lua error could not be copied
+-- off the red line, and the log is in a hidden folder
+local function logs()
+	local width = math.min(magic.ui.root.width - 40, 760)
+	local root, window = screen("launch_menu logs", width,
+			"Logs and errors", "")
+	local path = api.log_path() or ""
+	local where = text(window, path ~= "" and "The log: " .. path or
+			"No log file here: the browser's console (F12) has it.", 14)
+	where:SetWordwrap(true)
+	where:SetFixedWidth(width - 32)
+	local view = ui_utils.list_view(window, width - 32, 200)
+	local status = text(window, "", 13, "dim")
+	local items = {}
+	local function row(e, run)
+		items[#items + 1] = {button = view:row(e), action = function()
+			local ok, why = run()
+			status.text = ok and ok ~= true and ok or (ok and "Done" or
+					tostring(why))
+		end}
+	end
+	if path ~= "" then
+		row({label = "Copy the path", glyph = "□"}, function()
+			ui_utils.copy(path)
+			return "The path is on the clipboard"
+		end)
+		if not web then
+			row({label = "Open the log folder", glyph = "▶"}, function()
+				local ok, why = api.open_log_folder()
+				return ok and "Opened" or nil, why
+			end)
+		end
+	end
+	row({label = "Copy the last errors", glyph = "□"}, function()
+		ui_utils.copy(api.recent_errors() or "")
+		return "The last errors, with the version, are on the clipboard"
+	end)
+	view:fit()
+	ui_utils.bind_button_menu(root, items, function(key)
+		if key == KEY_ESCAPE then
+			uistack.main:pop(root)
+			return true
+		end
+	end)
+end
+
 -- **Settings**, one tree: each part once
 local controls
 settings = function()
@@ -872,8 +919,13 @@ settings = function()
 		end
 	end
 	for _, section in ipairs({"Display and sound", "Controls", "Luanti",
-			"Developer"}) do
-		if section == "Controls" then
+			"Logs and errors", "Developer"}) do
+		if section == "Logs and errors" then
+			view:header(section)
+			row({label = "Logs and errors", glyph = "⌗", description =
+					"Where the log is, and the errors caught since the " ..
+					"client started, to copy into a report."}, logs)
+		elseif section == "Controls" then
 			view:header(section)
 			row({label = "Keys", glyph = "⌨", description = "Every app's keys, the " ..
 					"shared ones that bind them all at once, and the " ..

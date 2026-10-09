@@ -39,6 +39,8 @@ Section
 	; The shortcut's working directory is the one last set
 	SetOutPath "$INSTDIR\bin"
 	CreateShortcut "$SMPROGRAMS\Buildat.lnk" "$INSTDIR\bin\buildat.exe"
+	; The folder the log is in ([LOG_REACH]): a tester could not find it
+	CreateShortcut "$SMPROGRAMS\Buildat logs.lnk" "$LOCALAPPDATA\buildat\cache"
 	WriteUninstaller "$INSTDIR\uninstall.exe"
 	WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "Buildat"
 	WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${VERSION}"
@@ -59,5 +61,6 @@ Section "Uninstall"
 	; user's directory stay
 	RMDir /r "$LOCALAPPDATA\buildat\cache\rccpp_build"
 	Delete "$SMPROGRAMS\Buildat.lnk"
+	Delete "$SMPROGRAMS\Buildat logs.lnk"
 	DeleteRegKey HKCU "${UNINST_KEY}"
 SectionEnd
