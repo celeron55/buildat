@@ -94,42 +94,26 @@ local function open(title, draw, back)
 	return w
 end
 
--- A list that scrolls, rows wrapping to its width
-local function list(w, height_share)
-	local l = w:CreateChild("ListView")
-	l:SetStyleAuto()
-	l:SetFixedHeight(math.max(120,
-			math.floor(magic.ui.root.height * (height_share or 0.55))))
-	local width = math.max(100, w.width - 32 - 28)
+-- A page's rows, wrapping to its width. They go into the page itself,
+-- and the Server window's own view is the one scroll, as on Health
+-- ([STARPORT_LIST_FILL]: a list of a fixed share of the screen left a
+-- margin under it, or a second scroll bar in the first)
+local function list(w)
 	local add = {}
 	function add.text(t, color)
-		local x = l:CreateChild("Text")
-		x:SetStyleAuto()
-		x:SetWordwrap(true)
-		x:SetFixedWidth(width)
-		x:SetText(t)
-		if color then
-			x:SetColor(color)
-		end
-		l:AddItem(x)
-		return x
+		return text(w, t, color)
 	end
 	function add.button(t, on)
-		local r = l:CreateChild("UIElement")
-		r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
+		local r = row(w)
 		button(r, t, on)
-		l:AddItem(r)
 		return r
 	end
 	function add.row()
-		local r = l:CreateChild("UIElement")
-		r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
-		l:AddItem(r)
-		return r
+		return row(w)
 	end
-	-- [STARPORT_COPY_IDS]: a copyable id/line as a list item
+	-- [STARPORT_COPY_IDS]: a copyable id/line as a row
 	function add.copy(label, value)
-		return copy_into(add.row(), label, value, width)
+		return copy_into(row(w), label, value)
 	end
 	return add
 end
@@ -332,7 +316,7 @@ overview_page = function()
 			end
 		end
 		text(w, "Recent events")
-		local l = list(w, 0.4)
+		local l = list(w)
 		for _, e in ipairs(ov.events or {}) do
 			l.text(when(e.ts) .. "  " .. s(e.text),
 					(tonumber(e.ts) or 0) > (tonumber(ov.seen) or 0) and
@@ -366,7 +350,7 @@ servers_page = function()
 			home()
 		end)
 	end)
-	local l = list(w, 0.3)
+	local l = list(w)
 	for _, x in ipairs(me.listings or {}) do
 		l.text(s(x.name) .. " (" .. s(x.host) .. ":" ..
 				s(x.port) .. "): " .. s(x.served) ..
@@ -429,7 +413,7 @@ fleets_page = function(me)
 	text(w, "A server joins a fleet by a line in its starport.json; "..
 			"servers that only split the load also name the same pool.",
 			GREY)
-	local l = list(w, 0.3)
+	local l = list(w)
 	for _, f in ipairs(me.fleets or {}) do
 		l.text(s(f.name) .. ": " .. s(f.description) .. " " .. s(f.link))
 		l.copy("starport.json line", '"fleet": "' .. s(f.id) .. ":" ..
@@ -479,7 +463,7 @@ blocklists_page = function(me)
 			text(w, "Yours: no fleets or servers", GREY)
 		end
 		local scope = edit(w, "Acting for", scopes[1] or "")
-		local l = list(w, 0.4)
+		local l = list(w)
 		for _, b in ipairs(lists) do
 			l.text(s(b.name) .. " (" .. s(b.owner) .. "): " .. s(b.bans) ..
 					" bans; publishers " .. table.concat(b.publishers or {},
@@ -563,7 +547,7 @@ group_page = function(gid)
 		text(w, s(x.id) .. " " .. s(x.host) .. ":" .. s(x.port) .. ", " ..
 				categories(x) .. "; " .. s(x.served) .. ". " ..
 				s(x.description), GREY)
-		local l = list(w, 0.3)
+		local l = list(w)
 		if s(g.fleet) ~= "" then
 			text(w, "Reports of the whole fleet " .. g.fleet ..
 					": an action applies to all its servers.", YELLOW)
@@ -681,8 +665,8 @@ listings_page = function(search)
 		-- The columns' shares of the width, and the characters each takes
 		-- simplified: the characters are for the default font's average
 		-- width (7 px); a long run of wide letters can still overflow
-		-- Inside the page's margins and clear of the scroll bar
-		local width = w.width - 40
+		-- Inside the page's margins (4 and 8)
+		local width = w.width - 12
 		local cols = {{"Name", 0.30}, {"Address", 0.27}, {"Kind", 0.12},
 			{"St", 0.05}, {"Last announce", 0.26}}
 		local function line(parent, values, color)
@@ -703,11 +687,10 @@ listings_page = function(search)
 		local head = {}
 		for i, c in ipairs(cols) do head[i] = c[1] end
 		line(w, head, GREY)
-		local v = ui.list_view(w, width, math.max(120,
-				math.floor(magic.ui.root.height * 0.5)), {wheel = 40,
-				follow_focus = true})
+		-- The rows in the page, which the window's view scrolls
+		-- ([STARPORT_LIST_FILL])
 		for _, x in ipairs(ls) do
-			local b = v.list:CreateChild("Button")
+			local b = w:CreateChild("Button")
 			b:SetStyleAuto()
 			b:SetFixedSize(width, 24)
 			b:SetFocusMode(magic.FM_FOCUSABLE)
@@ -719,10 +702,9 @@ listings_page = function(search)
 			magic.SubscribeToEvent(b, "Released", function() listing_page(x) end)
 		end
 		if #ls == 0 then
-			v:header(search ~= "" and "Nothing matches the search" or
-					"No listings")
+			text(w, search ~= "" and "Nothing matches the search" or
+					"No listings", GREY)
 		end
-		v:fit()
 	end)
 end
 
@@ -805,7 +787,7 @@ settings_page = function()
 			keys[#keys + 1] = k
 		end
 		table.sort(keys)
-		local l = list(w, 0.6)
+		local l = list(w)
 		for _, k in ipairs(keys) do
 			local r = l.row()
 			local name = text(r, k)

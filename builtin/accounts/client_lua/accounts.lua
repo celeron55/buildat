@@ -141,7 +141,7 @@ local ban_page
 -- The Server window ([SERVER_ADMIN_PAGE]), below; its state and the
 -- functions the pages above it call
 local sw = {}
-local draw_sidebar, server_element, server_close
+local draw_sidebar, server_element, server_close, sidebar_need
 local health_page, health_capture
 -- The Starport panel open: "starports", "listing" or "ids"
 local starport_page, sp_panel
@@ -1216,18 +1216,14 @@ users_page = function(back)
 				"Give an admin a local password (Password... on their row).",
 				magic.Color(rgb("error")))
 	end
-	-- **The accounts, invites and bans in a list that scrolls** (user,
-	-- 2026-09-30): a server's users are more than a phone's screen. Its
-	-- height is what is in it, up to under half the screen.
-	local list = w:CreateChild("ListView")
-	list:SetStyleAuto()
-	local item_width = math.max(100, w.width - 32 - 28)
-	local lines = 0
+	-- **The accounts, invites and bans** (user, 2026-09-30): a server's
+	-- users are more than a phone's screen; they go into the page, which
+	-- scrolls as one [STARPORT_LIST_FILL]
+	local item_width = math.max(100, w.width - 32)
 	local function item()
-		local it = list:CreateChild("UIElement")
+		local it = w:CreateChild("UIElement")
 		it:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 2, 0, 2))
 		it:SetFixedWidth(item_width)
-		list:AddItem(it)
 		return it
 	end
 	-- [STARPORT] 10g: Starport IDs waiting for an admin
@@ -1235,7 +1231,6 @@ users_page = function(back)
 		local it = item()
 		page_text(it, name .. ": a Starport ID waiting to be let in", WARN)
 		local r = row(it)
-		lines = lines + 2
 		button(r, "Let in", function() M.admin("approve", name) end)
 		button(r, "Turn away", function() M.admin("turn_away", name) end)
 	end
@@ -1252,7 +1247,6 @@ users_page = function(back)
 				(user.id_only == 1 and " (Starport ID only)" or "") ..
 				(user.storage ~= "" and ", keeps " .. user.storage or ""))
 		local r = row(it)
-		lines = lines + 2
 		local below = user.level < u.level
 		if admin then
 			button(r, has.admin and "Admin: yes" or "Admin: no", function()
@@ -1268,7 +1262,6 @@ users_page = function(back)
 		-- [TRUST_LADDER] Each level below the viewer's, on a row of its own
 		if below and user.level < 40 then
 			local r2 = row(it)
-			lines = lines + 1
 			for _, lv in ipairs({10, 20, 30}) do
 				-- "No longer" for the highest held only: it steps down one
 				if lv < u.level and user.level < lv + 10 then
@@ -1300,11 +1293,9 @@ users_page = function(back)
 	end
 	if #u.invites > 0 then
 		page_text(item(), "Invites (each makes one account):")
-		lines = lines + 1
 	end
 	for _, inv in ipairs(u.invites) do
 		local r = row(item())
-		lines = lines + 1
 		page_text(r, inv.code .. "  (" .. inv.by .. ")"):SetWordwrap(false)
 		button(r, "Delete", function() M.admin("uninvite", inv.code) end)
 	end
@@ -1312,17 +1303,13 @@ users_page = function(back)
 	-- from while registration is open
 	if #(u.bans or {}) > 0 then
 		page_text(item(), "Banned:")
-		lines = lines + 1
 		for _, b in ipairs(u.bans) do
 			local r = row(item())
-			lines = lines + 1
 			page_text(r, b.name .. (b.address ~= "" and
 					"  (" .. b.address .. ")" or "")):SetWordwrap(false)
 			button(r, "Unban", function() M.admin("unban", b.name) end)
 		end
 	end
-	list:SetFixedHeight(math.min(lines * 34 + 8,
-			math.floor(magic.ui.root.height * 0.45)))
 	local r = row(w)
 	if admin then
 		button(r, "Add a user...", function()
@@ -2158,6 +2145,18 @@ end
 
 -- simplified: a count is "any waiting", in the highlight colour; per-item
 -- seen times are the upgrade
+-- The height the sidebar's entries take, and the window's margins
+sidebar_need = function()
+	local h, n = 16, 0
+	for i = 0, sw.sidebar:GetNumChildren() - 1 do
+		local c = sw.sidebar:GetChild(i)
+		if c then
+			h, n = h + c.height, n + 1
+		end
+	end
+	return h + 2 * math.max(0, n - 1)
+end
+
 draw_sidebar = function()
 	if not sw.frame then
 		return
@@ -2203,19 +2202,51 @@ draw_sidebar = function()
 		end
 	end
 	sw.versions_logged = true
+	-- More entries than the window was made for (an admin's, with the
+	-- users list): made again, the frame after
+	if not sw.building and not sw.refit and sidebar_need() > sw.frame.height then
+		sw.refit = true
+		local sub
+		sub = magic.SubscribeToEvent("Update", function()
+			magic.UnsubscribeFromEvent("Update", sub)
+			-- Closed meanwhile
+			if not sw.refit then
+				return
+			end
+			local key, on_close = sw.current, sw.on_close
+			server_close(true)
+			M.server_window(key, on_close)
+		end)
+	end
 end
 M.server_sidebar = function() draw_sidebar() end
 
 local function build_frame()
+	local root = magic.ui.root
 	local f = page_window(880)
 	f:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(8, 8, 8, 8))
-	f:SetFixedHeight(math.floor(magic.ui.root.height * 0.8))
-	local inner = f.width - 16
-	sw.narrow = magic.ui.root.width < 560
 	sw.frame = f
 	M.frame = f
 	sw.sidebar = f:CreateChild("UIElement")
 	sw.sidebar:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(0, 0, 0, 0))
+	sw.building = true
+	draw_sidebar()
+	sw.building = nil
+	-- **As tall as its sidebar** (user, 2026-10-09): on a phone turned or
+	-- at a big UI size the entries ran off the screen's bottom. Taller
+	-- than the screen, the client's fit (update_ui_fit) brings the UI's
+	-- scale down for it, and the window takes the width that frees: the
+	-- screen's shape at its height, less the black round it (50) and a
+	-- margin. A scale does not change that shape, so the fit has nothing
+	-- of its own to follow.
+	local h = math.max(math.floor(root.height * 0.8), sidebar_need())
+	f:SetFixedHeight(h)
+	if h + 50 > root.height * 0.98 then
+		f:SetFixedWidth(math.max(f.width, math.floor((h + 50) *
+				root.width / root.height * 0.96) - 50))
+	end
+	local inner = f.width - 16
+	sw.narrow = f.width < 544
 	sw.sidebar:SetFixedWidth(sw.narrow and inner or 150)
 	sw.view = f:CreateChild("ScrollView")
 	sw.view:SetStyleAuto()
@@ -2289,10 +2320,11 @@ end
 -- The window up at `key`, or the first entry. An admin's entries come
 -- with the users list; one asked for before it is shown when it comes
 function M.server_window(key, on_close)
+	-- Before the frame: its sidebar has Close
+	sw.on_close = on_close
 	if not sw.frame then
 		build_frame()
 	end
-	sw.on_close = on_close
 	-- **Black behind a window a game opened** (user, 2026-10-07), 25 UI
 	-- pixels round it: told apart from the game's UI under it
 	if on_close and not sw.backdrop then

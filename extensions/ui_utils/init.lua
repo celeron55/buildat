@@ -73,15 +73,67 @@ local function shown(e)
 	return ok and v == true
 end
 
--- The page's buttons and fields, in the order they are drawn
-local function page_items(e, out)
+-- **A view that scrolls**, read the same way whichever kind it is: a
+-- ScrollView (the Server window's page) or a list_view's viewport. y in
+-- its content, top the content's y at the view's top edge.
+local list_views, list_view_serial = {}, 0
+local function scroller(e, t)
+	if t == "ScrollView" or t == "ListView" then
+		-- None set reads as an error in the sandbox
+		local ok, content = pcall(function() return e.contentElement end)
+		return ok and content and {content = content,
+			top = function() return e.viewPosition.y end,
+			height = function() return e.scrollPanel.height end,
+			set_top = function(y)
+				y = math.max(0, math.min(y,
+						content.height - e.scrollPanel.height))
+				e.viewPosition = magic.IntVector2(e.viewPosition.x, y)
+			end}
+	end
+	local view = t == "UIElement" and list_views[e:GetName()]
+	return view and {content = view.list,
+		top = function() return -view.list.position.y end,
+		height = function() return view.viewport.height end,
+		set_top = function(y) view:scroll(y + view.list.position.y) end}
+end
+local function y_in(sc, e)
+	return e.screenPosition.y - sc.content.screenPosition.y
+end
+local function in_view(sc, e)
+	local y, top = y_in(sc, e), sc.top()
+	return y >= top and y + e.height <= top + sc.height()
+end
+-- Scrolls just enough that e is in view, its top if it is taller
+local function show_in(sc, e)
+	local y, top, h = y_in(sc, e), sc.top(), sc.height()
+	if y + e.height > top + h then
+		sc.set_top(math.min(y, y + e.height - h))
+	elseif y < top then
+		sc.set_top(y)
+	end
+end
+
+-- The page's buttons and fields, in the order they are drawn. scs, when
+-- given, gets the view each one scrolls in (scs[i] for out[i]; the same
+-- table for one view in one walk), none for those outside any.
+local function page_items(e, out, scs, sc)
 	if not e.visible then
 		return out
 	end
 	local t = e:GetTypeName()
+	-- A scroll bar's arrows are the wheel's and the mouse's
+	if t == "ScrollBar" then
+		return out
+	end
+	if scs then
+		sc = scroller(e, t) or sc
+	end
 	if ((t == "Button" or t == "DropDownList") and e.enabled) or
 			t == "LineEdit" then
 		out[#out + 1] = e
+		if scs then
+			scs[#out] = sc
+		end
 		if t ~= "LineEdit" then
 			-- A dropdown's or a checkbox's insides are the button's
 			return out
@@ -92,7 +144,7 @@ local function page_items(e, out)
 	for i = 0, e:GetNumChildren() - 1 do
 		local c = e:GetChild(i)
 		if c then
-			page_items(c, out)
+			page_items(c, out, scs, sc)
 		end
 	end
 	return out
@@ -446,7 +498,8 @@ end
 -- The page's items read again from its window: nothing of it is held
 -- from one frame to the next but the window
 local function rewalk(page)
-	page.items = page_items(page.win, {})
+	page.scs = {}
+	page.items = page_items(page.win, {}, page.scs)
 	for _, e in ipairs(page.items) do
 		if e:GetTypeName() == "Button" then
 			e:SetFocusMode(magic.FM_FOCUSABLE)
@@ -531,6 +584,16 @@ function M.safe.keyboard_page(win)
 			dirty = false
 			rewalk(page)
 		end
+		-- **The view follows the focus** a key moved (Tab, PageDown) into
+		-- an item not wholly in it; the wheel and the mouse are as they are
+		if page.follow and arranged and shown(win) then
+			page.follow = false
+			for i, e in ipairs(page.items) do
+				if page.scs[i] and e:HasFocus() then
+					show_in(page.scs[i], e)
+				end
+			end
+		end
 		local cols = page.columns
 		-- Most frames the focus is where it was: that one asked, not both
 		-- columns walked ([FRAME_WORK]: ~1 ms a frame on the join screen)
@@ -606,6 +669,7 @@ function M.safe.keyboard_page(win)
 			end
 		end
 		dirty = true
+		page.follow = true
 		rewalk(page)
 		if #page.items == 0 then
 			return
@@ -632,27 +696,34 @@ function M.safe.keyboard_page(win)
 		-- with the focus, Right goes to the right one's first item, Left
 		-- back to the left one's last; Enter on the left one stays there
 		-- (user, 2026-10-07: browsing the pages, Right to act in one)
-		local items = page.items
+		local items, scs = page.items, page.scs
 		local side = nil
 		local cols = page.columns
 		if cols then
-			local left, right = page_items(cols[1], {}),
-					page_items(cols[2], {})
+			local lscs, rscs = {}, {}
+			local left, right = page_items(cols[1], {}, lscs),
+					page_items(cols[2], {}, rscs)
 			for i, e in ipairs(left) do
 				if e:HasFocus() then
-					side, items, page.left_at = 1, left, i
+					side, items, scs, page.left_at = 1, left, lscs, i
 				end
 			end
 			for _, e in ipairs(right) do
 				if e:HasFocus() then
-					side, items = 2, right
+					side, items, scs = 2, right, rscs
 				end
 			end
 			-- Nothing focused (a page with nothing to focus came up after
-			-- Enter): an arrow key goes back to the left one's last
+			-- Enter, or one drawn again after a click): Right goes to the
+			-- page's first, another arrow key back to the left one's last
 			if key ~= KEY_RETURN and key ~= KEY_RETURN2 and
 					key ~= KEY_KP_ENTER then
 				page.keep_left = nil
+			end
+			if not side and key == KEY_RIGHT and #right > 0 then
+				right[1]:SetFocus(true)
+				page.side = 2
+				return
 			end
 			if not side and #left > 0 and (key == KEY_UP or
 					key == KEY_DOWN or key == KEY_LEFT or key == KEY_RIGHT) then
@@ -692,8 +763,40 @@ function M.safe.keyboard_page(win)
 			end
 			local d = key == KEY_DOWN and 1 or -1
 			local n = #items
-			local i = at == 0 and 1 or (at - 1 + d) % n + 1
+			local i = at == 0 and 1 or at + d
+			-- **In a view that scrolls, past it and never round**
+			-- ([STARPORT_LIST_FILL]): at its last item Down scrolls half a
+			-- view, and at its end goes on to the item under it, or
+			-- stops; an item further than the view's edge is scrolled to
+			-- half a view at a time, nothing between skipped unread. Up
+			-- the same. A page that does not scroll wraps around.
+			local cur, nsc = scs[at], scs[i]
+			local half = cur and math.floor(cur.height() / 2)
+			if cur and nsc ~= cur then
+				local top = cur.top()
+				cur.set_top(top + d * half)
+				if cur.top() ~= top then
+					return
+				end
+			elseif cur and items[i] and not in_view(cur, items[i]) then
+				local e, top, h = items[i], cur.top(), cur.height()
+				local need = d > 0 and y_in(cur, e) + e.height - top - h or
+						top - y_in(cur, e)
+				cur.set_top(top + d * math.min(half, need))
+				if need > half and cur.top() ~= top then
+					return
+				end
+			end
+			if not items[i] then
+				if cur or scs[(at - 1 + d) % n + 1] then
+					return
+				end
+				i = (at - 1 + d) % n + 1
+			end
 			items[i]:SetFocus(true)
+			if scs[i] then
+				show_in(scs[i], items[i])
+			end
 			-- Keys come several in a frame: kept now, not at the next Update
 			if side == 1 then
 				page.left_at = i
@@ -848,10 +951,16 @@ function M.safe.list_view(parent, width, height, options)
 	list:SetFixedWidth(width)
 	list.enabled = true
 	local view = {viewport = viewport, list = list}
+	-- keyboard_page knows it by its name as a view that scrolls
+	list_view_serial = list_view_serial + 1
+	local name = "list_view_" .. list_view_serial
+	viewport:SetName(name)
+	list_views[name] = view
 	local subs = {}
 	local function on(event, fn)
 		subs[event] = magic.SubscribeToEvent(event, function(t, d)
 			if gone(viewport) then
+				list_views[name] = nil
 				for e, sub in pairs(subs) do
 					magic.UnsubscribeFromEvent(e, sub)
 				end
@@ -975,13 +1084,7 @@ function M.safe.list_view(parent, width, height, options)
 		list:SetPosition(0, -top)
 	end
 	function view:show(e)
-		local y = e.position.y
-		local top = -list.position.y
-		if y < top then
-			view:scroll(y - top)
-		elseif y + e.height > top + viewport.height then
-			view:scroll(y + e.height - top - viewport.height)
-		end
+		show_in(scroller(viewport, "UIElement"), e)
 	end
 	return view
 end
