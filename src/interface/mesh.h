@@ -201,6 +201,12 @@ namespace interface
 		// default. For every mesh made after the call, in this process.
 		void set_bounce_color(float r, float g, float b);
 
+		// The unpacked layout's alpha as the packed one's two nibbles, the
+		// sky high and the shade low, its rgb as it is: a sealed cave's
+		// corners for extensions/luanti_client's pbr ([CAVE_EXPOSURE_FLOOR]).
+		// For every mesh made after the call, in this process.
+		void set_alpha_nibbles(bool on);
+
 		// A chunk's column heights for a HorizonMap: the local y of the
 		// highest voxel with an edge material that is not a cutout, per
 		// column, HORIZON_NONE where the column has none; w*d int16_t in

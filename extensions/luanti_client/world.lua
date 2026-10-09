@@ -604,8 +604,11 @@ function M.new(magic, buildat, log, options)
 	-- these units (0.00125) rounds to nought there. The floor is the
 	-- shader's CaveAmbient instead, set with the sky visibility below
 	-- ([CAVE_EXPOSURE_FLOOR]).
+	-- And the mesh's alpha in two nibbles, the sky and the shade, so the
+	-- floor keeps a cave's corners where sky times shade is nought
 	if pbr then
 		buildat.set_mesh_bounce(0, 0, 0)
+		buildat.set_mesh_alpha_nibbles(true)
 	end
 	-- The render's moon, a 4100 K lamp; the cold blue is the other modes'
 	local PBR_MOON_COLOR = magic.Color(1.0, 0.86, 0.70)
@@ -1702,7 +1705,7 @@ function M.new(magic, buildat, log, options)
 	-- Where the camera was last frame, to tell a step from a teleport
 	local vis_at = nil
 	local cave_floor_now = nil
-	local CAVE_FLOOR_GAIN = 0.3
+	local CAVE_FLOOR_GAIN = 0.48
 
 	local function update_sky_visibility()
 		if not vis then return end
@@ -1721,9 +1724,9 @@ function M.new(magic, buildat, log, options)
 		-- for vanilla's chamber reading, which also counts daylit faces
 		-- in sight; a cave lit round a corner reads darker here.
 		-- CAVE_FLOOR_GAIN is measured, not derived: at vanilla's value the
-		-- closed cave read 43/255 to vanilla's 27.7, flat where vanilla's
-		-- has its corners (the unpacked mesh carries no occlusion where
-		-- no sky reaches); at 0.3 of it pbr_pair reads 20.4 to 21.6.
+		-- closed cave read 43/255 to vanilla's 27.7; with the shade on it
+		-- (the alpha's low nibble), at 0.48 of it pbr_pair reads 20.2 to
+		-- 21.3, the corners seen.
 		-- Set only on a change: set_param walks the render path.
 		local cf = PHYS.cave_floor * UNITS * CAVE_FLOOR_GAIN *
 				(1 - math.min(1, vis:most()))
@@ -3765,6 +3768,7 @@ function M.new(magic, buildat, log, options)
 	function self:close()
 		if pbr then
 			buildat.set_mesh_bounce(nil)
+			buildat.set_mesh_alpha_nibbles(false)
 		end
 		for key, block in pairs(blocks) do
 			if block.node then

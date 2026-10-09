@@ -2134,6 +2134,13 @@ function buildat.safe.set_mesh_bounce(r, g, b)
 	__buildat_set_mesh_bounce(r, g, b)
 end
 
+-- set_mesh_alpha_nibbles(on): the unpacked mesher's alpha as the sky and the
+-- shade in a nibble each, for meshes made after it. See src/interface/mesh.h
+-- set_alpha_nibbles()
+function buildat.safe.set_mesh_alpha_nibbles(on)
+	__buildat_set_mesh_alpha_nibbles(on == true)
+end
+
 -- column_heights(buffer, voxel_reg) -> string; see src/lua_bindings/mesh.cpp
 function buildat.safe.column_heights(safe_buffer, ...)
 	local buffer

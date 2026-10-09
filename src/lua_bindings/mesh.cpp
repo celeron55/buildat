@@ -937,6 +937,12 @@ void set_mesh_bounce(float r, float g, float b)
 	interface::mesh::set_bounce_color(r, g, b);
 }
 
+// set_mesh_alpha_nibbles(on): see interface/mesh.h set_alpha_nibbles()
+void set_mesh_alpha_nibbles(bool on)
+{
+	interface::mesh::set_alpha_nibbles(on);
+}
+
 void init_mesh(lua_State *L)
 {
 	using namespace luabind;
@@ -948,6 +954,7 @@ void init_mesh(lua_State *L)
 			LUABIND_FUNC(set_image_data),
 			LUABIND_FUNC(column_heights),
 			LUABIND_FUNC(set_mesh_bounce),
+			LUABIND_FUNC(set_mesh_alpha_nibbles),
 			LUABIND_FUNC(set_simple_voxel_model),
 			LUABIND_FUNC(set_8bit_voxel_geometry),
 			LUABIND_FUNC(set_voxel_geometry),

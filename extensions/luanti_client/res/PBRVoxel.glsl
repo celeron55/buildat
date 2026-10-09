@@ -184,6 +184,16 @@ uniform float cPackedSky;
 // voxel_shading.set_shadow_kinds(). Unset reads as 0.
 uniform float cShadowKinds;
 
+// The mesher's shade -- corners, rays, face -- in the low nibble of this
+// client's alpha, in 0...1 as the packed layout's b: what the cave floor
+// takes, since where no sky reaches the sky times the shade is nought
+// ([CAVE_EXPOSURE_FLOOR])
+float ShadeOfAlpha(float a)
+{
+    float bits = floor(a * 255.0 + 0.5);
+    return (bits - floor(bits / 16.0) * 16.0) / 15.0;
+}
+
 // (gate, share): the nibble the sun is gated by and the sky share the
 // ambient is scaled by, out of the vertex alpha in either layout
 vec2 SkyOfAlpha(float a)
@@ -215,7 +225,12 @@ vec2 SkyOfAlpha(float a)
         float sky = hi / 15.0;
         return vec2(sky, lo / 15.0 * sky * sky * sky);
     }
-    return vec2(a, a);
+    // This client's mesh: the same two nibbles (world.lua
+    // set_mesh_alpha_nibbles), read back as the sky times the shade it
+    // was before them; the shade over FACE_SHADE's top of 1.15
+    float sky = floor(floor(a * 255.0 + 0.5) / 16.0) / 15.0;
+    float s = min(sky * ShadeOfAlpha(a) * 1.15, 1.0);
+    return vec2(s, s);
 }
 
 #if defined(NORMALMAP)
@@ -487,7 +502,7 @@ void VS()
                     (1.0 - ShapeSkylight(sky.x)) * shade +
                 cGroundLight * (0.5 - 0.5 * vNormal.y) *
                     (ShapeSkylight(sky.x) * groundSeen + interior) +
-                cCaveAmbient * shade;
+                cCaveAmbient * (isPacked ? shade : ShadeOfAlpha(iColor.a));
         #endif
         vSkyVisibility = ShapeSkylight(SkyOfAlpha(iColor.a).x);
 

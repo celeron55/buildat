@@ -737,9 +737,18 @@ static bool occludes_sky(VoxelVolume &volume,
 // its level: 1.17/3.2/6.6 of the render at the near wall, was 2/5/11)
 static const float SHADE_FLOOR = 0.1f;
 
+// The packed layout's alpha without its rgb (set_alpha_nibbles()): what
+// keeps the shade where no sky reaches, which sky times shade does not
+static std::atomic<bool> alpha_nibbles{false};
+
+void set_alpha_nibbles(bool on)
+{
+	alpha_nibbles = on;
+}
+
 static float sky_alpha(float sky_f, float shade, bool packed)
 {
-	if(!packed)
+	if(!packed && !alpha_nibbles)
 		return sky_f * shade;
 	float s = shade / 1.15f; // FACE_SHADE's top, so a lit top is full
 	if(s > 1.0f) s = 1.0f;
