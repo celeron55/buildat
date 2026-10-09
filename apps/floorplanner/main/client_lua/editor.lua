@@ -2594,7 +2594,7 @@ end
 
 local function build_toolbar()
 	if toolbar then
-		toolbar:Remove()
+		panel.discard(toolbar)
 	end
 	-- Rows of buttons, as many as the screen's width needs ([FP_TOUCH] 2);
 	-- one on a desktop's. A touchscreen has no keys: no key in the names,
@@ -2765,7 +2765,7 @@ end
 
 local function build_props()
 	if props then
-		props:Remove()
+		panel.discard(props)
 	end
 	props = panel.window(magic.HA_RIGHT, magic.VA_TOP, -8, S.panel_y or 50)
 	if panel.folded("props") then
@@ -3599,7 +3599,7 @@ build_palette = function()
 		if M.palette_view then
 			M.palette_scroll = M.palette_view.viewPosition.y
 		end
-		palette_win:Remove()
+		panel.discard(palette_win)
 	end
 	M.palette_view = nil
 	palette_win = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, S.panel_y or 50)
@@ -3843,7 +3843,7 @@ end
 -- or building
 place.build_window = function()
 	if place.win then
-		place.win:Remove()
+		panel.discard(place.win)
 		place.win = nil
 	end
 	if not S.layouts_open then
@@ -7108,6 +7108,7 @@ function M.update(dt)
 		M.keyed_win = E.pause_win
 		panel.keyboard_menu(E.pause_win)
 	end
+	panel.sweep()
 	E.fit_pause()
 	if S.panels_stale and not doc.typing() then
 		refresh_panels()

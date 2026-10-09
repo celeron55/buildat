@@ -501,6 +501,22 @@ magic.SubscribeToEvent("MouseMove", function()
 	end
 end)
 
+-- A window built anew: hidden now, removed on the next M.sweep. A dropdown's
+-- pick rebuilds a panel while its popup is modal, and the engine then puts
+-- the window it was in back in the root (UI::SetElementModal's revert):
+-- removed at once, it stayed there, a second panel on top of the palette
+local discarded = {}
+function M.discard(w)
+	w.visible = false
+	discarded[#discarded + 1] = w
+end
+function M.sweep()
+	for i = #discarded, 1, -1 do
+		discarded[i]:Remove()
+		discarded[i] = nil
+	end
+end
+
 -- Takes the picker's window down; what is in it is not asked again
 function M.close_picker(w)
 	sheet = nil

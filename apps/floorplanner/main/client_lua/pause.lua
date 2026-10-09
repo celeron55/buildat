@@ -24,14 +24,9 @@ do
 	-- HUD's 90, and the page in a view that scrolls where it is taller
 	-- than the screen (a large UI size on a small window)
 	local view, fit
-	-- Hidden, and removed on the next frame: a dropdown's pick rebuilds
-	-- the page while its popup is modal, and the engine then puts the
-	-- window it was in back in the root (UI::SetElementModal's revert)
-	local replaced = {}
 	local function dialog(title)
 		if E.pause_win then
-			E.pause_win.visible = false
-			replaced[#replaced + 1] = E.pause_win
+			panel.discard(E.pause_win)
 		end
 		E.pause_win = panel.window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
 		E.pause_win.priority = 95
@@ -70,13 +65,7 @@ do
 			view:SetFixedSize(w, h)
 		end
 	end
-	function E.fit_pause()
-		for i = #replaced, 1, -1 do
-			replaced[i]:Remove()
-			replaced[i] = nil
-		end
-		fit()
-	end
+	E.fit_pause = fit
 
 	-- **The plan's settings**, everyone's in it (user: out of the
 	-- properties panel, which is for the selection and the tools, and a
@@ -554,7 +543,7 @@ do
 	-- The pause menu makes way for one, and its Back brings it back.
 	local function account_page(open)
 		if E.pause_win then
-			E.pause_win:Remove()
+			panel.discard(E.pause_win)
 			E.pause_win = nil
 		end
 		open(function() open_pause() end)
@@ -768,7 +757,7 @@ do
 	close_pause = function()
 		E.doc.accounts.close_page()
 		if E.pause_win then
-			E.pause_win:Remove()
+			panel.discard(E.pause_win)
 			E.pause_win = nil
 		end
 		S.paused = false
