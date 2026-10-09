@@ -749,8 +749,9 @@ const Value json::load_file(const char *path, json_error_t *error){
 	}
 	std::ifstream t(path);
 	if(!t.good()){
-		snprintf(error->text, sizeof(error->text), "Failed to open file [%s]",
-				path);
+		if(error)
+			snprintf(error->text, sizeof(error->text),
+					"Failed to open file [%s]", path);
 		return Value();
 	}
 	t.seekg(0, std::ios::end);
