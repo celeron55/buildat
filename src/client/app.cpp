@@ -50,11 +50,23 @@ EM_JS(int, web_dgram_open, (const char *url_p), {
 		d.out.forEach(function(m){ d.ws.send(m); });
 		d.out = [];
 	};
-	// simplified: what the game does not read in 4096 datagrams is lost,
+	// simplified: what the game does not read in 16384 datagrams is lost,
 	// as a full UDP buffer loses it
 	d.ws.onmessage = function(e){
-		if(d.q.length < 4096)
-			d.q.push(new Uint8Array(e.data));
+		if(d.q.length >= 16384)
+			return;
+		var m = new Uint8Array(e.data);
+		// [ACK_OFF_FRAME]: as network.cpp's ack_thread, a reliable packet
+		// of Luanti's acked as it arrives rather than in the game's frame;
+		// only one kept, as an acked one is never resent
+		if(d.ack && m.length >= 10 && m[0] == 0x4f && m[1] == 0x45 &&
+				m[2] == 0x74 && m[3] == 0x03 && m[6] < 3 && m[7] == 3){
+			d.ws.send(new Uint8Array([0x4f, 0x45, 0x74, 0x03,
+					d.peer >> 8, d.peer & 255, m[6], 0, 0, m[8], m[9]]));
+			if(m.length >= 14 && m[10] == 0 && m[11] == 1)
+				d.peer = (m[12] << 8) | m[13];
+		}
+		d.q.push(m);
 	};
 	d.ws.onclose = function(e){
 		d.state = 'closed: ' + (e.reason ? 'the bridge refused it: ' + e.reason :
@@ -71,6 +83,13 @@ EM_JS(void, web_dgram_send, (int id, const char *p, int n), {
 		d.ws.send(m);
 	else if(d.state === 'connecting' && d.out.length < 256)
 		d.out.push(m);
+});
+EM_JS(void, web_dgram_ack_luanti, (int id), {
+	var d = (Module['buildatDgram'] || {})[id];
+	if(d){
+		d.ack = true;
+		d.peer = 0;
+	}
 });
 EM_JS(int, web_dgram_peek, (int id), {
 	var d = (Module['buildatDgram'] || {})[id];

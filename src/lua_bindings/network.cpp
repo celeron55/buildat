@@ -18,6 +18,11 @@
 #include <string.h>
 #include <stdlib.h> // atoi()
 #include <vector>
+#include <deque>
+#include <mutex>
+#include <thread>
+#include <atomic>
+#include <chrono>
 #define MODULE "lua_bindings"
 
 // Sockets for Lua. This is the raw layer; it does not ask the user about
@@ -108,6 +113,14 @@ struct LuaSocket
 	ss_ m_error;
 	ss_ m_peer_ip;
 	int m_peer_port = 0;
+
+	// [ACK_OFF_FRAME]: Luanti's reliable packets acked as they arrive, by a
+	// thread that reads the socket into m_queue for receive()
+	std::thread m_thread;
+	std::atomic<bool> m_stop{false};
+	std::mutex m_mutex;
+	std::deque<ss_> m_queue;
+	ss_ m_thread_error;
 
 	LuaSocket(bool udp, const ss_ &remote):
 		m_udp(udp), m_remote(remote)
@@ -306,6 +319,21 @@ struct LuaSocket
 	{
 		if(m_fd == -1)
 			return "";
+		if(m_thread.joinable()){
+			ss_ error;
+			{
+				std::lock_guard<std::mutex> lock(m_mutex);
+				if(!m_queue.empty()){
+					ss_ d = std::move(m_queue.front());
+					m_queue.pop_front();
+					return d;
+				}
+				error = m_thread_error;
+			}
+			if(!error.empty())
+				fail(error);
+			return "";
+		}
 		std::vector<char> buf(RECEIVE_BUFFER_SIZE);
 		int r = recv(m_fd, &buf[0], buf.size(), 0);
 		if(r == 0){
@@ -324,8 +352,86 @@ struct LuaSocket
 		return ss_(&buf[0], r);
 	}
 
+	// ack_luanti(): from now on a thread reads the socket and acks each of
+	// Luanti's reliable packets at once, as Luanti's own client does: an ack
+	// that waits for the game's next frame keeps the server's window at its
+	// minimum. receive() hands on what it read, acked or not, as before.
+	// The game still acks too, unless it leaves that to this.
+	bool ack_luanti()
+	{
+		if(m_fd == -1 || !m_udp || m_thread.joinable())
+			return false;
+		m_thread = std::thread(&LuaSocket::ack_thread, this, m_fd);
+		return true;
+	}
+
+	void ack_thread(int fd)
+	{
+		static const size_t MAX_QUEUED = 16384;
+		std::vector<char> buf(RECEIVE_BUFFER_SIZE);
+		uint16_t peer_id = 0; // Luanti's PEER_ID_INEXISTENT
+		while(!m_stop){
+			// A datagram acked is one the server never resends, so none is
+			// dropped here: while the game is behind, what arrives waits
+			// unread and unacked in the socket's buffer instead
+			bool full;
+			{
+				std::lock_guard<std::mutex> lock(m_mutex);
+				full = m_queue.size() >= MAX_QUEUED;
+			}
+			if(full){
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+				continue;
+			}
+			fd_set rfds;
+			FD_ZERO(&rfds);
+			FD_SET(fd, &rfds);
+			struct timeval tv = {0, 50000}; // How soon close() is heard
+			int r = select(fd + 1, &rfds, NULL, NULL, &tv);
+			if(r < 0 && !would_block()){
+				std::lock_guard<std::mutex> lock(m_mutex);
+				m_thread_error = "select: "+last_socket_error();
+				return;
+			}
+			while(r > 0){
+				int n = recv(fd, &buf[0], buf.size(), 0);
+				if(n <= 0){
+					if(n < 0 && !would_block()){
+						std::lock_guard<std::mutex> lock(m_mutex);
+						m_thread_error = "recv: "+last_socket_error();
+						return;
+					}
+					break;
+				}
+				const unsigned char *d = (const unsigned char*)&buf[0];
+				// u32 protocol id | u16 peer id | u8 channel | u8 type 3
+				// (reliable) | u16 seqnum | the packet inside
+				if(n >= 10 && d[0] == 0x4f && d[1] == 0x45 && d[2] == 0x74 &&
+						d[3] == 0x03 && d[6] < 3 && d[7] == 3){
+					// The game's order: the ack, then a SET_PEER_ID in it
+					const unsigned char ack[11] = {0x4f, 0x45, 0x74, 0x03,
+						(unsigned char)(peer_id >> 8), (unsigned char)peer_id,
+						d[6], 0, 0, d[8], d[9]};
+					// simplified: an ack the full send buffer would not take
+					// is lost, and the server resends what it covered
+					::send(fd, (const char*)ack, sizeof ack, 0);
+					if(n >= 14 && d[10] == 0 && d[11] == 1)
+						peer_id = (d[12] << 8) | d[13];
+				}
+				std::lock_guard<std::mutex> lock(m_mutex);
+				m_queue.emplace_back(&buf[0], n);
+				if(m_queue.size() >= MAX_QUEUED)
+					break;
+			}
+		}
+	}
+
 	void close()
 	{
+		if(m_thread.joinable()){
+			m_stop = true;
+			m_thread.join();
+		}
 		if(m_fd != -1){
 			close_socket_fd(m_fd);
 			m_fd = -1;
@@ -371,6 +477,7 @@ void init_network(lua_State *L)
 			.def("local_port", &LuaSocket::local_port)
 			.def("send", &LuaSocket::send)
 			.def("receive", &LuaSocket::receive)
+			.def("ack_luanti", &LuaSocket::ack_luanti)
 			.def("close", &LuaSocket::close),
 		def("__buildat_tcp_connect", &tcp_connect),
 		def("__buildat_udp_connect", &udp_connect)

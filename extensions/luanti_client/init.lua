@@ -596,6 +596,8 @@ local function show_client(host, port, name, password, mode, origin)
 		-- time after asking, because a game's whole media is tens of
 		-- megabytes and takes longer than that to arrive.
 		local media_progress_us = nil
+		-- When the first file was asked for, until the last one is in
+		local media_asked_us = nil
 		local registry_stale = false
 
 		-- Composed textures go beside the server's own files, under a name
@@ -1068,8 +1070,16 @@ local function show_client(host, port, name, password, mode, origin)
 		end
 
 		client.on_media = function(files)
-			store:store(files)
+			local _, missing = store:store(files)
 			media_progress_us = buildat.get_time_us()
+			-- How long the files took, which is the network's part of the
+			-- wait ([ACK_OFF_FRAME] measured by it)
+			if missing == 0 and media_asked_us then
+				log:info("All media in, "..string.format("%.1f",
+						(media_progress_us - media_asked_us) / 1000000)..
+						" s after the first request")
+				media_asked_us = nil
+			end
 			-- Everything announced was asked for before the registry was
 			-- built the first time, so a file arriving after that is one the
 			-- announcement did not cover -- a media push, or a name a form or
@@ -2994,6 +3004,7 @@ local function show_client(host, port, name, password, mode, origin)
 				end
 				client:request_media(batch)
 				media_progress_us = buildat.get_time_us()
+				media_asked_us = media_asked_us or media_progress_us
 			elseif registry_stale and node_defs then
 				local waited = media_progress_us and
 						(buildat.get_time_us() - media_progress_us) /

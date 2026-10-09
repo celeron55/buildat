@@ -1974,7 +1974,8 @@
 	// web_dgram_open above); trusted Lua's (the network extension).
 	// ("open", url) -> id; ("send", id, data); ("recv", id) -> a datagram,
 	// "" when none; ("state", id) -> "connecting", "open" or "closed: why";
-	// ("close", id). Nothing natively.
+	// ("ack_luanti", id): see network.cpp's ack_luanti; ("close", id).
+	// Nothing natively.
 	static int l_web_dgram(lua_State *L)
 	{
 #ifdef __EMSCRIPTEN__
@@ -2000,6 +2001,8 @@
 			lua_pushstring(L, s);
 			free(s);
 			return 1;
+		} else if(op == "ack_luanti"){
+			web_dgram_ack_luanti(id);
 		} else if(op == "close"){
 			web_dgram_close(id);
 		}

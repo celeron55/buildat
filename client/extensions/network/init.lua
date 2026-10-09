@@ -595,6 +595,12 @@ local function wrap_udp(socket, uri)
 		return data
 	end
 
+	-- Not LuaSocket's: Luanti's reliable packets acked as they arrive,
+	-- off the game's frame ([ACK_OFF_FRAME]); true if the socket does it
+	function w:ack_luanti()
+		return socket:ack_luanti()
+	end
+
 	function w:receivefrom(size)
 		local data, err = w.receive(self, size)
 		if not data then
@@ -650,6 +656,10 @@ local function web_dgram(bridge, host, port)
 		return #data
 	end
 	function s:receive() return __buildat_web_dgram("recv", id) end
+	function s:ack_luanti()
+		__buildat_web_dgram("ack_luanti", id)
+		return true
+	end
 	function s:close() __buildat_web_dgram("close", id) end
 	return s
 end

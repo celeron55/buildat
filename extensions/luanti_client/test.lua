@@ -406,6 +406,22 @@ do
 	assert(#bs.sent == 3, "connection: the queue was sent twice")
 end
 
+-- A socket that acks for us ([ACK_OFF_FRAME]) gets no ack from the frame,
+-- and the packet is still handed on
+do
+	local as = fake_socket()
+	function as:ack_luanti() return true end
+	local ac = connection.new(as, log)
+	local got_here = nil
+	ac.on_data = function(data) got_here = data end
+	as.incoming = {datagram(1, 0, reliable(connection.SEQNUM_INITIAL,
+			original("acked")))}
+	ac:update(0.01)
+	ac:pump(1000000000)
+	assert(got_here == "acked", "connection: a socket-acked packet was lost")
+	assert(#as.sent == 0, "connection: acked although the socket does")
+end
+
 print("connection: ok")
 -- nodedef.lua
 

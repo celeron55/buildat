@@ -80,6 +80,9 @@ function M.new(socket, log)
 		}
 	end
 	local time_since_send = 0
+	-- [ACK_OFF_FRAME]: a socket that acks for us does it as datagrams arrive,
+	-- not once a frame
+	local socket_acks = socket.ack_luanti and socket:ack_luanti()
 
 	-- Datagrams the socket would not take yet, oldest first
 	local outgoing = {}
@@ -316,7 +319,9 @@ function M.new(socket, log)
 		local payload = r:rest()
 		-- Acknowledge even a duplicate; the ack for the first one may be what
 		-- got lost
-		send_control(channel, CONTROLTYPE_ACK, seqnum)
+		if not socket_acks then
+			send_control(channel, CONTROLTYPE_ACK, seqnum)
+		end
 		if seqnum == c.next_incoming_seqnum then
 			c.next_incoming_seqnum = (seqnum + 1) % 65536
 			process_packet(channel, payload)
