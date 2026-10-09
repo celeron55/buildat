@@ -6,9 +6,11 @@
 #include "client/config.h"
 #include "interface/fs.h"
 #include <tolua++.h>
+#include <cstring>
 #include <Context.h>
 #include <Scene.h>
 #include <Image.h>
+#include <MemoryBuffer.h>
 #include <Profiler.h>
 #include <ResourceCache.h>
 #include <Camera.h>
@@ -261,6 +263,32 @@ static int l_image_set_data(lua_State *L)
 	return 0;
 }
 
+// image_load_data(image, data: string) -> whether it was read
+// **A PNG or a JPEG from its bytes** ([HEARTH_ATTACHMENTS]): a picture a
+// server sends at run time, as Hearth's thumbnails, not a resource of the
+// cache. At most 1 MiB, and 1024 pixels a side once read; the decoder
+// is the one every texture a server sends goes through, its 8192 a side
+// the cap on what a small file may unpack to.
+static int l_image_load_data(lua_State *L)
+{
+	tolua_Error tolua_err;
+	GET_TOLUA_STUFF(image, 1, Image);
+	size_t len = 0;
+	const char *data = lua_tolstring(L, 2, &len);
+	if(!data)
+		throw Exception("image_load_data: data must be a string");
+	bool ok = len >= 4 && len <= 1024 * 1024 &&
+			(memcmp(data, "\x89PNG", 4) == 0 ||
+			memcmp(data, "\xff\xd8\xff", 3) == 0);
+	if(ok){
+		MemoryBuffer buf(data, (unsigned)len);
+		ok = image->Load(buf) && image->GetWidth() <= 1024 &&
+				image->GetHeight() <= 1024;
+	}
+	lua_pushboolean(L, ok);
+	return 1;
+}
+
 // get_voxel_data(node) -> string, or nil for a node without the var
 static int l_get_voxel_data(lua_State *L)
 {
@@ -345,6 +373,7 @@ void init_misc_urho3d(lua_State *L)
 	DEF_BUILDAT_FUNC(set_voxel_data);
 	DEF_BUILDAT_FUNC(get_voxel_data);
 	DEF_BUILDAT_FUNC(image_set_data);
+	DEF_BUILDAT_FUNC(image_load_data);
 	DEF_BUILDAT_FUNC(hold_ref);
 }
 

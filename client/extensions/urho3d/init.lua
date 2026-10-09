@@ -588,6 +588,13 @@ Safe.image_set_data = wrap_function({"Image", "number", "number", "number",
 	__buildat_image_set_data(image, w, h, components, data)
 end)
 
+-- **A PNG or JPEG from its bytes** ([HEARTH_ATTACHMENTS]), as a server
+-- sends a picture at run time: false for anything else, over 1 MiB or
+-- over 1024 pixels a side
+Safe.image_load_data = wrap_function({"Image", "string"}, function(image, data)
+	return __buildat_image_load_data(image, data)
+end)
+
 -- The viewports the user's graphics preferences are applied to, as against
 -- the raw renderer:SetViewport() ones which are drawn the way the game says
 -- and nothing else. Use this instead of renderer:SetViewport(): the engine
