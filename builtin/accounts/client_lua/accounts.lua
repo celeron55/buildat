@@ -809,6 +809,66 @@ M.page_field = field
 
 local WARN = magic.Color(rgb("warn"))
 
+--
+-- "Open to LAN" ([SECURITY_RUN_1], the user's call; [ACCOUNTS_LAN]): the
+-- launcher's server listens on this machine only until its owner opens it
+-- here, from the Server window or an app's own page (M.lan_row(w)).
+-- M.lan is nil, "opening", or what the server answered: "1", or why not.
+--
+M.lan = nil
+-- The row shown last, filled again when the answer comes
+local lan_shown = nil
+
+local function lan_text()
+	if M.lan == "opening" then
+		return "Opening to the LAN..."
+	elseif M.lan ~= "1" then
+		return "Not opened to the LAN: " .. tostring(M.lan)
+	end
+	local port = buildat.local_server_state()
+	local ip = buildat.lan_address()
+	if ip and port then
+		return "Open to the LAN at " .. ip .. ":" .. port
+	end
+	return "Open to the LAN" .. (port and (", port " .. port) or "")
+end
+
+local function lan_fill(r)
+	r.el:RemoveAllChildren()
+	local failed = M.lan ~= nil and M.lan ~= "1" and M.lan ~= "opening"
+	if M.lan == nil or failed then
+		button(r.el, "Open to LAN", function()
+			M.lan = "opening"
+			buildat.send_packet("accounts:open_lan", "")
+			lan_fill(r)
+		end)
+	end
+	if M.lan ~= nil then
+		local l = page_text(r.el, lan_text(), failed and WARN or nil)
+		if page_windows[r.w] then
+			l:SetFixedWidth(r.w.width - 32)
+		end
+	end
+end
+
+-- The button, then what it came to, in `w`: a page of the Server window
+-- or an app's own (vanilla's pause menu)
+function M.lan_row(w)
+	local el = w:CreateChild("UIElement")
+	el:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(0, 0, 0, 0))
+	lan_shown = {el = el, w = w}
+	lan_fill(lan_shown)
+end
+
+buildat.sub_packet("accounts:lan", function(data)
+	M.lan = data
+	log:info("Open to LAN: " .. lan_text())
+	if lan_shown then
+		-- simplified: a row since removed is filled to no effect
+		pcall(lan_fill, lan_shown)
+	end
+end)
+
 -- The Starport page's listing as being edited, kept over its redraws (a
 -- dropdown's choice redraws it); nil to take the server's config again
 local draft = nil
@@ -2102,6 +2162,15 @@ local function server_entries()
 	add("Mine", "Account", "account", function()
 		account_page(top_back())
 	end)
+	if M.hello and M.hello["local"] == 1 then
+		add("Mine", "Open to LAN", "lan", function()
+			local w = M.server_open("Open to LAN")
+			page_text(w, "Players on this network find the server in " ..
+					"their launcher's \"On this network\" and join it; " ..
+					"until then it listens on this computer only.")
+			M.lan_row(w)
+		end)
+	end
 	-- The users list arriving says a moderator or the admin (the server
 	-- answers no one else); a moderator's is the Accounts page only
 	if M.users then

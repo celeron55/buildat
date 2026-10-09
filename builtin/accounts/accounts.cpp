@@ -16,6 +16,7 @@
 #include "interface/os.h"
 #include "interface/http.h"
 #include "interface/fs.h"
+#include "interface/tcpsocket.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
 #include <cereal/types/vector.hpp>
@@ -445,6 +446,11 @@ struct Module: public interface::Module, public Interface
 	// Without a token -- a server started by hand with launcher=1, which
 	// the tests do -- a loopback peer is local, as it was.
 	ss_ m_owner_token;
+	// [ACCOUNTS_LAN] "Open to LAN" from the Server window: whether it is,
+	// and the name it is announced under (the app's, or set_lan_name()'s)
+	bool m_lan_open = false;
+	ss_ m_lan_name;
+	bool m_lan_account = true;
 	std::set<PeerId> m_owners;
 	std::map<PeerId, Peer> m_peers;
 	// A logged in account's wrong old passwords, by its name
@@ -544,7 +550,8 @@ struct Module: public interface::Module, public Interface
 		for(const char *name : {"accounts:owner_token",
 				"accounts:get_hello", "accounts:login",
 				"accounts:admin", "accounts:passwd", "accounts:logout",
-				"accounts:totp", "accounts:link_starport"})
+				"accounts:totp", "accounts:link_starport",
+				"accounts:open_lan"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+name));
 	}
@@ -573,6 +580,8 @@ struct Module: public interface::Module, public Interface
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/accounts:link_starport",
 				on_link_starport, network::Packet)
+		EVENT_TYPEN("network:packet_received/accounts:open_lan",
+				on_open_lan, network::Packet)
 	}
 
 	// One key of what the launcher asked for through the server's -u
@@ -1181,8 +1190,60 @@ struct Module: public interface::Module, public Interface
 
 	void on_get_hello(const network::Packet &packet)
 	{
-		if(m_peers.count(packet.sender))
-			send_hello(packet.sender);
+		if(!m_peers.count(packet.sender))
+			return;
+		send_hello(packet.sender);
+		// A window opened again after a reconnect says it is open
+		if(m_lan_open && is_local(packet.sender))
+			send(packet.sender, "accounts:lan", "1");
+	}
+
+	// "Open to LAN" ([SECURITY_RUN_1], the user's call; [ACCOUNTS_LAN]): a
+	// launched server listens on 127.0.0.1 until its owner opens it from
+	// the Server window; then on the machine's LAN address too, the same
+	// port, and it is announced there ([LAN_DISCOVERY]). The answer,
+	// accounts:lan, is "1" or why not. A server the launcher did not start
+	// listens where its config says and has no owner to ask.
+	// simplified: the address the default route leaves by, one of them;
+	// a machine on two LANs is opened on that one. Every interface would
+	// be getifaddrs(), which the box's seccomp may not allow.
+	void on_open_lan(const network::Packet &packet)
+	{
+		if(!is_local(packet.sender)){
+			log_w(MODULE, "Open to LAN refused to peer %i: not the owner",
+					(int)packet.sender);
+			return;
+		}
+		if(m_lan_open)
+			return send(packet.sender, "accounts:lan", "1");
+		ss_ error;
+		const ss_ lan = interface::local_lan_address();
+		if(lan.empty())
+			error = "this machine is on no network";
+		else
+			network::access(m_server, [&](network::Interface *inetwork){
+				m_lan_open = inetwork->listen_on(lan, &error);
+				if(m_lan_open)
+					inetwork->lan_announce(lan_name(), m_lan_account);
+			});
+		log_i(MODULE, "Open to LAN: %s", m_lan_open ?
+				("listening at "+lan+" too").c_str() : cs(error));
+		send(packet.sender, "accounts:lan", m_lan_open ? ss_("1") : error);
+	}
+
+	ss_ lan_name()
+	{
+		return m_lan_name.empty() ? m_server->get_app_id() : m_lan_name;
+	}
+
+	void set_lan_name(const ss_ &name, bool account)
+	{
+		m_lan_name = name;
+		m_lan_account = account;
+		if(m_lan_open)
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->lan_announce(lan_name(), m_lan_account);
+			});
 	}
 
 	// simplified: the password arrives in the clear on a native client's

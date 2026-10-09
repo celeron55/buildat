@@ -13,7 +13,6 @@
 #include "core/log.h"
 #include "interface/module.h"
 #include "interface/server.h"
-#include "interface/tcpsocket.h"
 #include "interface/server_config.h"
 #include "interface/event.h"
 #include "interface/fs.h"
@@ -168,8 +167,6 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/launch:untrusted"));
 		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:open_lan"));
-		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:open"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:save_info"));
@@ -230,8 +227,6 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:packet_received/main:punch_object",
 				on_punch_object, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:place", on_place,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/main:open_lan", on_open_lan,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:get_saves", on_get_saves,
 				network::Packet)
@@ -347,9 +342,6 @@ struct Module: public interface::Module
 	{
 		return !name.empty() && name[0] != '_';
 	}
-
-	// Open to the LAN already ("Open to LAN" in the pause menu)
-	bool m_lan_open = false;
 
 	// The launcher's own client, on the launcher's server
 	bool is_owner(network::PeerInfo::Id peer)
@@ -904,42 +896,6 @@ struct Module: public interface::Module
 	// game each one says it needs, and every Luanti game there is to choose
 	// from. Flat, with the number of saves leading, because that is what one
 	// array of strings can carry.
-	// "Open to LAN" (the user's call, [SECURITY_RUN_1]): the launcher's
-	// game listens on 127.0.0.1 until the player who started it opens it
-	// from the pause menu; then on the machine's LAN address too, the same
-	// port. Who comes in from there is an ordinary player
-	// (player_name_of()). The answer, main:lan, is "1" or why not.
-	// simplified: the address the default route leaves by, one of them;
-	// a machine on two LANs is opened on that one. Every interface would
-	// be getifaddrs(), which the box's seccomp may not allow.
-	void on_open_lan(const network::Packet &packet)
-	{
-		if(m_public || !is_owner(packet.sender) || m_lan_open)
-			return;
-		ss_ error;
-		bool ok = false;
-		const ss_ lan = interface::local_lan_address();
-		if(lan.empty()){
-			error = "this machine is on no network";
-		} else {
-			network::access(m_server, [&](network::Interface *inetwork){
-				ok = inetwork->listen_on(lan, &error);
-				// Found on the LAN without the address typed
-				// ([LAN_DISCOVERY]); the others are ordinary players, no
-				// account
-				if(ok)
-					inetwork->lan_announce(m_world_name.empty() ? "Luanti" :
-							m_world_name, false);
-			});
-		}
-		m_lan_open = ok;
-		log_i(MODULE, "Open to LAN: %s", ok ? ("listening at "+lan+" too").c_str() :
-				cs(error));
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(packet.sender, "main:lan", ok ? ss_("1") : error);
-		});
-	}
-
 	// The same lines -u holds, read through launch_param() as those are;
 	// the owner's alone, since anyone else's would choose for the owner
 	void on_launch_untrusted(const network::Packet &packet)
@@ -3311,6 +3267,11 @@ struct Module: public interface::Module
 		}
 		m_starting = true;
 		m_world_name = world_name;
+		// Announced under the world's name once open to the LAN; who comes
+		// in from there plays without an account (player_name_of())
+		accounts::access(m_server, [&](accounts::Interface *i){
+			i->set_lan_name(world_name, false);
+		});
 		// [HEARTH_VISITOR_FLOW] The game where it came from, for the
 		// listing: what the ContentDB install wrote beside it
 		ss_ source;

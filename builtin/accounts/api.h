@@ -89,6 +89,10 @@ namespace accounts
 		virtual bool is_local(PeerId peer) = 0;
 		// Whether the launcher started this server
 		virtual bool launched() = 0;
+		// [ACCOUNTS_LAN] the name the server is announced under once its
+		// owner opens it to the LAN (the app id unless set), and whether
+		// joining it needs an account; announced again if open already
+		virtual void set_lan_name(const ss_ &name, bool account) = 0;
 		// Off the server, told why
 		virtual void kick(PeerId peer, const ss_ &why) = 0;
 		// A ban by name, and by the address the name last joined from while

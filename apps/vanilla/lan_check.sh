@@ -44,7 +44,7 @@ def define(t, name):
             len(n).to_bytes(4, "little") + n)
 def peer(send_token):
     s = socket.create_connection(("127.0.0.1", port))
-    out = define(100, "accounts:owner_token") + define(101, "main:open_lan")
+    out = define(100, "accounts:owner_token") + define(101, "accounts:open_lan")
     if send_token is not None:
         out += packet(100, send_token)
     s.sendall(out)
@@ -74,13 +74,16 @@ for i in $(seq 1 30); do
 done
 owners=$(grep -ac "is this server's owner" "$out/srv.log")
 wrong=$(grep -ac "wrong owner token" "$out/srv.log")
+# [ACCOUNTS_LAN] builtin/accounts answers it now, and says whom it refused
+refused=$(grep -ac "Open to LAN refused" "$out/srv.log")
 # [LAN_DISCOVERY]: opened, it announces itself (util/lan_check.sh hears it)
 announced=$(grep -ac "Announced to the LAN as" "$out/srv.log")
-echo "listening without the token: $before, with it: $after; owners $owners, wrong tokens $wrong; announced $announced; stopped on SIGTERM: $stopped"
+echo "listening without the token: $before, with it: $after; owners $owners, wrong tokens $wrong, refused $refused; announced $announced; stopped on SIGTERM: $stopped"
 lan=$(echo "$after" | tr ' ' '\n' | grep -v "^127.0.0.1:" | head -1)
 if [ "$before" = "127.0.0.1:$port" ] && echo "$after" | grep -q "127.0.0.1:$port" &&
 		[ -n "$lan" ] &&
-		[ "$owners" = 1 ] && [ "$wrong" = 1 ] && [ "$announced" = 1 ] &&
+		[ "$owners" = 1 ] && [ "$wrong" = 1 ] && [ "$refused" = 2 ] &&
+		[ "$announced" = 1 ] &&
 		[ "$stopped" = yes ]; then
 	echo PASS
 else

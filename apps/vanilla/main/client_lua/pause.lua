@@ -63,31 +63,6 @@ buildat.sub_packet("main:account", function(data)
 	end
 end)
 
--- "Open to LAN" ([SECURITY_RUN_1], the user's call): the launcher's game
--- listens on this machine only until its player opens it here. nil, or
--- "opening", or what the server answered: "1", or why not.
-local lan = nil
-buildat.sub_packet("main:lan", function(data)
-	lan = data
-	if window then
-		open()
-	end
-end)
-
-local function lan_text()
-	if lan == "opening" then
-		return "Opening to the LAN..."
-	elseif lan ~= "1" then
-		return "Not opened to the LAN: " .. tostring(lan)
-	end
-	local port = buildat.local_server_state()
-	local ip = buildat.lan_address()
-	if ip and port then
-		return "Open to the LAN at " .. ip .. ":" .. port
-	end
-	return "Open to the LAN" .. (port and (", port " .. port) or "")
-end
-
 local function close()
 	if window then
 		window:Remove()
@@ -271,15 +246,7 @@ open = function()
 		end)
 	end
 	if not account.public and account.is_local then
-		if lan == nil then
-			accounts.page_button(w, "Open to LAN", function()
-				lan = "opening"
-				buildat.send_packet("main:open_lan", "")
-				open()
-			end)
-		else
-			accounts.page_text(w, lan_text())
-		end
+		accounts.lan_row(w)
 	end
 	-- A browser tab has no launcher to leave to, and is closed as a tab
 	-- (only the web page sets BUILDAT_PAGE_HTTPS)
