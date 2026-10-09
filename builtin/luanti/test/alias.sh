@@ -55,7 +55,23 @@ core.register_on_mods_loaded(function()
 	end)
 end)
 L
-for r in r1:set r2:read; do
+# And register_alias_force over a node still registered: the old node read
+# back as the new one, and one placed by the old name now is the new one
+cat > "$out/r3.lua" <<L
+core.register_node(":aliascheck:old", {description = "old"})
+core.register_node(":aliascheck:new", {description = "new"})
+core.register_alias_force("aliascheck:old", "aliascheck:new")
+core.register_on_mods_loaded(function()
+	core.emerge_area($P, $P, function(_, _, left)
+		if left > 0 then return end
+		local saved = core.get_node($P).name
+		local q = {x = 4, y = 2001, z = 0}
+		core.set_node(q, {name = "aliascheck:old"})
+		core.log("warning", "aliascheck: forced " .. saved .. " " .. core.get_node(q).name)
+	end)
+end)
+L
+for r in r1:set r2:read r1:set r3:forced; do
 	BUILDAT_LUANTI_GAME="${GAME:-minetest_game}" BUILDAT_LUANTI_SAVE=$save \
 		BUILDAT_LUANTI_LUA="$out/${r%:*}.lua" \
 		start_server "$out/${r%:*}.log" "aliascheck: ${r#*:}" 300 auto \
@@ -65,6 +81,9 @@ for r in r1:set r2:read; do
 	for _ in $(seq 30); do kill -0 $SERVER_PID 2>/dev/null || break; sleep 1; done
 done
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
+forced=$(grep -a "aliascheck: forced" "$out/r3.log" | sed 's/.*aliascheck: forced //')
+echo "forced alias: saved and placed read as: $forced"
+[ "$forced" = "aliascheck:new aliascheck:new" ] || fail "register_alias_force: $forced"
 got=$(grep -a "aliascheck: read" "$out/r2.log" | sed 's/.*aliascheck: read //')
 echo "renamed node read back as: $got"
 [ "$got" = aliascheck:new ] || fail "the saved node under its old name read as $got"

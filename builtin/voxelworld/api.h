@@ -166,10 +166,11 @@ namespace voxelworld
 		virtual void set_save(storage::Save *save, const ss_ &world_name) = 0;
 
 		// Before set_save(): old block name -> the one it is now. A name the
-		// save holds and the game no longer registers is read as the voxel
-		// of the name its alias gives, rather than kept as unknown -- a game
-		// that renamed a node and kept the old name as an alias, as Luanti
-		// remaps a stored block's names ([FEATURE_SWEEP_1009]).
+		// save holds is read as the voxel of the name its alias gives, and
+		// written back under that name -- whether the game still registers
+		// the old one (Luanti's register_alias_force keeps its id) or not
+		// (it would be unknown) -- as Luanti remaps a stored block's names
+		// ([FEATURE_SWEEP_1009]).
 		virtual void set_name_aliases(const std::map<ss_, ss_> &aliases) = 0;
 
 		// Write out every section that has changed since it was read.

@@ -2444,22 +2444,25 @@ struct CInstance: public voxelworld::Instance
 		}
 		// What is left is a name the save has and the game does not register
 		m_save_to_session.resize(m_save_names.size(), 0);
+		// A renamed type, registered or not (Luanti's register_alias_force
+		// keeps the old one's id): the voxel its alias names, written back
+		// under that name (the reverse map below skips this save id)
+		for(size_t i = 1; !m_name_aliases.empty() &&
+				i < m_save_names.size(); i++){
+			auto al = m_name_aliases.find(m_save_names[i].block_name);
+			if(al == m_name_aliases.end() || m_aliased_save_ids.count(i))
+				continue;
+			interface::VoxelName n = m_save_names[i];
+			n.block_name = al->second;
+			const interface::VoxelDefinition *d = m_voxel_reg->get(n);
+			if(d){
+				m_save_to_session[i] = d->id;
+				m_aliased_save_ids.insert(i);
+			}
+		}
 		for(size_t i = 1; i < m_save_names.size(); i++){
 			if(m_save_to_session[i] != 0)
 				continue; // Resolved once and for all: nothing is unregistered
-			// A renamed type: the voxel its alias names, written back under
-			// that name (the reverse map below skips this save id)
-			auto al = m_name_aliases.find(m_save_names[i].block_name);
-			if(al != m_name_aliases.end()){
-				interface::VoxelName n = m_save_names[i];
-				n.block_name = al->second;
-				const interface::VoxelDefinition *d = m_voxel_reg->get(n);
-				if(d){
-					m_save_to_session[i] = d->id;
-					m_aliased_save_ids.insert(i);
-					continue;
-				}
-			}
 			const interface::VoxelDefinition *def =
 					adopt_unknown_voxel(m_save_names[i]);
 			if(!def){
