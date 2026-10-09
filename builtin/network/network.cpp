@@ -632,6 +632,7 @@ struct Module: public interface::Module, public network::Interface
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:tick"));
+		m_server->sub_event(this, Event::t("core:shutdown"));
 
 		// Don't start thread in constructor because in there this module is not
 		// guaranteed to be available by server->access_module()
@@ -646,6 +647,50 @@ struct Module: public interface::Module, public network::Interface
 		EVENT_VOIDN("core:unload", on_unload)
 		EVENT_VOIDN("core:continue", on_continue)
 		EVENT_VOIDN("core:tick", on_tick)
+		EVENT_VOIDN("core:shutdown", on_shutdown)
+	}
+
+	// **A goodbye** ([SERVE_UPDATE_SMOOTH] 4): every game peer is told why
+	// before the server closes. util/serve_latest_release.sh writes
+	// <user>/apps/<app>/shutdown_reason ("updating to 0.6.99") before its
+	// SIGTERM, and then it is a restart, which a client waits out and
+	// rejoins; without the file it is a shutdown. "1" or "0", then the
+	// text. The file is in the app's directory because the box cannot read
+	// the user path's top level.
+	void on_shutdown()
+	{
+		const ss_ path = m_server->get_config().get<ss_>("user_path")+
+				"/apps/"+m_server->get_app_id()+"/shutdown_reason";
+		ss_ reason;
+		{
+			std::ifstream in(path);
+			std::getline(in, reason);
+		}
+		reason = web::trim(reason).substr(0, 200);
+		const bool restart = interface::fs::path_exists(path);
+		if(restart)
+			::remove(path.c_str());
+		const ss_ data = restart ? "1The server is restarting" +
+				(reason.empty() ? ss_() : ": "+reason) :
+				"0The server is shutting down";
+		for(auto &pair : m_peers){
+			if(pair.second.game())
+				send_u(pair.second, "network:goodbye", data);
+		}
+		// simplified: up to a second for a peer that is behind to take it;
+		// one further behind than that leaves without it
+		const int64_t until = interface::os::time_us() + 1000000;
+		while(interface::os::time_us() < until){
+			bool pending = false;
+			for(auto &pair : m_peers){
+				flush_peer(pair.second);
+				pending = pending || (pair.second.game() &&
+						pair.second.out_pending() > 0);
+			}
+			if(!pending)
+				break;
+			interface::os::sleep_us(10000);
+		}
 	}
 
 	// A dedicated server announces itself to the LAN only when its admin

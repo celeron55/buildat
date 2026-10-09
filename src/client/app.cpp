@@ -1712,6 +1712,7 @@ struct CApp: public App, public magic::Application
 	// the leave waits for on_update(), out of the state's own reading
 	bool m_lost_remote = false;
 	ss_ m_lost_remote_why;
+	bool m_lost_remote_restarting = false;
 
 	ss_ local_server_launch()
 	{
@@ -1776,7 +1777,7 @@ struct CApp: public App, public magic::Application
 	}
 #endif
 
-	void lost_connection(const ss_ &reason)
+	void lost_connection(const ss_ &reason, bool restarting)
 	{
 #ifdef __EMSCRIPTEN__
 		// The web client has no menu to go back to and cannot close its
@@ -1785,12 +1786,13 @@ struct CApp: public App, public magic::Application
 		// its GL calls on the way out.
 		EM_ASM({
 			if(Module['onDisconnected'])
-				Module['onDisconnected'](UTF8ToString($0));
-		}, reason.c_str());
+				Module['onDisconnected'](UTF8ToString($0), !!$1);
+		}, reason.c_str(), restarting);
 		emscripten_pause_main_loop();
 		return;
 #endif
 		m_lost_remote_why = reason;
+		m_lost_remote_restarting = restarting;
 		if(g_local_server.valid() && !g_local_server_log.empty()){
 			// The socket closes before the process is gone -- a crash
 			// writes its backtrace first -- so the verdict waits a moment
@@ -1811,8 +1813,11 @@ struct CApp: public App, public magic::Application
 			lua_pushlstring(L, m_lost_remote_why.c_str(),
 					m_lost_remote_why.size());
 			lua_setglobal(L, "__buildat_lost_why");
+			lua_pushboolean(L, m_lost_remote_restarting);
+			lua_setglobal(L, "__buildat_lost_restarting");
 			if(!run_script_no_sandbox(
-					"if not __buildat_leave_lost(__buildat_lost_why) then\n"
+					"if not __buildat_leave_lost(__buildat_lost_why, "
+					"__buildat_lost_restarting) then\n"
 					"    __buildat_disconnect()\n"
 					"end\n"))
 				shutdown();

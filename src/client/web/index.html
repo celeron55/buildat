@@ -228,8 +228,9 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 				'\nReload the page to start again.';
 		},
 		// The client calls this when the server has gone, and stops;
-		// reason is what it saw
-		onDisconnected: function(reason){
+		// reason is what it saw, restarting whether the server's goodbye
+		// said it restarts ([SERVE_UPDATE_SMOOTH] 6)
+		onDisconnected: function(reason, restarting){
 			disconnected = true;
 			// Gone while the page was away, or noticed just after it came
 			// back (a page in the background does not run): the browser's
@@ -248,6 +249,40 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			b.style.pointerEvents = 'auto';
 			b.onclick = function(){ location.reload(); };
 			status.appendChild(b);
+			// Restarting: the page is reloaded once its server answers
+			// /health with anything but the stand-in's 503 (a 403 to a
+			// stranger is the server up), asked every 3 s for 5 minutes;
+			// the button is Cancel meanwhile
+			if(restarting){
+				var t0 = Date.now(), timer = null;
+				status.firstChild.textContent = reason + '.\n\n';
+				var wait = document.createTextNode('Reconnecting...\n\n');
+				status.insertBefore(wait, b);
+				b.textContent = 'Cancel';
+				b.onclick = function(){
+					clearTimeout(timer);
+					wait.textContent = '';
+					b.textContent = 'Reconnect';
+					b.onclick = function(){ location.reload(); };
+				};
+				var poll = function(){
+					var s = Math.floor((Date.now() - t0) / 1000);
+					if(s >= 300){
+						b.onclick();
+						wait.textContent = 'Not back in 5 minutes.\n\n';
+						return;
+					}
+					wait.textContent = 'Reconnecting... (' + s + ' s)\n\n';
+					fetch('/health', {cache: 'no-store'}).then(function(r){
+						if(r.status !== 503 && b.textContent === 'Cancel')
+							location.reload();
+					}, function(){}).then(function(){
+						if(b.textContent === 'Cancel')
+							timer = setTimeout(poll, 3000);
+					});
+				};
+				timer = setTimeout(poll, 3000);
+			}
 			status.style.background = 'rgba(0,0,0,0.75)';
 			status.style.padding = '16px';
 			if(document.exitPointerLock)

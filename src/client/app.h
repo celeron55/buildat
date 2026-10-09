@@ -134,8 +134,9 @@ namespace app
 		virtual void shutdown() = 0;
 		// The connection is gone: shut down, but when the local server
 		// this client started has died, show its log's tail first
-		// ([START_PROGRESS])
-		virtual void lost_connection(const ss_ &reason) = 0;
+		// ([START_PROGRESS]). restarting: the server's goodbye said it
+		// restarts, and a rejoin is tried ([SERVE_UPDATE_SMOOTH] 6)
+		virtual void lost_connection(const ss_ &reason, bool restarting) = 0;
 		// The owner token of the local server this client started, when
 		// address is that server; "" for any other ([SECURITY_RUN_1])
 		virtual ss_ owner_token_for(const ss_ &address) = 0;

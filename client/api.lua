@@ -229,13 +229,26 @@ local function launcher_under_game()
 			__buildat_local_server_running() == true)
 end
 -- The connection to a remote server went (src/client/app.cpp,
--- check_lost_connection): to the launcher with why, or false
-function __buildat_leave_lost(lost)
-	local why = leave_reason and "Left the server: " .. leave_reason or
+-- check_lost_connection): to the launcher with why, or false.
+-- [SERVE_UPDATE_SMOOTH] 6: one that was not a kick is rejoined from
+-- there -- at once when the server's goodbye said it restarts, else when
+-- asked
+function __buildat_leave_lost(lost, restarting)
+	local kicked = leave_reason
+	local address = __buildat_server_address()
+	local why = kicked and "Left the server: " .. kicked or
+			restarting and tostring(lost) or
 			"Left the server: " .. tostring(lost)
 	leave_reason = nil
 	log:info("leave: " .. why .. "; to the launcher if there is one")
-	return leave_to_launcher(why)
+	if kicked or not address then
+		return leave_to_launcher(why)
+	end
+	if not leave_to_launcher() then
+		return false
+	end
+	__buildat_reconnect(address, why, restarting)
+	return true
 end
 buildat.safe.leave = function()
 	leave_reason = nil
@@ -1401,6 +1414,10 @@ buildat.safe.join_server = function(address)
 	end
 	launch_grid.screens().connect(address)
 	return true
+end
+-- [SERVE_UPDATE_SMOOTH] 6, from __buildat_leave_lost above
+function __buildat_reconnect(address, why, restarting)
+	launch_grid.screens().reconnect(address, why, restarting)
 end
 -- [PLAY_LINKS] the play page's ?server=, from src/client/app.cpp once the
 -- launch UI is up: screens.lua joins it if it is listed

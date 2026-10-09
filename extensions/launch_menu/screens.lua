@@ -198,6 +198,77 @@ local function connect_or_show_error(address, fallbacks)
 	end)
 end
 
+-- **Back to a server whose connection went** ([SERVE_UPDATE_SMOOTH] 6),
+-- from client/api.lua's leave. One that said it restarts is tried every
+-- 3 s for up to 5 minutes, with Cancel; any other only when asked, as a
+-- crash or the network gives no telling when it comes back. A rejoin is
+-- a join: the app logs in with the kept login and does what it does then.
+-- simplified: Cancel during a try lets that try finish, and one that got
+-- through is joined
+function M.reconnect(address, why, restarting)
+	if not restarting then
+		ui_utils.show_confirm_dialog(why, function()
+			M.reconnect(address, why, true)
+		end, nil, "Reconnect", "Back")
+		return
+	end
+	local root, window, status = push_status_screen("reconnecting", why)
+	local cancel = make_button(window, "Cancel")
+	local t0 = api.get_time_us()
+	local next_try, trying, done = 0, false, false
+	local function close()
+		done = true
+		uistack.main:pop(root)
+	end
+	ui_utils.bind_button_menu(root, {{cancel, function()
+		log:info("reconnect: cancelled")
+		if trying then
+			cancel:SetVisible(false)
+			status.text = why .. "\n\nCancelling..."
+			done = "cancel"
+		else
+			close()
+		end
+	end}})
+	cancel:SetFocus(true)
+	root:SubscribeToStackEvent("Update", function()
+		if done == true then
+			return
+		end
+		local now = api.get_time_us()
+		if trying then
+			local state = api.connect_poll()
+			if state == "pending" then
+				return
+			end
+			trying = false
+			if state == "ok" then
+				log:info("reconnect: joined " .. address)
+				close()
+				uistack.main:push({desc = GAME_RUNNING, tap_outside = false})
+				magic.ui:SetFocusElement(nil)
+				return
+			end
+		end
+		if done == "cancel" then
+			close()
+			return
+		end
+		local s = math.floor((now - t0) / 1000000)
+		if s >= 300 then
+			log:info("reconnect: not back in 5 minutes")
+			close()
+			show_error(why .. "\n\nNot back in 5 minutes.")
+			return
+		end
+		status.text = why .. "\n\nReconnecting... (" .. s .. " s)"
+		if now >= next_try then
+			next_try = now + 3000000
+			trying = api.connect_start(address)
+		end
+	end)
+end
+
 -- A connect asked for by the launch grid ("Feedback..." on an app)
 function M.connect(address)
 	api.stop_local_server()

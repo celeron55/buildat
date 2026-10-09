@@ -154,6 +154,9 @@ struct CState: public State
 	bool m_connected = false;
 	// Set once the connection is gone; see lost_connection()
 	bool m_disconnected = false;
+	// [SERVE_UPDATE_SMOOTH] 4: the server's network:goodbye, said in place
+	// of the connection's end: "1" when it restarts, then why
+	ss_ m_goodbye;
 	// **A connection that died without closing** (user, 2026-09-30: the
 	// web client froze, saying nothing): a server that sends
 	// network:keepalive to an idle peer is heard from every few seconds,
@@ -368,9 +371,11 @@ struct CState: public State
 		if(m_disconnected)
 			return;
 		m_disconnected = true;
-		log_w(MODULE, "Disconnected from server: %s", cs(reason));
+		const bool restarting = !m_goodbye.empty() && m_goodbye[0] == '1';
+		const ss_ why = m_goodbye.empty() ? reason : m_goodbye.substr(1);
+		log_w(MODULE, "Disconnected from server: %s", cs(why));
 		if(m_app)
-			m_app->lost_connection(reason);
+			m_app->lost_connection(why, restarting);
 	}
 
 	bool connect_host_port(const ss_ &address, const ss_ &port, ss_ *error)
@@ -795,6 +800,12 @@ void CState::setup_packet_handlers()
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
 		m_keepalive_seen = true;
+	};
+
+	m_packet_handlers["network:goodbye"] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+		m_goodbye = data.substr(0, 256);
 	};
 
 	m_packet_handlers["core:unordered"] =

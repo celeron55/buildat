@@ -11,15 +11,23 @@
 #
 # Each server is a game, a port and a user directory, which holds its
 # saves and accounts. Every version uses it (-D), and it can be one a
-# server used before. The servers all run the same release. The rest is
-# under BUILDAT_SERVE_DIR (default ~/buildat-serve):
+# server used before. Each server has its own: two given one directory
+# would share saves and accounts, and the script refuses to start. The
+# servers all run the same release. The rest is under BUILDAT_SERVE_DIR
+# (default ~/buildat-serve):
 #   versions/<archive>/     each release, unpacked
 #   current                 the version running
 #   server-<game>-<port>.log  a server's output, also on the terminal with
 #                           [<game>:<port>] before each line
-# A new release is downloaded and unpacked, every running server is
-# stopped with SIGTERM (a game saves on it), and each is started on the new
-# one. A server that exits is started again by itself. Every version but
+# **A new release** ([SERVE_UPDATE_SMOOTH]) is downloaded and unpacked,
+# and each server's app compiled on it (--compile-only) while the old one
+# serves. A compile that fails keeps every server on the old version, and
+# that release is not tried again; a newer one is. Then one server at a
+# time: <user dir>/apps/<game>/shutdown_reason written ("updating to X"),
+# which the server tells its clients as it goes (they wait and rejoin),
+# stopped with SIGTERM (a game saves on it), started on the new version,
+# a stand-in on its port meanwhile, and the next once it is listening.
+# A server that exits is started again by itself. Every version but
 # the running one and the one before it is deleted. A server that exits with
 # status 20 is a game's own restart (apps/vanilla switching its world), and
 # is started again at once; meanwhile a stand-in on its port answers a
@@ -46,7 +54,9 @@
 # newer version wrote.
 #
 # Environment: POLL_SECONDS (300), GITHUB_REPO (celeron55/buildat),
-# GITHUB_TOKEN (optional; unauthenticated, GitHub allows 60 asks an hour).
+# GITHUB_TOKEN (optional; unauthenticated, GitHub allows 60 asks an hour),
+# RELEASES_URL (GitHub's list of the repo's releases; a check serves its
+# own).
 # Needs bash, curl and tar; python3 for the stand-in, which is skipped
 # without it.
 set -u
@@ -63,7 +73,15 @@ while [ $# -gt 0 ]; do
 	games+=("$1")
 	ports+=("$2")
 	mkdir -p "$3" || exit 1
-	users+=("$(cd "$3" && pwd)")
+	u=$(cd "$3" && pwd -P)
+	for j in "${!users[@]}"; do
+		if [ "${users[$j]}" = "$u" ]; then
+			echo "${games[$j]} on port ${ports[$j]} and $1 on port $2 are" \
+				"given the same user directory, $u; each needs its own" >&2
+			exit 2
+		fi
+	done
+	users+=("$u")
 	shift 3
 	o=""
 	while [ $# -gt 0 ] && [ "$1" != "--" ]; do
@@ -78,6 +96,7 @@ done
 base=${BUILDAT_SERVE_DIR:-$HOME/buildat-serve}
 poll=${POLL_SECONDS:-300}
 repo=${GITHUB_REPO:-celeron55/buildat}
+releases_url=${RELEASES_URL:-https://api.github.com/repos/$repo/releases?per_page=10}
 asset_re='linux-x86_64-web-precompiled\.tar\.gz'
 
 mkdir -p "$base/versions"
@@ -92,7 +111,7 @@ latest_url(){
 	local auth=()
 	[ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
 	curl -fsSL --max-time 60 "${auth[@]}" \
-			"https://api.github.com/repos/$repo/releases?per_page=10" |
+			"$releases_url" |
 		grep -o '"browser_download_url": *"[^"]*"' |
 		sed 's/.*"\(http[^"]*\)"$/\1/' |
 		grep -E "$asset_re" | head -n 1
@@ -155,6 +174,8 @@ prune(){
 # The servers' process ids, by index; a version a server would not start
 # on is not tried again until another comes
 pids=() broken=()
+# A release some server's app would not compile on: not tried again
+bad_release=""
 # A restarting server's stand-in, by index: its pid, and the log line
 # the server's own "Listening at" is to come after
 standins=() standin_from=()
@@ -266,6 +287,46 @@ stop(){
 	pids[$i]=""
 }
 
+# The new version's compile of server i's app, with its options, while
+# the old one serves: the modules land in the version's own cache, which
+# the start then finds. True when it compiled.
+compile(){
+	local i=$1 game=${games[$1]} port=${ports[$1]} v=$2
+	local args=()
+	[ -n "${opts[$i]}" ] && mapfile -t args <<< "${opts[$i]%$'\n'}"
+	say "compiling $game on $v"
+	(cd "$base/versions/$v" && exec bin/buildat_server -m "apps/$game" \
+			-P "$port" -D "${users[$i]}" "${args[@]}" --compile-only) 2>&1 |
+		sed -u "s/^/[$game:$port compile] /" |
+		tee -a "$base/server-$game-$port.log"
+	return "${PIPESTATUS[0]}"
+}
+
+# One server onto the current version: told why, stopped, started, and
+# waited for until it listens (or exits, or 10 minutes pass)
+restart(){
+	local i=$1 why=$2
+	if [ -n "${pids[$i]:-}" ] && kill -0 "${pids[$i]}" 2>/dev/null; then
+		mkdir -p "${users[$i]}/apps/${games[$i]}"
+		printf '%s\n' "$why" > "${users[$i]}/apps/${games[$i]}/shutdown_reason"
+	fi
+	stop "$i"
+	rm -f "${users[$i]}/apps/${games[$i]}/shutdown_reason"
+	local log="$base/server-${games[$i]}-${ports[$i]}.log" from n
+	from=$(wc -l < "$log" 2>/dev/null || echo 0)
+	standin_start "$i"
+	if start "$i"; then
+		for n in $(seq 600); do
+			tail -n +"$((from + 1))" "$log" 2>/dev/null |
+				grep -q "Listening at\|Failed to bind" && break
+			kill -0 "${pids[$i]}" 2>/dev/null || break
+			sleep 1
+		done
+		[ "$n" = 600 ] && say "${games[$i]} is not listening after 10 minutes; going on"
+	fi
+	standin_stop "$i"
+}
+
 stop_all(){
 	local i
 	# All told at once, so that they save and go together
@@ -297,15 +358,29 @@ while true; do
 		if [ -z "$url" ]; then
 			say "could not read the releases of $repo; keeping ${current:-nothing}"
 		elif [ "$(basename "$url" .tar.gz)" != "$current" ]; then
-			name=$(install "$url")
+			name=$(basename "$url" .tar.gz)
+			[ "$name" != "$bad_release" ] && name=$(install "$url") || name=""
 			if [ -n "$name" ]; then
 				say "new version: $name"
-				stop_all
-				current=$name
+				ok=1
 				for i in "${!games[@]}"; do
-					start "$i"
+					compile "$i" "$name" && continue
+					say "${games[$i]} does not compile on $name; staying on" \
+						"${current:-nothing} until a newer release"
+					bad_release=$name
+					ok=""
+					break
 				done
-				prune
+				if [ -n "$ok" ]; then
+					old=$current
+					current=$name
+					# buildat-<version>-<hash>-linux-... said as its version
+					v=${name#buildat-}
+					for i in "${!games[@]}"; do
+						restart "$i" "updating to ${v%%-*}"
+					done
+					[ -n "$old" ] && prune
+				fi
 			fi
 		fi
 	fi
