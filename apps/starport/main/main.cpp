@@ -48,6 +48,7 @@
 #include "network/api.h"
 #include "storage/api.h"
 #include "accounts/api.h"
+#include "moderation/api.h"
 #include <algorithm>
 #include <cmath>
 #include <ctime>
@@ -159,7 +160,7 @@ static const sm_<ss_, sv_<ss_>> DESCRIPTORS = {
 	{"personal_data", {"no", "yes"}},
 };
 // How much a reason weighs in the queue's order
-static int severity(const ss_ &reason)
+static int reason_severity(const ss_ &reason)
 {
 	static const sm_<ss_, int> s = {{"csam", 100}, {"malware", 60},
 		{"illegal", 50}, {"scam", 40}, {"harassment", 30},
@@ -405,7 +406,7 @@ struct VerifyResult {
 	ss_ why;
 };
 
-struct Module: public interface::Module
+struct Module: public interface::Module, public moderation::Host
 {
 	interface::Server *m_server;
 	storage::Save *m_save = nullptr;
@@ -930,8 +931,7 @@ struct Module: public interface::Module
 		if(f.is_object() && same(jstr(f, "code"), code) &&
 				!banned("account", jstr(f, "owner"))){
 			if(jstr(l, "fleet") != fid){
-				audit("", jstr(l, "id"), "fleet", "", "joined fleet "+fid,
-						true);
+				record("", jstr(l, "id"), "fleet", "joined fleet "+fid, true);
 				event({jstr(f, "owner")}, "", jstr(l, "name")+" joined your "
 						"fleet "+jstr(f, "name"));
 			}
@@ -1453,11 +1453,6 @@ struct Module: public interface::Module
 		rep.set("ts", now_s());
 		rep.set("trusted", trusted(h));
 		rep.set("weight", trusted(h) ? 1.0 : key_weight(h));
-		// The spam filter ([STARPORT] 7): held back, not counted
-		const ss_ held = spam_reason(rep);
-		rep.set("state", held.empty() ? "open" : "held");
-		if(!held.empty())
-			rep.set("held", held);
 		// Of the whole fleet the listing is in, where the reporter said so
 		const ss_ fleet = b.get("whole_fleet").is_true() ? jstr(l, "fleet") :
 				ss_();
@@ -1465,138 +1460,89 @@ struct Module: public interface::Module
 		rep.set("group", gid);
 		if(!fleet.empty())
 			rep.set("fleet", fleet);
-		put("reports", id, rep);
-		if(held.empty())
-			add_to_group(gid, listing, reason, id, fleet);
+		json::Value fields = json::object();
+		fields.set("fleet", fleet);
+		mod_do([&](moderation::Interface *m){
+			m->add_report(this, rep, fields);
+		});
 		json::Value v = json::object();
 		v.set("ok", true);
 		v.set("receipt", id);
 		respond(r, 200, v);
 	}
 
-	// Why a report is held back, or ""
-	ss_ spam_reason(const json::Value &rep)
+	// -- 5, 6 and 7 in builtin/moderation: this is its Host
+
+	void mod_do(std::function<void(moderation::Interface*)> f)
 	{
-		const ss_ h = jstr(rep, "key");
-		if(key_muted(h))
-			return "a key whose reports were mostly rejected";
-		const ss_ text = jstr(rep, "text");
-		if(text.size() >= 20){
-			// The same words as several others today
-			int same_text = 0;
-			const int64_t t = now_s();
-			for(const ss_ &id : store("reports")->list("")){
-				const json::Value o = load("reports", id);
-				if(t - jint(o, "ts") < 86400 && jstr(o, "text") == text)
-					same_text++;
-			}
-			if(same_text >= 3)
-				return "the same text as other reports today";
-		}
-		return "";
+		moderation::access(m_server, f);
 	}
 
-	// -- 7. Groups
-
-	json::Value open_group(const ss_ &gid, const ss_ &listing,
-			const ss_ &reason, const ss_ &note, const ss_ &fleet = "")
+	void open_group(const ss_ &gid, const ss_ &listing, const ss_ &reason,
+			const ss_ &note)
 	{
-		json::Value g = json::object();
-		g.set("id", gid);
-		g.set("listing", listing);
-		g.set("fleet", fleet);
-		g.set("reason", reason);
-		g.set("reports", json::array());
-		g.set("state", "open");
-		g.set("opened", now_s());
-		g.set("note", note);
-		g.set("weight", 0.0);
-		g.set("auto", "");
-		put("groups", gid, g);
-		return g;
+		mod_do([&](moderation::Interface *m){
+			m->open_group(this, gid, listing, reason, note, json::Value());
+		});
 	}
 
-	void add_to_group(const ss_ &gid, const ss_ &listing, const ss_ &reason,
-			const ss_ &report_id, const ss_ &fleet)
+	// An operator's own doings in the audit log, not the moderators'
+	void record(const ss_ &by, const ss_ &listing, const ss_ &action,
+			const ss_ &text, bool automatic)
 	{
-		json::Value g = load("groups", gid);
-		if(!g.is_object() || jstr(g, "state") != "open")
-			g = open_group(gid, listing, reason, "", fleet);
-		json::Value reps = g.get("reports").deepcopy();
-		reps.append(report_id);
-		g.set("reports", reps);
-		g.set("weight", group_weight(g));
-		put("groups", gid, g);
-		auto_act(g);
+		mod_do([&](moderation::Interface *m){
+			m->audit(this, by, listing, action, "", text, automatic, false);
+		});
 	}
 
-	// What a group weighs ([STARPORT] 7): the reports' weights, one per
-	// address range, and all the new keys of a burst together as one
-	double group_weight(const json::Value &g)
+	storage::Save* save(){ return m_save; }
+	ss_ name(){ return "Starport"; }
+	json::Value subject(const ss_ &id){ return load("listings", id); }
+	int severity(const ss_ &reason){ return reason_severity(reason); }
+
+	// An ID's group is its suspension's, by a moderator: none of its
+	// listings, nothing automatic
+	sv_<ss_> members(const json::Value &g)
 	{
-		sm_<ss_, double> buckets;
-		const int64_t d = day_of(now_s());
-		const json::Value &reps = g.get("reports");
-		for(unsigned i = 0; i < reps.size(); i++){
-			const json::Value rep = load("reports", reps.at(i).as_string());
-			if(!rep.is_object() || jstr(rep, "state") != "open")
-				continue;
-			const double w = jnum(rep, "weight");
-			ss_ bucket;
-			if(rep.get("trusted").is_true())
-				bucket = "trusted:"+jstr(rep, "key");
-			else {
-				const json::Value k = load("keys", jstr(rep, "key"));
-				const bool fresh = !k.is_object() ||
-						d - jint(k, "first_day") < 2;
-				bucket = fresh ? "fresh" : "net:"+subnet_of(jstr(rep,
-						"address"));
-			}
-			buckets[bucket] = std::max(buckets[bucket], w);
-		}
-		double sum = 0;
-		for(auto &pair : buckets)
-			sum += pair.second;
-		return sum;
+		return jstr(g, "id_name").empty() ? members_of(g) : sv_<ss_>();
 	}
 
-	json::Value thresholds(const ss_ &reason)
-	{
-		const json::Value &th = setting("thresholds");
-		const json::Value &t = th.get(reason);
-		return t.is_object() ? t : th.get("default");
-	}
-
-	// Past a threshold, hidden or delisted until a moderator looks; never
-	// for good, never banned ([STARPORT] 7)
-	void auto_act(json::Value g)
+	json::Value thresholds(const json::Value &g)
 	{
 		// An ID is suspended by a moderator, never by reports alone (10d)
 		if(!jstr(g, "id_name").empty())
-			return;
-		const json::Value t = thresholds(jstr(g, "reason"));
-		const double w = jnum(g, "weight");
-		ss_ want;
-		if(w >= jnum(t, "delist", 1e9))
-			want = "delist";
-		else if(w >= jnum(t, "hide", 1e9))
-			want = "hide";
-		if(want.empty() || want == jstr(g, "auto") ||
-				(want == "hide" && jstr(g, "auto") == "delist"))
-			return;
-		g.set("auto", want);
-		put("groups", jstr(g, "id"), g);
-		for(const ss_ &id : members_of(g))
-			auto_act_on(g, load("listings", id), want, w);
+			return json::object();
+		const json::Value &th = setting("thresholds");
+		const json::Value &t = th.get(jstr(g, "reason"));
+		return t.is_object() ? t : th.get("default");
 	}
 
-	void auto_act_on(const json::Value &g, json::Value l, const ss_ &want,
-			double w)
+	// The spam filter ([STARPORT] 7): held back, not counted
+	ss_ held(const json::Value &rep)
 	{
+		return key_muted(jstr(rep, "key")) ?
+				"a key whose reports were mostly rejected" : "";
+	}
+
+	// [STARPORT] 7: one per address range, and all the new keys of a burst
+	// together as one
+	ss_ bucket(const json::Value &rep)
+	{
+		if(rep.get("trusted").is_true())
+			return "trusted:"+jstr(rep, "key");
+		const json::Value k = load("keys", jstr(rep, "key"));
+		const bool fresh = !k.is_object() ||
+				day_of(now_s()) - jint(k, "first_day") < 2;
+		return fresh ? "fresh" : "net:"+subnet_of(jstr(rep, "address"));
+	}
+
+	json::Value auto_act(const json::Value &g, const ss_ &id,
+			const ss_ &want)
+	{
+		json::Value l = load("listings", id);
 		if(!l.is_object())
-			return;
-		const ss_ reason = jstr(g, "reason");
-		if(reason == "category" && want == "hide"){
+			return json::Value();
+		if(jstr(g, "reason") == "category" && want == "hide"){
 			// Relabelled to what most reporters said, where they said it
 			sm_<ss_, int> votes;
 			const json::Value &reps = g.get("reports");
@@ -1622,48 +1568,99 @@ struct Module: public interface::Module
 		if(want == "delist" || prev != "delisted")
 			l.set("status", want == "delist" ? "delisted" : "hidden");
 		l.set("status_auto", true);
-		put("listings", jstr(l, "id"), l);
-		const ss_ text = "Automatic, pending a moderator's review: reports of "
-				"\""+reason+"\" weighing "+std::to_string(w).substr(0, 4)+
-				" passed this instance's threshold to "+want+".";
-		audit("", jstr(l, "id"), want == "delist" ? "delist" : "hide", reason,
-				text, true);
-		statement(l, want == "delist" ? "delisted" : "hidden", reason, text);
+		put("listings", id, l);
+		return l;
 	}
 
-	// -- 6. The audit log and the statements of reasons
-
-	void audit(const ss_ &by, const ss_ &listing, const ss_ &action,
-			const ss_ &reason, const ss_ &text, bool automatic)
+	void uphold(moderation::Interface *m, const ss_ &by, const json::Value &g,
+			const json::Value &q)
 	{
-		json::Value a = json::object();
-		const int64_t t = now_s();
-		a.set("ts", t);
-		a.set("by", by);
-		a.set("listing", listing);
-		a.set("action", action);
-		a.set("reason", reason);
-		a.set("text", text);
-		a.set("auto", automatic);
-		// Sortable by time
-		char key[40];
-		snprintf(key, sizeof key, "%012lld-%s", (long long)t,
-				random_hex(3).c_str());
-		put("audit", key, a);
-		// The moderators see one another's decisions and the automatic
-		// ones; an operator's own claims and fleets are not theirs
-		static const char *const MODERATION[] = {"relabel", "hide", "delist",
-				"csam", "ban", "restore", "dismiss", "suspend"};
-		for(const char *m : MODERATION)
-			if(action == m){
-				const json::Value l = load("listings", listing);
-				event({"@moderators"}, by, (by.empty() ? ss_("Starport") : by)+
-						" "+action+(automatic ? " (automatic) " : " ")+
-						(l.is_object() ? jstr(l, "name")+" ("+listing+")" :
-						listing)+(reason.empty() ? "" : ", "+reason)+
-						(text.empty() ? "" : ": "+text));
-				break;
+		const ss_ reason = jstr(g, "reason");
+		if(!jstr(g, "id_name").empty()){
+			suspend_id(m, by, jstr(g, "id_name"), jint(q, "days"), reason,
+					jstr(q, "text"));
+			return;
+		}
+		const sv_<ss_> members = members_of(g);
+		if(members.empty())
+			throw Exception("the listing has gone");
+		for(const ss_ &id : members){
+			const json::Value l = load("listings", id);
+			if(l.is_object())
+				apply_action(m, by, l, q, reason);
+		}
+	}
+
+	// What was done automatically is undone
+	bool undo_auto(const ss_ &id, const json::Value &g)
+	{
+		json::Value l = load("listings", id);
+		if(!l.get("status_auto").is_true())
+			return false;
+		l.set("status", "active");
+		l.set("status_auto", false);
+		if(jstr(g, "reason") == "category")
+			l.del_key("relabel");
+		put("listings", id, l);
+		return true;
+	}
+
+	void reverse(moderation::Interface *m, const ss_ &by,
+			const json::Value &a, const ss_ &text)
+	{
+		// An ID's suspension (10d): lifted
+		const ss_ lid = jstr(a, "listing");
+		if(lid.compare(0, 3, "id:") == 0){
+			json::Value id = load("ids", lid.substr(3));
+			if(id.is_object()){
+				id.set("suspended_until", (int64_t)0);
+				put("ids", lid.substr(3), id);
 			}
+			m->audit(this, by, lid, "restore", "appeal", text, false);
+		}
+		json::Value l = load("listings", lid);
+		if(l.is_object()){
+			l.set("status", "active");
+			l.set("status_until", (int64_t)0);
+			l.del_key("relabel");
+			put("listings", jstr(l, "id"), l);
+			store("bans")->remove("listing:"+jstr(l, "id"));
+			m->audit(this, by, jstr(l, "id"), "restore", "appeal", text, false);
+			m->statement(this, l, "restored", "appeal", text, by);
+		}
+	}
+
+	void decided(const json::Value &rep, bool upheld)
+	{
+		const ss_ h = jstr(rep, "key");
+		json::Value k = h.empty() ? json::Value() : load("keys", h);
+		if(!k.is_object())
+			return;
+		const char *f = upheld ? "upheld" : "rejected";
+		k.set(f, jint(k, f) + 1);
+		// [STARPORT] 6: a reporter whose reports are mostly rejected is
+		// not heard for a while
+		if(jint(k, "rejected") >= 5 && jint(k, "rejected") >
+				3 * jint(k, "upheld"))
+			k.set("muted_until", now_s() + 30 * 86400);
+		put("keys", h, k);
+	}
+
+	// A statement by mail too, to an operator who gave an address
+	void notify(const json::Value &s)
+	{
+		const ss_ owner = jstr(s, "owner");
+		const json::Value o = owner.empty() ? json::Value() :
+				load("operators", owner);
+		if(jstr(o, "email").empty() || !can_mail())
+			return;
+		const ss_ sp = jstr(m_settings, "name");
+		const ss_ name = jstr(s, "listing_name");
+		mail(owner, jstr(o, "email"), sp+": "+jstr(s, "action")+": "+name,
+				"Your listing \""+name+"\" ("+jstr(s, "listing")+") on "+sp+
+				":\n\n    "+jstr(s, "action")+", for "+jstr(s, "reason")+
+				"\n\n"+jstr(s, "text")+"\n\n"+"Appeal from your account on "+
+				sp+"; another moderator than the one who acted decides.\n");
 	}
 
 	// An event on the Overview ([STARPORT_UI]): for the accounts and roles
@@ -1706,45 +1703,6 @@ struct Module: public interface::Module
 			}
 		}
 		return out;
-	}
-
-	// To the operator who claimed it: what was done, why, how to appeal
-	void statement(const json::Value &l, const ss_ &action, const ss_ &reason,
-			const ss_ &text, const ss_ &by = "")
-	{
-		const ss_ owner = jstr(l, "owner");
-		json::Value s = json::object();
-		const ss_ id = random_hex(6);
-		s.set("id", id);
-		s.set("ts", now_s());
-		s.set("listing", jstr(l, "id"));
-		s.set("listing_name", jstr(l, "name"));
-		s.set("action", action);
-		s.set("reason", reason);
-		s.set("text", text);
-		s.set("by", by);
-		s.set("owner", owner);
-		s.set("appeal", "Appeal from your account on this Starport; another "
-				"moderator than the one who acted decides.");
-		put("statements", id, s);
-		if(!owner.empty())
-			event({owner}, by, jstr(l, "name")+": "+action+", for "+reason+
-					(text.empty() ? "" : ". "+text));
-		const json::Value o = owner.empty() ? json::Value() :
-				load("operators", owner);
-		if(!jstr(o, "email").empty() && can_mail()){
-			const ss_ sp = jstr(m_settings, "name");
-			mail(owner, jstr(o, "email"), sp+": "+action+": "+
-					jstr(l, "name"),
-					"Your listing \""+jstr(l, "name")+"\" ("+jstr(l, "id")+
-					") on "+sp+":\n\n"
-					"    "+action+", for "+reason+"\n\n"+text+"\n\n"+
-					"Appeal from your account on "+sp+"; another moderator "
-					"than the one who acted decides.\n");
-		}
-		log_i(MODULE, "Statement of reasons to %s: listing %s %s (%s)",
-				owner.empty() ? "(unclaimed)" : cs(owner), cs(jstr(l, "id")),
-				cs(action), cs(reason));
 	}
 
 	// -- 5. The reporter's outcomes
@@ -2887,8 +2845,13 @@ struct Module: public interface::Module
 			return cmd_fleet_remove_server(name, q);
 		if(cmd.compare(0, 10, "blocklist_") == 0 || cmd == "blocklists")
 			return cmd_blocklist(name, cmd, q);
-		if(cmd == "appeal")
-			return cmd_appeal(name, q);
+		if(cmd == "appeal"){
+			ss_ id;
+			mod_do([&](moderation::Interface *m){
+				id = m->appeal(this, name, q);
+			});
+			return json::Value(id);
+		}
 		if(cmd == "overview"){
 			// The events, and the time they were last seen, which moves on
 			json::Value r = json::object();
@@ -2902,25 +2865,40 @@ struct Module: public interface::Module
 		}
 		if(!mod)
 			throw Exception("for moderators");
-		if(cmd == "queue")
-			return cmd_queue();
+		json::Value r;
+		if(cmd == "queue"){
+			mod_do([&](moderation::Interface *m){ r = m->queue(this); });
+			return r;
+		}
 		if(cmd == "group")
 			return cmd_group(jstr(q, "group"));
-		if(cmd == "decide")
-			return cmd_decide(name, q);
+		if(cmd == "decide"){
+			mod_do([&](moderation::Interface *m){ m->decide(this, name, q); });
+			return json::Value(true);
+		}
 		if(cmd == "act")
 			return cmd_act(name, q);
 		if(cmd == "listings")
 			return cmd_listings(jstr(q, "search"));
-		if(cmd == "audit")
-			return cmd_audit();
-		if(cmd == "appeals")
-			return cmd_appeals();
-		if(cmd == "decide_appeal")
-			return cmd_decide_appeal(name, q);
+		if(cmd == "audit"){
+			mod_do([&](moderation::Interface *m){ r = m->audit_log(this); });
+			return r;
+		}
+		if(cmd == "appeals"){
+			mod_do([&](moderation::Interface *m){ r = m->appeals(this); });
+			return r;
+		}
+		if(cmd == "decide_appeal"){
+			mod_do([&](moderation::Interface *m){
+				m->decide_appeal(this, name, q);
+			});
+			return json::Value(true);
+		}
 		if(cmd == "suspend_id"){
-			suspend_id(name, jstr(q, "id"), jint(q, "days"),
-					jstr(q, "reason", "other"), jstr(q, "text"));
+			mod_do([&](moderation::Interface *m){
+				suspend_id(m, name, jstr(q, "id"), jint(q, "days"),
+						jstr(q, "reason", "other"), jstr(q, "text"));
+			});
 			return json::Value(true);
 		}
 		if(!admin)
@@ -3133,13 +3111,13 @@ struct Module: public interface::Module
 				if(!ol.get(k).is_undefined())
 					l.set(k, ol.get(k));
 			listing_remove(old);
-			audit(name, jstr(l, "id"), "replace", "", "replaces "+old, false);
+			record(name, jstr(l, "id"), "replace", "replaces "+old, false);
 		}
 		l.set("owner", name);
 		if(l.get("claimed").is_undefined())
 			l.set("claimed", now_s());
 		put("listings", jstr(l, "id"), l);
-		audit(name, jstr(l, "id"), "claim", "", "", false);
+		record(name, jstr(l, "id"), "claim", "", false);
 		return listing_summary(l);
 	}
 
@@ -3196,13 +3174,12 @@ struct Module: public interface::Module
 			rep.set("trusted", false);
 			rep.set("weight", 1.0);
 			rep.set("state", "open");
-			const ss_ gid = "id:"+who.as_string()+"|"+reason;
-			rep.set("group", gid);
-			put("reports", rid, rep);
-			add_to_group(gid, jstr(l, "id"), reason, rid, "");
-			json::Value g = load("groups", gid);
-			g.set("id_name", who.as_string());
-			put("groups", gid, g);
+			rep.set("group", "id:"+who.as_string()+"|"+reason);
+			json::Value fields = json::object();
+			fields.set("id_name", who.as_string());
+			mod_do([&](moderation::Interface *m){
+				m->add_report(this, rep, fields);
+			});
 		}
 		put("listing_bans", jstr(l, "id"), now);
 	}
@@ -3383,8 +3360,9 @@ struct Module: public interface::Module
 	}
 
 	// A Starport moderator's suspension of an ID, with its statement (6)
-	void suspend_id(const ss_ &by, const ss_ &idname, int64_t days,
-			const ss_ &reason, const ss_ &text)
+	void suspend_id(moderation::Interface *m, const ss_ &by,
+			const ss_ &idname, int64_t days, const ss_ &reason,
+			const ss_ &text)
 	{
 		json::Value id = load("ids", idname);
 		if(!id.is_object())
@@ -3395,12 +3373,12 @@ struct Module: public interface::Module
 		for(const ss_ &k : store("sessions")->list(""))
 			if(jstr(load("sessions", k), "name") == idname)
 				store("sessions")->remove(k);
-		audit(by, "id:"+idname, "suspend", reason, text, false);
+		m->audit(this, by, "id:"+idname, "suspend", reason, text, false);
 		json::Value fake = json::object();
 		fake.set("id", "id:"+idname);
 		fake.set("name", "Starport ID "+idname);
 		fake.set("owner", idname);
-		statement(fake, days > 0 ? "suspended for "+itos(days)+" days" :
+		m->statement(this, fake, days > 0 ? "suspended for "+itos(days)+" days" :
 				"suspended", reason, text, by);
 	}
 
@@ -3442,7 +3420,7 @@ struct Module: public interface::Module
 			f.set("link", jstr(q, "link"));
 		}
 		put("fleets", jstr(f, "id"), f);
-		audit(name, "", cmd, "", "fleet "+jstr(f, "id"), false);
+		record(name, "", cmd, "fleet "+jstr(f, "id"), false);
 		return f;
 	}
 
@@ -3459,92 +3437,11 @@ struct Module: public interface::Module
 		return listing_summary(l);
 	}
 
-	json::Value cmd_appeal(const ss_ &name, const json::Value &q)
-	{
-		const json::Value s = load("statements", jstr(q, "statement"));
-		if(!s.is_object() || jstr(s, "owner") != name)
-			throw Exception("no such statement of yours");
-		const ss_ text = jstr(q, "text");
-		if(text.empty() || text.size() > 4000)
-			throw Exception("say why, in at most 4000 characters");
-		for(const ss_ &aid : store("appeals")->list("")){
-			const json::Value o = load("appeals", aid);
-			if(jstr(o, "statement") == jstr(s, "id") &&
-					jstr(o, "state") == "open")
-				throw Exception("this statement has an open appeal");
-		}
-		json::Value a = json::object();
-		const ss_ id = random_hex(6);
-		a.set("id", id);
-		a.set("statement", jstr(s, "id"));
-		a.set("listing", jstr(s, "listing"));
-		a.set("by", name);
-		a.set("acted_by", jstr(s, "by"));
-		a.set("text", text);
-		a.set("ts", now_s());
-		a.set("state", "open");
-		put("appeals", id, a);
-		if(!jstr(s, "by").empty())
-			event({jstr(s, "by")}, name, name+" appealed your decision on "+
-					jstr(s, "listing_name")+" ("+jstr(s, "action")+"): "+text);
-		return json::Value(id);
-	}
-
-	json::Value cmd_queue()
-	{
-		struct Item { double priority; json::Value g; };
-		std::vector<Item> items;
-		const int64_t t = now_s();
-		for(const ss_ &id : store("groups")->list("")){
-			json::Value g = load("groups", id);
-			if(jstr(g, "state") != "open")
-				continue;
-			const json::Value l = load("listings", jstr(g, "listing"));
-			bool flagger = false;
-			const json::Value &reps = g.get("reports");
-			for(unsigned i = 0; i < reps.size(); i++)
-				if(load("reports", reps.at(i).as_string()).get("trusted").is_true())
-					flagger = true;
-			// [STARPORT] 7: the reason's severity, the weight, a trusted
-			// flagger, how long it has waited, how many it reaches
-			const double p = severity(jstr(g, "reason")) +
-					10.0 * jnum(g, "weight") + (flagger ? 50.0 : 0.0) +
-					(double)(t - jint(g, "opened")) / 3600.0 +
-					log(1.0 + (double)jint(l, "players"));
-			g.set("priority", p);
-			g.set("listing_name", jstr(l, "name"));
-			g.set("count", (int64_t)reps.size());
-			g.set("trusted_flagger", flagger);
-			items.push_back({p, g});
-		}
-		std::sort(items.begin(), items.end(), [](const Item &a, const Item &b){
-			return a.priority > b.priority;
-		});
-		json::Value out = json::array();
-		for(const Item &i : items)
-			out.append(i.g);
-		return out;
-	}
-
 	json::Value cmd_group(const ss_ &gid)
 	{
-		json::Value g = load("groups", gid);
-		if(!g.is_object())
-			throw Exception("no such group");
-		json::Value reps = json::array();
-		const json::Value &ids = g.get("reports");
-		for(unsigned i = 0; i < ids.size(); i++){
-			json::Value rep = load("reports", ids.at(i).as_string());
-			if(!rep.is_object())
-				continue;
-			// Who reported is not shown: their key's standing is
-			rep.set("key", jstr(rep, "key").substr(0, 8));
-			rep.set("address", "");
-			reps.append(rep);
-		}
-		json::Value r = json::object();
-		r.set("group", g);
-		r.set("reports", reps);
+		json::Value r;
+		mod_do([&](moderation::Interface *m){ r = m->group(this, gid); });
+		const json::Value g = r.get("group");
 		// An ID's: its age band and whether it is suspended, nothing more
 		if(!jstr(g, "id_name").empty()){
 			const json::Value id = load("ids", jstr(g, "id_name"));
@@ -3557,21 +3454,14 @@ struct Module: public interface::Module
 		const json::Value l = load("listings", jstr(g, "listing"));
 		if(l.is_object())
 			r.set("listing", listing_summary(l));
-		json::Value hist = json::array();
-		for(const ss_ &id : store("audit")->list("")){
-			const json::Value a = load("audit", id);
-			if(jstr(a, "listing") == jstr(g, "listing"))
-				hist.append(a);
-		}
-		r.set("history", hist);
 		return r;
 	}
 
 	// A moderator's action on a listing ([STARPORT] 6): relabel, hide,
 	// delist (for days, or until review), ban, or for plainly illegal
 	// content delist at once and keep what the reports carried
-	void apply_action(const ss_ &by, json::Value l, const json::Value &q,
-			const ss_ &reason)
+	void apply_action(moderation::Interface *m, const ss_ &by, json::Value l,
+			const json::Value &q, const ss_ &reason)
 	{
 		const ss_ type = jstr(q, "action");
 		const ss_ text = jstr(q, "text");
@@ -3623,8 +3513,8 @@ struct Module: public interface::Module
 			keep.set("by", by);
 			put("preserved", id+"-"+itos(now_s()), keep);
 		}
-		audit(by, id, type, reason, text, false);
-		statement(l, type, reason, text, by);
+		m->audit(this, by, id, type, reason, text, false);
+		m->statement(this, l, type, reason, text, by);
 	}
 
 	void ban(const ss_ &kind, const ss_ &what, int64_t until, const ss_ &by)
@@ -3663,74 +3553,6 @@ struct Module: public interface::Module
 		}
 	}
 
-	json::Value cmd_decide(const ss_ &by, const json::Value &q)
-	{
-		json::Value g = load("groups", jstr(q, "group"));
-		if(!g.is_object() || jstr(g, "state") != "open")
-			throw Exception("no such open group");
-		const ss_ decision = jstr(q, "decision");
-		if(decision != "dismiss" && decision != "uphold")
-			throw Exception("decision: dismiss or uphold");
-		const ss_ reason = jstr(g, "reason");
-		if(!jstr(g, "id_name").empty() && decision == "uphold")
-			suspend_id(by, jstr(g, "id_name"), jint(q, "days"), reason,
-					jstr(q, "text"));
-		const sv_<ss_> members = jstr(g, "id_name").empty() ? members_of(g) :
-				sv_<ss_>();
-		if(decision == "uphold" && members.empty() &&
-				jstr(g, "id_name").empty())
-			throw Exception("the listing has gone");
-		for(const ss_ &id : members){
-			json::Value l = load("listings", id);
-			if(!l.is_object())
-				continue;
-			if(decision == "uphold"){
-				apply_action(by, l, q, reason);
-			} else if(l.get("status_auto").is_true()){
-				// What was done automatically is undone
-				l.set("status", "active");
-				l.set("status_auto", false);
-				if(reason == "category")
-					l.del_key("relabel");
-				put("listings", id, l);
-				audit(by, id, "restore", reason,
-						"the automatic action undone: reports dismissed", false);
-			} else
-				audit(by, id, "dismiss", reason, jstr(q, "text"), false);
-		}
-		// The reporters' records
-		const json::Value &reps = g.get("reports");
-		const int64_t t = now_s();
-		for(unsigned i = 0; i < reps.size(); i++){
-			json::Value rep = load("reports", reps.at(i).as_string());
-			if(!rep.is_object())
-				continue;
-			rep.set("state", decision == "uphold" ? "upheld" : "rejected");
-			rep.set("outcome", decision == "uphold" ? "acted on: "+
-					jstr(q, "action") : "no action");
-			rep.set("decided_at", t);
-			put("reports", jstr(rep, "id"), rep);
-			const ss_ h = jstr(rep, "key");
-			json::Value k = h.empty() ? json::Value() : load("keys", h);
-			if(!k.is_object())
-				continue;
-			const char *f = decision == "uphold" ? "upheld" : "rejected";
-			k.set(f, jint(k, f) + 1);
-			// [STARPORT] 6: a reporter whose reports are mostly rejected is
-			// not heard for a while
-			if(jint(k, "rejected") >= 5 && jint(k, "rejected") >
-					3 * jint(k, "upheld"))
-				k.set("muted_until", t + 30 * 86400);
-			put("keys", h, k);
-		}
-		g.set("state", "closed");
-		g.set("decided", decision);
-		g.set("decided_by", by);
-		g.set("decided_at", t);
-		put("groups", jstr(g, "id"), g);
-		return json::Value(true);
-	}
-
 	json::Value cmd_act(const ss_ &by, const json::Value &q)
 	{
 		if(!jstr(q, "fleet").empty()){
@@ -3742,8 +3564,10 @@ struct Module: public interface::Module
 			const sv_<ss_> members = members_of(g);
 			if(members.empty())
 				throw Exception("no servers in that fleet");
-			for(const ss_ &id : members)
-				apply_action(by, load("listings", id), q, reason);
+			mod_do([&](moderation::Interface *m){
+				for(const ss_ &id : members)
+					apply_action(m, by, load("listings", id), q, reason);
+			});
 			return json::Value((int64_t)members.size());
 		}
 		json::Value l = load("listings", jstr(q, "listing"));
@@ -3752,7 +3576,9 @@ struct Module: public interface::Module
 		const ss_ reason = jstr(q, "reason");
 		if(!in_set(reason, REASONS))
 			throw Exception("reason: one of the report reasons");
-		apply_action(by, l, q, reason);
+		mod_do([&](moderation::Interface *m){
+			apply_action(m, by, l, q, reason);
+		});
 		return listing_summary(load("listings", jstr(q, "listing")));
 	}
 
@@ -3772,77 +3598,6 @@ struct Module: public interface::Module
 				break;
 		}
 		return out;
-	}
-
-	json::Value cmd_audit()
-	{
-		json::Value out = json::array();
-		sv_<ss_> keys = store("audit")->list("");
-		for(size_t i = keys.size(); i > 0 && out.size() < 300; i--)
-			out.append(load("audit", keys[i - 1]));
-		return out;
-	}
-
-	json::Value cmd_appeals()
-	{
-		json::Value out = json::array();
-		for(const ss_ &id : store("appeals")->list("")){
-			json::Value a = load("appeals", id);
-			if(jstr(a, "state") != "open")
-				continue;
-			a.set("statement_text", load("statements", jstr(a, "statement")));
-			out.append(a);
-		}
-		return out;
-	}
-
-	json::Value cmd_decide_appeal(const ss_ &by, const json::Value &q)
-	{
-		json::Value a = load("appeals", jstr(q, "appeal"));
-		if(!a.is_object() || jstr(a, "state") != "open")
-			throw Exception("no such open appeal");
-		if(jstr(a, "acted_by") == by && !jstr(a, "acted_by").empty())
-			throw Exception("another moderator than the one who acted decides");
-		const ss_ outcome = jstr(q, "outcome");
-		if(outcome != "reverse" && outcome != "keep")
-			throw Exception("outcome: reverse or keep");
-		// An ID's suspension (10d): lifted
-		const ss_ lid = jstr(a, "listing");
-		if(outcome == "reverse" && lid.compare(0, 3, "id:") == 0){
-			json::Value id = load("ids", lid.substr(3));
-			if(id.is_object()){
-				id.set("suspended_until", (int64_t)0);
-				put("ids", lid.substr(3), id);
-			}
-			audit(by, lid, "restore", "appeal", jstr(q, "text"), false);
-		}
-		if(outcome == "reverse"){
-			json::Value l = load("listings", jstr(a, "listing"));
-			if(l.is_object()){
-				l.set("status", "active");
-				l.set("status_until", (int64_t)0);
-				l.del_key("relabel");
-				put("listings", jstr(l, "id"), l);
-				store("bans")->remove("listing:"+jstr(l, "id"));
-				audit(by, jstr(l, "id"), "restore", "appeal", jstr(q, "text"),
-						false);
-				statement(l, "restored", "appeal", jstr(q, "text"), by);
-			}
-		}
-		a.set("state", "decided");
-		a.set("outcome", outcome);
-		a.set("decided_by", by);
-		a.set("answer", jstr(q, "text"));
-		put("appeals", jstr(a, "id"), a);
-		const json::Value st = load("statements", jstr(a, "statement"));
-		const ss_ what = jstr(st, "listing_name")+" ("+jstr(st, "action")+
-				"): "+(outcome == "reverse" ? "reversed" : "kept")+
-				(jstr(q, "text").empty() ? "" : ". "+jstr(q, "text"));
-		event({jstr(a, "by")}, by, "Your appeal on "+what);
-		if(!jstr(a, "acted_by").empty())
-			event({jstr(a, "acted_by")}, by, "The appeal of your decision on "+
-					what+", by "+by);
-		return json::Value(true);
 	}
 
 	// The key that made a report becomes a trusted flagger's ([STARPORT]

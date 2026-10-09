@@ -6,6 +6,7 @@
 		{"module": "client_lua"},
 		{"module": "client_data"},
 		{"module": "storage"},
-		{"module": "accounts"}
+		{"module": "accounts"},
+		{"module": "moderation"}
 	]
 }

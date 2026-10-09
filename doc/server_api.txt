@@ -403,6 +403,16 @@ key, draw, count) end, and may make the window its own UI with
 accounts.server_window(key) and server_open(title) (Starport, Aitta);
 accounts.health_rows(w) adds rows to Health.
 
+builtin/moderation/api.h -- moderation::Interface: reports, their groups
+and weights, the queue, a moderator's decision, the audit log, statements
+of reasons and appeals, for any app (Starport's). It holds no state: each
+call names the app's moderation::Host, whose save keeps the records and
+whose callbacks say what a subject is (an id), weigh and bucket reports,
+and do the hide, delist, uphold and reverse. add_report, open_group,
+audit, statement; queue, group, decide, audit_log, appeal, appeals,
+decide_appeal. A callback runs in this module's thread and is handed the
+Interface to call; access() from it would be the module accessing itself.
+
 builtin/starport_announce/api.h -- starport_announce::Interface: the
 server's listing on its Starports (starport.json). accepts_ids / ids_mode
 / set_ids_mode (whether Starport IDs log in, written into starport.json);
@@ -481,6 +491,7 @@ builtin/loader/api.h: Interface, activate, get_module_info, access
 builtin/luanti/api.h: SceneReference, GameLoaded, RegionMap, ~RegionMap, get, set, to_world, Interface, set_region_map, set_progress_handler, run_game, import_world_settings, load_lua, import_world, add_player, set_admin, chat_send, remove_player, set_player_pos, player_fell, dig_node, punch_node, place_node, drop_wielded, punch_object, set_wield_index, chat_message, get_scene, call_string_list, set_server_physics, access
 builtin/luanti_mapgen/api.h: chunk_index, chunk_blockseed, Params, NodeProps, Biome, NoiseParams, Ore, Schematic, Decoration, LTree, GennotifyEvent, SectionMaps, BiomeQuery, ~BiomeQuery, biome_at, Interface, create_generator, list_mapgens, spawn_level, biome_query, take_gennotify, take_maps, access
 builtin/main_context/api.h: SceneReference, SceneDeleted, Interface, get_context, find_scene, check_scene, create_scene, delete_scene, sub_magic_event, access
+builtin/moderation/api.h: Host, save, name, subject, members, severity, thresholds, held, bucket, auto_act, uphold, undo_auto, reverse, decided, event, notify, Interface, add_report, open_group, audit, statement, queue, group, decide, audit_log, appeal, appeals, decide_appeal, access
 builtin/network/api.h: PeerId, address_bin, address_key, PeerInfo, Id, Packet, Type, NewClient, OldClient, HttpRequest, param, query_value, RateTable, Rate, ok, query_value_self_check, Interface, send, list_peers, pending_bytes, set_send_policy, declare, disconnect, http_respond, listen_on, claim_http_path, claim_ws_path, set_page_has_no_game, ws_send, ws_close, set_favicon, set_page_title, lan_announce, set_ws_origins, health_json, access, serve_brand
 builtin/replicate/api.h: SceneReference, PeerId, PeerJoinedScene, PeerLeftScene, Interface, assign_scene_to_peer, find_peers_on_scene, find_peers_that_know_node, set_node_filter, refresh_peer_nodes, emit_after_next_sync, sync_node_immediate, access
 builtin/starport_announce/api.h: IdLogin, Interface, accepts_ids, ids_mode, starports, set_game, set_ids_mode, is_blocked, announce_soon, verify_id_token, access

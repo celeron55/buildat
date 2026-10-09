@@ -29,6 +29,9 @@
 #      make the admin's listing a publisher it did not offer.
 #  10. With retention_days 0, a restart's daily pass clears the IDs'
 #      login and session addresses ([STARPORT_ADDR_RETENTION]).
+#  11. mod reverses the appeal; with a low threshold a new key's report
+#      hides the listing at once, with a statement; mod upholds it as a
+#      delist, and the reporter's key sees it upheld ([MODERATION_MODULE]).
 #
 #   KEEP_TMP=1 apps/starport/check.sh
 set -u
@@ -343,6 +346,40 @@ grep -Eq '"ok":true,"result":"[0-9a-f]{12}"' "$tmp/cl10.log" &&
 grep -q '"error":"no such offer"' "$tmp/cl11.log" ||
 	fail "a list took a listing that was not offered (cl11.log)"
 echo "ok: one open appeal a statement; a list takes only what is offered"
+# 11: what the check of builtin/moderation adds ([MODERATION_MODULE])
+ap=$(grep -Eo '"ok":true,"result":"[0-9a-f]{12}"' "$tmp/cl10.log" | cut -d'"' -f6)
+sp_reqs mod modpass1234 "{\"cmd\":\"decide_appeal\",\"appeal\":\"$ap\",\"outcome\":\"reverse\",\"text\":\"fine\"}" cl13.log
+sp_reqs admin checkpass '{"cmd":"set_settings","settings":{"thresholds":{"default":{"hide":0.005,"delist":8}}}}' cl14.log
+key2=$(head -c32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+receipt2=$(api -d "{\"listing\":\"$id\",\"reason\":\"scam\",\"key\":\"$key2\"}" \
+	"localhost:$SP/api/report" | python3 -c \
+	"import json,sys; print(json.load(sys.stdin)['receipt'])") ||
+	fail "no receipt for the second report"
+sp_reqs admin checkpass '{"cmd":"me"}' cl15.log
+sp_reqs mod modpass1234 "{\"cmd\":\"decide\",\"group\":\"$id|scam\",\"decision\":\"uphold\",\"action\":\"delist\",\"text\":\"upheld\",\"days\":0}" cl16.log
+sp_reqs admin checkpass '{"cmd":"me"}' cl17.log
+python3 - "$tmp" "$id" <<'PY' || fail "the appeal, the automatic hide or the uphold (cl13 to cl17.log)"
+import json, re, sys
+def res(name):
+    for line in open(sys.argv[1] + "/" + name, errors="replace"):
+        m = re.search(r'sp: (\{.*\})\s*$', line)
+        if m:
+            return json.loads(m.group(1))
+for n in ("cl13.log", "cl14.log", "cl16.log"):
+    assert res(n)["ok"], (n, res(n))
+def mine(name):
+    me = res(name)["result"]
+    l = [x for x in me["listings"] if x["id"] == sys.argv[2]][0]
+    return l["status"], [(s["action"], s["by"]) for s in me["statements"]]
+status, st = mine("cl15.log")
+assert status == "hidden" and ("restored", "mod") in st and ("hidden", "") in st, (status, st)
+status, st = mine("cl17.log")
+assert status == "delisted" and ("delist", "mod") in st, (status, st)
+PY
+api -d "{\"key\":\"$key2\",\"receipts\":[\"$receipt2\"]}" \
+	"localhost:$SP/api/report_status" | grep -q '"state":"upheld"' ||
+	fail "the second reporter does not see the report upheld"
+echo "ok: an appeal reversed, a report past a threshold hides, the moderator's uphold delists"
 # 10
 addrs(){ sqlite3 "$tmp/sp/apps/starport/saves/starport/save.sqlite" "SELECT count(*) FROM
 	store WHERE store IN ('ids', 'sessions') AND value LIKE '%\"address\":\"1%'"; }
