@@ -1159,7 +1159,7 @@ function M.new(magic, buildat, log, options)
 	end
 
 	-- The registry as it is until the node definitions arrive: air, and one
-	-- placeholder cube for everything else. set_node_definitions() replaces
+	-- placeholder cube for everything else. begin_node_definitions() replaces
 	-- it with one built from what the server says the nodes are.
 	local function base_registry()
 		local voxel_reg = buildat.createVoxelRegistry()
@@ -1191,7 +1191,7 @@ function M.new(magic, buildat, log, options)
 		return voxel_reg
 	end
 
-	-- On self rather than in a local: set_node_definitions() replaces both,
+	-- On self rather than in a local: begin_node_definitions() replaces both,
 	-- and mesh_block() has to use whichever is current
 	self.voxel_reg = base_registry()
 	local function new_atlas_registry()
@@ -1267,7 +1267,7 @@ function M.new(magic, buildat, log, options)
 	-- about a voxel's shape does not come through here any more -- that is
 	-- what the definitions' variants carry -- so this is only about colour.
 	local param2_look = {}
-	-- Set by set_node_definitions(), which is what knows how to build one
+	-- Set by begin_node_definitions(), which is what knows how to build one
 	local build_pair = nil
 
 	-- The pairs in one block that have no voxel id yet. Scanning 4096 voxels
@@ -1814,10 +1814,6 @@ function M.new(magic, buildat, log, options)
 				end
 			end
 		end
-	end
-
-	function self:get_block(x, y, z)
-		return blocks[block_key(x, y, z)]
 	end
 
 	-- The Luanti content id at a node position, or nil if the block holding
@@ -3636,18 +3632,6 @@ function M.new(magic, buildat, log, options)
 				end
 			end
 		end
-	end
-
-	-- The whole of the above in one call, for a caller with no frames to
-	-- spread it over
-	function self:set_node_definitions(defs, resolve_tile, palette_colors)
-		local step = self:begin_node_definitions(defs, resolve_tile,
-				palette_colors)
-		local done, cubes
-		repeat
-			done, cubes = step(1000000000)
-		until done
-		return cubes
 	end
 
 	-- Everything is out of date; used when what a node id means changes, which

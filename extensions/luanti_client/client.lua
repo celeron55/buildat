@@ -1585,17 +1585,6 @@ function M.new(socket, options, log)
 		conn:disconnect()
 	end
 
-	-- How many of each command arrived without being handled
-	function self:unhandled_summary()
-		local names = {}
-		for command, count in pairs(self.unhandled) do
-			names[#names + 1] = (TOCLIENT_NAME[command] or
-					string.format("0x%02x", command)).." x"..count
-		end
-		table.sort(names)
-		return table.concat(names, ", ")
-	end
-
 	send_init()
 	return self
 end
