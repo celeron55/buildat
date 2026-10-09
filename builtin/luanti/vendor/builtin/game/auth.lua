@@ -21,7 +21,10 @@ core.builtin_auth_handler = {
 			privileges[priv] = true
 		end
 		-- If singleplayer, give all privileges except those marked as give_to_singleplayer = false
-		if core.is_singleplayer() then
+		-- MODIFIED for buildat ([SECURITY_RUN_4]): the owner's alone. Every
+		-- other peer of a launcher's game is client<n> -- another user on
+		-- the machine, or the LAN once opened -- and has what its entry holds
+		if core.is_singleplayer() and name == core.__singleplayer_name then
 			for priv, def in pairs(core.registered_privileges) do
 				if def.give_to_singleplayer then
 					privileges[priv] = true

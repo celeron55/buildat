@@ -1892,7 +1892,8 @@ end
 function core.__drop_wielded(playername, count)
 	local id = players[playername]
 	local ref = id and core.object_refs[id]
-	if not ref then
+	-- Not without interact, as in Luanti ([SECURITY_RUN_4])
+	if not ref or not core.check_player_privs(playername, {interact = true}) then
 		return false
 	end
 	local inv = ref:get_inventory()
@@ -2290,7 +2291,9 @@ function core.__inventory_action(playername, a)
 		return
 	end
 	if a[1] == "craft" then
-		do_craft(ref, tonumber(a[2]) or 1)
+		if core.check_player_privs(playername, {interact = true}) then
+			do_craft(ref, tonumber(a[2]) or 1)
+		end
 		return
 	end
 	if a[1] ~= "move" then

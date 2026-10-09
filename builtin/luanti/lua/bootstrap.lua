@@ -3821,6 +3821,7 @@ local singleplayer_name = os.getenv("BUILDAT_LUANTI_NAME")
 if singleplayer_name == nil or singleplayer_name == "" then
 	singleplayer_name = "singleplayer"
 end
+core.__singleplayer_name = singleplayer_name
 
 function core.get_player_privs(name)
 	if (core.is_singleplayer() and name == singleplayer_name) or
