@@ -1863,7 +1863,8 @@ buildat.safe.take_screenshot          = __buildat_take_screenshot
 --   save_file(name, data) -> the path it went to ("" for a download), or
 --       nil and why not; never overwrites
 --   pick_file([accept]) -> true: the web's file picker, or on native the
---       client's own list of <user>/exports (extension/network)
+--       client's own, which starts in <user>/exports and browses the disk
+--       (extension/network)
 --   picked_file() -> name, data once the picked file is read, else nil;
 --       nil and why once the user picked nothing or it could not be read
 -- **No listing or reading of <user>/exports** ([SECURITY_RUN_1]): every
