@@ -594,6 +594,17 @@ function M.safe.keyboard_page(win)
 		if newest_page() ~= page or not arranged or drop_open then
 			return
 		end
+		-- So has a dialog over the page, an item of its own focused (the
+		-- file picker over Hearth, [HEARTH_USABILITY]: Down went to the
+		-- sidebar under it, Enter opened a topic). Not a plain element:
+		-- uistack focuses the one under a dialog it pops.
+		local f = magic.ui.focusElement
+		if f and not win:HasRecursiveFocus() then
+			local t = f:GetTypeName()
+			if t == "Button" or t == "LineEdit" or t == "DropDownList" then
+				return
+			end
+		end
 		dirty = true
 		rewalk(page)
 		if #page.items == 0 then
