@@ -20,6 +20,10 @@
 //   ["selall"]              Ctrl+A
 //   ["click", x, y]         left button, in CSS pixels
 //   ["mouse", x, y]         the pointer there, no button
+//   ["wheel", x, y, dy]     the mouse wheel turned over x, y by dy CSS
+//                           pixels (positive scrolls down); it moves no
+//                           pointer, so a "mouse" step there goes first or
+//                           the UI looks for what is under the old one
 //   ["tap", x, y]           a finger's touch there and up again
 //   ["hold", x, y, ms]      a finger held still there for ms (Firefox only)
 //   ["drag", x0, y0, x1, y1, "touch"]
@@ -141,6 +145,9 @@ async function firefox() {
 		mouse: (x, y) => c.send("input.performActions", {context: ctx,
 				actions: [{type: "pointer", id: "m", actions: [
 				{type: "pointerMove", x, y}]}]}),
+		wheel: (x, y, dy) => c.send("input.performActions", {context: ctx,
+				actions: [{type: "wheel", id: "w", actions: [
+				{type: "scroll", x, y, deltaX: 0, deltaY: dy}]}]}),
 		tap: (x, y) => c.send("input.performActions", {context: ctx,
 				actions: [{type: "pointer", id: "t", parameters:
 				{pointerType: "touch"}, actions: [
@@ -228,6 +235,8 @@ async function chrome() {
 		},
 		mouse: (x, y) => c.send("Input.dispatchMouseEvent", {type: "mouseMoved",
 				x, y}),
+		wheel: (x, y, dy) => c.send("Input.dispatchMouseEvent", {
+				type: "mouseWheel", x, y, deltaX: 0, deltaY: dy}),
 		tap: async (x, y) => {
 			await c.send("Input.dispatchTouchEvent", {type: "touchStart",
 					touchPoints: [{x, y}]});
