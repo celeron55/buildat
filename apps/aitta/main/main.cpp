@@ -4,12 +4,17 @@
 // apps, as an app. An author joins it (builtin/accounts: a local account
 // or a Starport ID, as the server's admin set up its logins) and binds an
 // author name to their key; `bin/buildat aitta publish` uploads a signed
-// release; Aitta checks it and lists it. Everything listed is unreviewed.
-// The admin can delist.
+// release; Aitta checks it and lists it, unreviewed. The server's
+// moderators and admins review it ([AITTA_REVIEW], below): reviewed, needs
+// changes, relabelled or delisted, its "review" in the list. Anyone
+// reports a release ([AITTA_REPORTS]); the moderators decide through
+// builtin/moderation, the author told and able to appeal. The admin can
+// delist.
 //
 // The HTTP API, under /api/aitta/ on the server's port, JSON out, a
 // refusal {"ok": false, "error": ...} with status 200:
-//   GET  list                       the listed releases
+//   GET  list                       the listed releases, and "delisted":
+//                                   those out of it, each with why
 //   GET  info?key=<public key>      the licences taken here, and the
 //                                   author the key is bound to ("" for
 //                                   none): what the client's publish
@@ -17,12 +22,18 @@
 //   GET  release?id=author/name/version  one, with its changelog's text
 //                                   ([PACKAGE_SUBJECT]: what a Hearth
 //                                   posts as the release's thread)
-//   GET  archive/<sha256>.zip|.sig  a release's two files
+//   GET  archive/<sha256>.zip|.sig  a release's two files; ?ticket= a
+//                                   reviewer's playtest's, once each, of
+//                                   a release not listed too
 //   POST upload_begin?size=N        body: the release's .sig. Its key must
 //                                   be bound to an author, and the
 //                                   signature good for the hash it names.
 //   POST upload_part?sha256=&offset=  body: the next bytes, 60000 at most
 //   POST upload_end?sha256=         the checks, and the listing
+//   POST report                     {release, reason, text, key}: a
+//                                   report, its receipt; or the package
+//                                   page's form, urlencoded
+//   POST report_status              {key, receipts}: their outcomes
 // And a browser's pages ([FRONT_PAGES]), the web client at /app:
 //   GET  /                          each package's latest release
 //   GET  /p/<author>/<name>         a package's listed releases
@@ -33,7 +44,11 @@
 // The records are in the save "aitta": stores authors (author -> its key
 // and account), keys (key -> author), owners (account -> author),
 // releases ("author/name/version" -> the manifest's fields, sha256, size,
-// key, time, delisted), changelogs (the same key -> {text}), settings. The archives are files, by hash, in
+// key, time, delisted, review, review_note, reviewed_by, playtested_by),
+// changelogs (the same key -> {text}), relabels (author/name -> the
+// audience a reviewer set), reporters (a report key's hash -> its
+// record), settings, and builtin/moderation's reports, groups, audit,
+// statements and appeals. The archives are files, by hash, in
 // <user>/apps/<app>/archives.
 #include "core/log.h"
 #include "core/json.h"
@@ -52,6 +67,7 @@
 #include "network/api.h"
 #include "storage/api.h"
 #include "accounts/api.h"
+#include "moderation/api.h"
 #include <ctime>
 #include <map>
 #include <set>
@@ -84,6 +100,23 @@ static bool plain_name(const ss_ &s)
 			return false;
 	return true;
 }
+
+// [AITTA_REPORTS] What a release is reported for: Starport's reasons and
+// Aitta's own (malware, licence, broken), each its severity in the queue
+static const std::map<ss_, int> REASONS = {
+	{"csam", 100}, {"malware", 90}, {"illegal", 80}, {"scam", 60},
+	{"harassment", 50}, {"impersonation", 40}, {"licence", 30},
+	{"category", 20}, {"broken", 10}, {"spam", 10}, {"other", 5},
+};
+// And what a person reads for each, in the order a form offers them
+static const char *const REASON_NAMES[][2] = {
+	{"malware", "Malware or harmful code"}, {"licence", "Licence or "
+	"copyright violation"}, {"broken", "Broken"}, {"category", "Wrong "
+	"audience"}, {"illegal", "Illegal content"}, {"csam", "Child sexual "
+	"abuse material"}, {"harassment", "Harassment or abuse"}, {"scam",
+	"Scam or phishing"}, {"impersonation", "Impersonation"}, {"spam",
+	"Spam"}, {"other", "Other"},
+};
 
 static ss_ read_file(const ss_ &path)
 {
@@ -118,6 +151,23 @@ static json::Value default_settings()
 	// [FRONT_PAGES]: seconds a release is listed before the page at /
 	// shows it, so it can be delisted first
 	s.set("page_delay", (int64_t)3600);
+	// [AITTA_REPORTS] What a report weighs: anonymous, and with the
+	// client's report key (times its record of upheld and rejected ones).
+	// simplified: a Starport ID's standing is not asked; a key is a key
+	s.set("anon_weight", 0.01);
+	s.set("key_weight", 0.1);
+	// A release reported past "hide" is out of the list until a moderator
+	// looks, past "delist" delisted; malware and CSAM at once
+	json::Value th = json::object(), d = json::object(),
+			now = json::object();
+	d.set("hide", 3.0);
+	d.set("delist", 6.0);
+	now.set("hide", 1.0);
+	now.set("delist", 2.0);
+	th.set("default", d);
+	th.set("malware", now);
+	th.set("csam", now);
+	s.set("thresholds", th);
 	return s;
 }
 
@@ -129,7 +179,7 @@ struct Upload {
 	int64_t started = 0;
 };
 
-struct Module: public interface::Module
+struct Module: public interface::Module, public moderation::Host
 {
 	interface::Server *m_server;
 	storage::Save *m_save = nullptr;
@@ -170,6 +220,13 @@ struct Module: public interface::Module
 	{
 		store(store_name)->set(key, v.stringify());
 	}
+	// A setting, its default where the save has none
+	json::Value setting(const char *k)
+	{
+		const json::Value &v = m_settings.get(k);
+		return v.is_undefined() ? default_settings().get(k) : v;
+	}
+
 	ss_ get(const char *store_name, const ss_ &key)
 	{
 		ss_ v;
@@ -282,6 +339,10 @@ struct Module: public interface::Module
 				return http_upload_part(r);
 			if(call == "upload_end")
 				return http_upload_end(r);
+			if(call == "report")
+				return http_report(r);
+			if(call == "report_status")
+				return http_report_status(r);
 		} catch(std::exception &e){
 			return refuse(r, e.what());
 		}
@@ -293,7 +354,8 @@ struct Module: public interface::Module
 		json::Value list = json::array();
 		for(const ss_ &k : store("releases")->list("")){
 			json::Value rel = load("releases", k);
-			if(!with_delisted && rel.get("delisted").is_true())
+			if(!with_delisted && (rel.get("delisted").is_true() ||
+					rel.get("hidden").is_true()))
 				continue;
 			list.append(rel);
 		}
@@ -309,7 +371,143 @@ struct Module: public interface::Module
 		json::Value v = json::object();
 		v.set("ok", true);
 		v.set("releases", listed_releases());
+		// [AITTA_REPORTS] And what is out of it, with why: a client notes
+		// it on the tile of one it has installed
+		json::Value out = json::array();
+		for(const ss_ &k : store("releases")->list("")){
+			const json::Value rel = load("releases", k);
+			if(!rel.get("delisted").is_true() && !rel.get("hidden").is_true())
+				continue;
+			json::Value o = json::object();
+			for(const char *f : {"author", "name", "version", "sha256"})
+				o.set(f, jstr(rel, f));
+			o.set("why", jstr(rel, "delisted_why"));
+			out.append(o);
+		}
+		v.set("delisted", out);
 		respond(r, v);
+	}
+
+	// [AITTA_REPORTS] A report on a release: JSON {release, reason, text,
+	// key (the client's report key for this Aitta, optional)}, or the
+	// package page's form with the same fields, urlencoded, answered by a
+	// page. Ten an hour a network, five a key; the receipt is the report's
+	// id, its outcome asked by the key (report_status).
+	void http_report(const network::HttpRequest &r)
+	{
+		const bool form = r.body.empty() || r.body[0] != '{';
+		json::Value b = form ? json::object() :
+				json::load_string(r.body.c_str());
+		if(form)
+			for(const char *f : {"release", "reason", "text"})
+				b.set(f, network::query_value(r.body, f));
+		auto answer = [&](const ss_ &error, const ss_ &receipt){
+			if(!form){
+				if(!error.empty())
+					return refuse(r, error);
+				json::Value v = json::object();
+				v.set("ok", true);
+				v.set("receipt", receipt);
+				return respond(r, v);
+			}
+			using interface::web_brand::html;
+			const ss_ body = (error.empty() ? "<p>Sent; a moderator will "
+					"look. Receipt "+html(receipt)+".</p>" : "<p>Not sent: "+
+					html(error)+"</p>")+"<p><a href=\"/\">Aitta</a></p>";
+			network::access(m_server, [&](network::Interface *iface){
+				iface->http_respond(r.peer, 200, "text/html; charset=utf-8",
+						interface::web_brand::page("Report - Aitta", "Aitta",
+						body), "");
+			});
+		};
+		const ss_ net = network::address_bin(r.address);
+		if(!m_hits.ok("report", net, 10, 3600))
+			return answer("too many reports from your network; try later", "");
+		const ss_ id = jstr(b, "release");
+		const json::Value rel = load("releases", id);
+		if(!rel.is_object() || rel.get("delisted").is_true())
+			return answer("no such release", "");
+		const ss_ reason = jstr(b, "reason");
+		if(!REASONS.count(reason))
+			return answer("reason: one of csam, malware, illegal, scam, "
+					"harassment, impersonation, licence, category, broken, "
+					"spam, other", "");
+		const ss_ text = jstr(b, "text");
+		if(text.size() > 2000)
+			return answer("text: at most 2000 characters", "");
+		ss_ h;
+		const ss_ key = jstr(b, "key");
+		if(!key.empty()){
+			if(!is_hex(key, 64))
+				return answer("key: 64 hex digits", "");
+			h = interface::sha256::hex(interface::sha256::calculate(key));
+			if(!m_hits.ok("report_key", h, 5, 3600))
+				return answer("too many reports from this key; try later", "");
+		}
+		json::Value rep = json::object();
+		const ss_ rid = interface::sha256::hex(
+				interface::bignum::random_bytes(8)).substr(0, 16);
+		rep.set("id", rid);
+		rep.set("listing", id);
+		rep.set("reason", reason);
+		rep.set("text", text);
+		rep.set("key", h);
+		// The network, not the address, under the module's field, which
+		// it keeps from the moderators
+		rep.set("address", net);
+		rep.set("ts", now_s());
+		rep.set("weight", key_weight(h));
+		rep.set("group", id+"|"+reason);
+		moderation::access(m_server, [&](moderation::Interface *m){
+			m->add_report(this, rep, json::object());
+		});
+		log_i(MODULE, "A report on %s: %s", cs(id), cs(reason));
+		answer("", rid);
+	}
+
+	// {key, receipts: [id...]}: each of the key's reports' {receipt,
+	// state, outcome}
+	void http_report_status(const network::HttpRequest &r)
+	{
+		const json::Value b = json::load_string(r.body.c_str());
+		const ss_ key = jstr(b, "key");
+		if(!is_hex(key, 64))
+			return refuse(r, "key: 64 hex digits");
+		const ss_ h = interface::sha256::hex(interface::sha256::calculate(key));
+		const json::Value &ids = b.get("receipts");
+		json::Value out = json::array();
+		for(unsigned i = 0; ids.is_array() && i < ids.size() && i < 100; i++){
+			if(!ids.at(i).is_string())
+				continue;
+			const json::Value rep = load("reports", ids.at(i).as_string());
+			if(!rep.is_object() || jstr(rep, "key") != h)
+				continue;
+			json::Value o = json::object();
+			o.set("receipt", jstr(rep, "id"));
+			o.set("state", jstr(rep, "state"));
+			o.set("outcome", jstr(rep, "outcome"));
+			out.append(o);
+		}
+		json::Value v = json::object();
+		v.set("ok", true);
+		v.set("reports", out);
+		respond(r, v);
+	}
+
+	// A keyed report's weight: the setting, more for a record of upheld
+	// reports and less for rejected ones, as Starport's
+	double key_weight(const ss_ &h)
+	{
+		const double anon = setting("anon_weight").as_number();
+		if(h.empty())
+			return anon;
+		const json::Value k = load("reporters", h);
+		auto n = [&](const char *f){
+			return k.get(f).is_number() ? (int64_t)k.get(f).as_number() : 0;
+		};
+		return std::max(anon, setting("key_weight").as_number() *
+				(1.0 + 0.1 * std::min<int64_t>(n("upheld"), 10)) /
+				(1.0 + 0.5 * n("rejected")));
 	}
 
 	void http_info(const network::HttpRequest &r)
@@ -370,7 +568,8 @@ struct Module: public interface::Module
 				", "+date((int64_t)rel.get("time")
 				.as_number())+", "+(size < 1000 ? itos(size)+" bytes" : size < 1000000 ?
 				itos(size / 1000)+" kB" :
-				itos(size / 1000000)+" MB")+", unreviewed</span>";
+				itos(size / 1000000)+" MB")+", "+(jstr(rel, "review") ==
+				"reviewed" ? "reviewed" : "unreviewed")+"</span>";
 		if(!jstr(rel, "description").empty())
 			b += "<br>"+html(jstr(rel, "description"));
 		b += "<br><span class=\"meta\">Licence: code "+
@@ -437,9 +636,27 @@ struct Module: public interface::Module
 				return send(404, html_type, interface::web_brand::page(
 						"Not found", "Aitta", "<p>No package of that name is "
 						"listed here. <a href=\"/\">The list</a>.</p>"));
+			// [AITTA_REPORTS] A report from the web: anonymous, so it
+			// weighs little alone
+			ss_ f = "<h2>Report</h2><form method=\"post\" action=\""
+					"/api/aitta/report\"><p><select name=\"release\">";
+			for(const json::Value &rel : rels)
+				if(pkg(rel) == want)
+					f += "<option>"+html(pkg(rel)+"/"+jstr(rel, "version"))+
+							"</option>";
+			f += "</select> <select name=\"reason\">";
+			for(const auto &x : REASON_NAMES)
+				f += "<option value=\""+ss_(x[0])+"\">"+x[1]+"</option>";
+			f += "</select></p><p><textarea name=\"text\" maxlength=\"2000\" "
+					"rows=\"3\" cols=\"60\" placeholder=\"What is wrong "
+					"(optional)\"></textarea></p><p><button>Send the report"
+					"</button></p><p class=\"meta\">Anonymous from here, so "
+					"it weighs little alone; the client's carries its report "
+					"key. A moderator of this Aitta decides.</p></form>\n";
 			return send(200, html_type, interface::web_brand::page(want+
 					" - Aitta", "Aitta", "<h1>"+html(want)+"</h1><p class=\""
-					"meta\">Every listed release, the newest first.</p>\n"+c));
+					"meta\">Every listed release, the newest first.</p>\n"+c+
+					f));
 		}
 		std::set<ss_> seen;
 		for(const json::Value &rel : rels)
@@ -447,7 +664,8 @@ struct Module: public interface::Module
 				c += release_box(rel, true);
 		ss_ body = "<h1>Aitta</h1><p>A registry of Buildat apps and "
 				"extensions: their authors sign each release with their own "
-				"key, and Aitta lists it. Nothing here is reviewed. An app "
+				"key, and Aitta lists it. A release is unreviewed until this "
+				"server's reviewers mark it reviewed. An app "
 				"runs in the server's box, where it reaches only its own "
 				"saves.</p><p>To install one, open the Buildat client and "
 				"pick <b>Apps from Aitta</b>; it checks the signature before "
@@ -478,7 +696,8 @@ struct Module: public interface::Module
 		for(const ss_ &k : store("releases")->list("")){
 			json::Value rel = load("releases", k);
 			if(jstr(rel, "sha256") == sha)
-				return !rel.get("delisted").is_true();
+				return !rel.get("delisted").is_true() &&
+						!rel.get("hidden").is_true();
 		}
 		return false;
 	}
@@ -489,7 +708,7 @@ struct Module: public interface::Module
 		const ss_ sha = file.substr(0, dot), ext = dot == ss_::npos ? "" :
 				file.substr(dot);
 		if(!is_hex(sha, 64) || (ext != ".zip" && ext != ".sig") ||
-				!listed_hash(sha))
+				!(ticket_ok(r.param("ticket"), sha, ext) || listed_hash(sha)))
 			return respond(r, 404, "text/plain", "Not found\n");
 		respond(r, 200, ext == ".zip" ? "application/zip" : "application/json",
 				read_file(m_archives+"/"+sha+ext));
@@ -506,6 +725,12 @@ struct Module: public interface::Module
 		if(author.empty())
 			return refuse(r, "this key is not bound to an author here: "
 					"join Aitta and bind it first");
+		// [AITTA_REPORTS] A moderator's bar
+		const json::Value bar = load("authors", author).get("barred_until");
+		if(bar.is_number() && (bar.as_number() < 0 ||
+				bar.as_number() > now_s()))
+			return refuse(r, "the author "+author+" is barred from "
+					"publishing here: see your statements on Aitta's page");
 		if(!interface::aitta::verify_hash(key, sha, jstr(sig, "signature")))
 			return refuse(r, "the signature does not match the hash");
 		const json::Value &max = m_settings.get("max_size");
@@ -623,6 +848,14 @@ struct Module: public interface::Module
 		rel.set("key", jstr(u.sig, "key"));
 		rel.set("time", now_s());
 		rel.set("delisted", false);
+		// A reviewer's relabel holds for the package's later releases
+		// ([AITTA_REVIEW]). simplified: until a reviewer relabels it again
+		const json::Value lock = load("relabels", jstr(m, "author")+"/"+
+				jstr(m, "name"));
+		if(lock.is_object() && jstr(lock, "audience") != jstr(m, "audience")){
+			rel.set("audience_manifest", jstr(m, "audience"));
+			rel.set("audience", jstr(lock, "audience"));
+		}
 		put("releases", id, rel);
 		if(!changelog.empty()){
 			json::Value c = json::object();
@@ -650,6 +883,522 @@ struct Module: public interface::Module
 	}
 
 	// -----------------------------------------------------------------------
+	// [AITTA_REVIEW] The review: the server's moderators and admins
+	// (accounts' LV_MODERATOR and up) read a release's files and its diff
+	// against the package's last reviewed version, playtest it by a ticket,
+	// and mark it: reviewed, needs changes (a note to the author),
+	// relabelled (its audience, kept for the package's later releases) or
+	// delisted (builtin/moderation: a statement of reasons to the author).
+	// Each mark is in the audit log, with whether it was playtested.
+
+	// A release's files, unpacked once under the cache.
+	// simplified: kept until the cache is cleared; a sweep of the old ones
+	// when a reviewer's cache grows past what the disk minds
+	ss_ unpacked(const json::Value &rel)
+	{
+		const ss_ sha = jstr(rel, "sha256");
+		const ss_ dir = m_tmp+"/review/"+sha;
+		if(!interface::fs::path_exists(dir+"/meta.json")){
+			interface::fs::remove_all(dir);
+			interface::fs::create_directories(dir);
+			interface::zip_extract(m_archives+"/"+sha+".zip", dir);
+		}
+		return dir;
+	}
+
+	json::Value review_release(const ss_ &id)
+	{
+		const json::Value rel = load("releases", id);
+		if(!rel.is_object())
+			throw Exception("no release "+id);
+		return rel;
+	}
+
+	// The package's latest reviewed release before this one, or undefined
+	json::Value review_base(const json::Value &rel)
+	{
+		json::Value best;
+		for(const ss_ &k : store("releases")->list(jstr(rel, "author")+"/"+
+				jstr(rel, "name")+"/")){
+			const json::Value o = load("releases", k);
+			// simplified: by publish time in seconds; two releases of one
+			// second are both "before" each other
+			if(jstr(o, "review") != "reviewed" || rel_id(o) == rel_id(rel) ||
+					o.get("time").as_number() > rel.get("time").as_number())
+				continue;
+			if(!best.is_object() || o.get("time").as_number() >
+					best.get("time").as_number())
+				best = o;
+		}
+		return best;
+	}
+
+	static ss_ rel_id(const json::Value &rel)
+	{
+		return jstr(rel, "author")+"/"+jstr(rel, "name")+"/"+
+				jstr(rel, "version");
+	}
+
+	// Every file under dir, '/' separated, sorted
+	static void files_of(const ss_ &dir, const ss_ &prefix,
+			sm_<ss_, ss_> &out)
+	{
+		for(const auto &n : interface::fs::list_directory(dir)){
+			if(n.is_directory)
+				files_of(dir+"/"+n.name, prefix+n.name+"/", out);
+			else
+				out[prefix+n.name] = dir+"/"+n.name;
+		}
+	}
+
+	// No NUL in its first 8000 bytes, as git tells
+	static bool is_text(const ss_ &data)
+	{
+		const size_t z = data.find('\0');
+		return z == ss_::npos || z >= 8000;
+	}
+
+	static sv_<ss_> lines_of(const ss_ &s)
+	{
+		sv_<ss_> out;
+		std::istringstream is(s);
+		ss_ line;
+		while(std::getline(is, line))
+			out.push_back(line);
+		return out;
+	}
+
+	// The changed lines, "-" and "+", with two of context and "..." for
+	// what is left out between. simplified: a whole-file LCS, so a file
+	// pair over 3000 lines each is "too long to compare"; Myers' diff is
+	// the upgrade
+	static ss_ line_diff(const ss_ &a_text, const ss_ &b_text)
+	{
+		const sv_<ss_> a = lines_of(a_text), b = lines_of(b_text);
+		const size_t n = a.size(), m = b.size();
+		if((n + 1) * (m + 1) > 9000000)
+			return "(too long to compare here: "+itos(n)+" and "+itos(m)+
+					" lines)\n";
+		sv_<sv_<uint32_t>> L(n + 1, sv_<uint32_t>(m + 1, 0));
+		for(size_t i = n; i-- > 0;)
+			for(size_t j = m; j-- > 0;)
+				L[i][j] = a[i] == b[j] ? L[i + 1][j + 1] + 1 :
+						std::max(L[i + 1][j], L[i][j + 1]);
+		sv_<ss_> ops; // " x", "-x", "+x"
+		size_t i = 0, j = 0;
+		while(i < n || j < m){
+			if(i < n && j < m && a[i] == b[j])
+				ops.push_back(" "+a[i++]), j++;
+			else if(j < m && (i == n || L[i][j + 1] >= L[i + 1][j]))
+				ops.push_back("+"+b[j++]);
+			else
+				ops.push_back("-"+a[i++]);
+		}
+		ss_ out;
+		bool skipped = false;
+		for(size_t k = 0; k < ops.size(); k++){
+			bool near = false;
+			for(size_t d = (k < 2 ? 0 : k - 2); d < ops.size() && d <= k + 2;
+					d++)
+				near = near || ops[d][0] != ' ';
+			if(near){
+				out += ops[k]+"\n";
+				skipped = false;
+			} else if(!skipped){
+				out += "...\n";
+				skipped = true;
+			}
+		}
+		return out;
+	}
+
+	json::Value review_diff(const json::Value &rel)
+	{
+		const json::Value base = review_base(rel);
+		sm_<ss_, ss_> now, before;
+		files_of(unpacked(rel), "", now);
+		if(base.is_object())
+			files_of(unpacked(base), "", before);
+		json::Value added = json::array(), removed = json::array(),
+				changed = json::array();
+		for(auto &f : now)
+			if(!before.count(f.first))
+				added.append(f.first);
+		for(auto &f : before){
+			if(!now.count(f.first)){
+				removed.append(f.first);
+				continue;
+			}
+			const ss_ a = read_file(f.second), b = read_file(now[f.first]);
+			if(a == b)
+				continue;
+			json::Value c = json::object();
+			c.set("path", f.first);
+			c.set("diff", is_text(a) && is_text(b) ? line_diff(a, b) :
+					"(binary: "+itos((int64_t)a.size())+" bytes, now "+
+					itos((int64_t)b.size())+")\n");
+			changed.append(c);
+		}
+		json::Value v = json::object();
+		v.set("base", base.is_object() ? rel_id(base) : ss_());
+		v.set("added", added);
+		v.set("removed", removed);
+		v.set("changed", changed);
+		return v;
+	}
+
+	// One ticket a playtest ([AITTA_REVIEW]): a release's two files, once
+	// each, for an hour, to whoever has it. simplified: in memory; a
+	// restart drops them, and the reviewer asks for another
+	struct Ticket {
+		ss_ release, sha, by;
+		int64_t expires = 0;
+		bool zip = false, sig = false;
+	};
+	sm_<ss_, Ticket> m_tickets;
+
+	// Whether the file is the ticket's, unfetched, in time; marks it
+	bool ticket_ok(const ss_ &t, const ss_ &sha, const ss_ &ext)
+	{
+		auto it = m_tickets.find(t);
+		if(t.empty() || it == m_tickets.end() || it->second.sha != sha ||
+				now_s() > it->second.expires)
+			return false;
+		bool &used = ext == ".zip" ? it->second.zip : it->second.sig;
+		if(used)
+			return false;
+		used = true;
+		if(ext == ".zip"){
+			json::Value rel = load("releases", it->second.release);
+			json::Value by = rel.get("playtested_by").is_array() ?
+					rel.get("playtested_by").deepcopy() : json::array();
+			by.append(it->second.by);
+			rel.set("playtested_by", by);
+			put("releases", it->second.release, rel);
+			log_i(MODULE, "Playtest: %s fetched %s", cs(it->second.by),
+					cs(it->second.release));
+		}
+		return true;
+	}
+
+	bool playtested(const json::Value &rel, const ss_ &by)
+	{
+		const json::Value &p = rel.get("playtested_by");
+		for(unsigned i = 0; p.is_array() && i < p.size(); i++)
+			if(p.at(i).is_string() && p.at(i).as_string() == by)
+				return true;
+		return false;
+	}
+
+	json::Value handle_review(const ss_ &name, const ss_ &cmd,
+			const json::Value &q)
+	{
+		if(cmd == "review_list"){
+			// Oldest first: unreviewed (not yet, or needs changes),
+			// reviewed, delisted, or all
+			const ss_ f = jstr(q, "filter", "unreviewed");
+			json::Value all = releases(true);
+			sv_<json::Value> out;
+			for(unsigned i = 0; i < all.size(); i++){
+				const json::Value &r = all.at(i);
+				const bool del = r.get("delisted").is_true();
+				const bool rev = jstr(r, "review") == "reviewed";
+				if(f == "all" || (f == "delisted" && del) ||
+						(f == "reviewed" && rev && !del) ||
+						(f == "unreviewed" && !rev && !del))
+					out.push_back(r);
+			}
+			std::sort(out.begin(), out.end(), [](const json::Value &a,
+					const json::Value &b){
+				return a.get("time").as_number() < b.get("time").as_number();
+			});
+			json::Value v = json::array();
+			for(const json::Value &r : out)
+				v.append(r);
+			return v;
+		}
+		const ss_ id = jstr(q, "release");
+		json::Value rel = review_release(id);
+		if(cmd == "review_release"){
+			json::Value v = json::object();
+			v.set("release", rel);
+			const json::Value c = load("changelogs", id);
+			v.set("changelog", c.is_object() ? jstr(c, "text") : ss_());
+			sm_<ss_, ss_> files;
+			files_of(unpacked(rel), "", files);
+			json::Value fl = json::array();
+			for(auto &f : files){
+				json::Value x = json::object();
+				x.set("path", f.first);
+				x.set("size", (int64_t)interface::fs::file_size(f.second));
+				fl.append(x);
+			}
+			v.set("files", fl);
+			const json::Value base = review_base(rel);
+			v.set("base", base.is_object() ? rel_id(base) : ss_());
+			v.set("playtested", playtested(rel, name));
+			json::Value hist = json::array(), entries;
+			moderation::access(m_server, [&](moderation::Interface *m){
+				entries = m->audit_log(this);
+			});
+			for(unsigned i = 0; i < entries.size(); i++)
+				if(jstr(entries.at(i), "listing") == id)
+					hist.append(entries.at(i));
+			v.set("history", hist);
+			return v;
+		}
+		if(cmd == "review_file"){
+			sm_<ss_, ss_> files;
+			files_of(unpacked(rel), "", files);
+			auto it = files.find(jstr(q, "path"));
+			if(it == files.end())
+				throw Exception("no file "+jstr(q, "path")+" in "+id);
+			const ss_ data = read_file(it->second);
+			// simplified: the first 64 KiB, as a Hearth message holds less
+			return json::Value(!is_text(data) ? "(binary, "+
+					itos((int64_t)data.size())+" bytes)" : data.size() >
+					64 * 1024 ? data.substr(0, 64 * 1024)+"\n(... "+
+					itos((int64_t)data.size())+" bytes in all)" : data);
+		}
+		if(cmd == "review_diff")
+			return review_diff(rel);
+		if(cmd == "playtest"){
+			Ticket t;
+			t.release = id;
+			t.sha = jstr(rel, "sha256");
+			t.by = name;
+			t.expires = now_s() + 3600;
+			for(auto it = m_tickets.begin(); it != m_tickets.end();)
+				it = now_s() > it->second.expires ? m_tickets.erase(it) : ++it;
+			const ss_ ticket = interface::sha256::hex(
+					interface::bignum::random_bytes(16));
+			m_tickets[ticket] = t;
+			log_i(MODULE, "Playtest: a ticket for %s to %s", cs(id), cs(name));
+			json::Value v = json::object();
+			v.set("ticket", ticket);
+			v.set("release", id);
+			v.set("sha256", t.sha);
+			return v;
+		}
+		if(cmd == "review_mark"){
+			const ss_ action = jstr(q, "action");
+			const ss_ note = jstr(q, "note");
+			if(note.size() > 4000)
+				throw Exception("the note: at most 4000 characters");
+			const ss_ pkg = jstr(rel, "author")+"/"+jstr(rel, "name");
+			if(action == "reviewed"){
+				rel.set("review", "reviewed");
+				rel.set("review_note", "");
+			} else if(action == "needs_changes"){
+				if(note.empty())
+					throw Exception("say what needs changing");
+				rel.set("review", "needs_changes");
+				rel.set("review_note", note);
+			} else if(action == "relabel"){
+				const ss_ a = jstr(q, "audience");
+				if(a != "everyone" && a != "teen" && a != "adult")
+					throw Exception("audience: everyone, teen or adult");
+				rel.set("audience", a);
+				json::Value lock = json::object();
+				lock.set("audience", a);
+				lock.set("by", name);
+				put("relabels", pkg, lock);
+			} else if(action == "delist"){
+				rel.set("delisted", true);
+			} else
+				throw Exception("action: reviewed, needs_changes, relabel or "
+						"delist");
+			rel.set("reviewed_by", name);
+			rel.set("reviewed_at", now_s());
+			put("releases", id, rel);
+			const ss_ text = action == "relabel" ? "to "+jstr(rel,
+					"audience")+(note.empty() ? "" : ": "+note) : note;
+			const ss_ how = playtested(rel, name) ? "playtested" :
+					"not playtested";
+			moderation::access(m_server, [&](moderation::Interface *m){
+				m->audit(this, name, id, action, how, text, false, false);
+				if(action == "delist" || action == "relabel")
+					m->statement(this, subject(id), action == "delist" ?
+							"delisted" : "relabelled", "review", text, name);
+			});
+			log_i(MODULE, "%s: %s %s (%s)", cs(name), cs(action), cs(id),
+					cs(how));
+			return rel;
+		}
+		throw Exception("no such command: "+cmd);
+	}
+
+	// -- builtin/moderation's Host: a subject is a release, its owner the
+	// account its author is bound by. The review audits and states
+	// through it; reports ([AITTA_REPORTS]) are grouped by release and
+	// reason, and Aitta's moderators and admins decide them.
+	storage::Save* save(){ return m_save; }
+	ss_ name(){ return "Aitta"; }
+	json::Value subject(const ss_ &id)
+	{
+		const json::Value rel = load("releases", id);
+		if(!rel.is_object())
+			return json::Value();
+		json::Value s = json::object();
+		s.set("id", id);
+		s.set("name", id);
+		s.set("owner", jstr(load("authors", jstr(rel, "author")), "account"));
+		return s;
+	}
+	sv_<ss_> members(const json::Value &g){ return {jstr(g, "listing")}; }
+	int severity(const ss_ &reason)
+	{
+		auto it = REASONS.find(reason);
+		return it == REASONS.end() ? 0 : it->second;
+	}
+	json::Value thresholds(const json::Value &g)
+	{
+		const json::Value th = setting("thresholds");
+		const json::Value &t = th.get(jstr(g, "reason"));
+		return t.is_object() ? t : th.get("default");
+	}
+	ss_ held(const json::Value &rep)
+	{
+		const json::Value k = load("reporters", jstr(rep, "key"));
+		return k.get("muted_until").is_number() &&
+				k.get("muted_until").as_number() > now_s() ?
+				"a key whose reports were mostly rejected" : "";
+	}
+	// One per network: anonymous reports are free to make
+	ss_ bucket(const json::Value &rep){ return "net:"+jstr(rep, "address"); }
+	json::Value auto_act(const json::Value &g, const ss_ &id,
+			const ss_ &want)
+	{
+		json::Value rel = load("releases", id);
+		if(!rel.is_object())
+			return json::Value();
+		if(want == "delist")
+			rel.set("delisted", true);
+		else
+			rel.set("hidden", true);
+		rel.set("status_auto", true);
+		rel.set("delisted_why", "reported for "+jstr(g, "reason")+
+				"; out of the list until a moderator looks");
+		put("releases", id, rel);
+		return subject(id);
+	}
+	// q: {action (unreview, delist, delist_package, bar), text, days (a
+	// bar's; 0 until a moderator lifts it)}
+	void uphold(moderation::Interface *m, const ss_ &by,
+			const json::Value &g, const json::Value &q)
+	{
+		const ss_ id = jstr(g, "listing"), reason = jstr(g, "reason"),
+				action = jstr(q, "action"), text = jstr(q, "text");
+		json::Value rel = load("releases", id);
+		if(!rel.is_object())
+			throw Exception("the release has gone");
+		if(action != "unreview" && action != "delist" &&
+				action != "delist_package" && action != "bar")
+			throw Exception("action: unreview, delist, delist_package or bar");
+		const ss_ pkg = jstr(rel, "author")+"/"+jstr(rel, "name")+"/";
+		ss_ stated = action == "unreview" ? "unreviewed" : action == "bar" ?
+				"barred" : action == "delist" ? "delisted" : "package delisted";
+		for(const ss_ &k : store("releases")->list(pkg)){
+			json::Value o = load("releases", k);
+			if(k != id && action != "delist_package")
+				continue;
+			// A moderator has looked: what reports did alone is theirs now
+			o.set("hidden", false);
+			o.set("status_auto", false);
+			o.set("delisted_why", "");
+			if(action == "unreview")
+				o.set("review", "");
+			if(action == "delist" || action == "delist_package"){
+				o.set("delisted", true);
+				o.set("delisted_why", reason+(text.empty() ? "" : ": "+text));
+			}
+			put("releases", k, o);
+		}
+		if(action == "bar"){
+			const double days = q.get("days").is_number() ?
+					q.get("days").as_number() : 0;
+			json::Value a = load("authors", jstr(rel, "author"));
+			a.set("barred_until", days > 0 ? now_s() + (int64_t)(days * 86400) :
+					(int64_t)-1);
+			put("authors", jstr(rel, "author"), a);
+			stated += days > 0 ? " for "+itos((int64_t)days)+" days" :
+					" until a moderator lifts it";
+		}
+		m->audit(this, by, id, action, reason, text, false, true);
+		m->statement(this, subject(id), stated, reason, text, by);
+	}
+	bool undo_auto(const ss_ &id, const json::Value &g)
+	{
+		json::Value rel = load("releases", id);
+		if(!rel.get("status_auto").is_true())
+			return false;
+		rel.set("hidden", false);
+		rel.set("delisted", false);
+		rel.set("status_auto", false);
+		rel.set("delisted_why", "");
+		put("releases", id, rel);
+		return true;
+	}
+	// An appeal reversed: what its statement said was done, undone
+	void reverse(moderation::Interface *m, const ss_ &by,
+			const json::Value &a, const ss_ &text)
+	{
+		const ss_ id = jstr(a, "listing");
+		json::Value rel = load("releases", id);
+		if(!rel.is_object())
+			return;
+		const ss_ action = jstr(load("statements", jstr(a, "statement")),
+				"action");
+		const ss_ pkg = jstr(rel, "author")+"/"+jstr(rel, "name")+"/";
+		for(const ss_ &k : store("releases")->list(pkg)){
+			json::Value o = load("releases", k);
+			if(k != id && action != "package delisted")
+				continue;
+			if(action == "unreviewed")
+				o.set("review", "reviewed");
+			else if(action.compare(0, 6, "barred") != 0){
+				o.set("delisted", false);
+				o.set("hidden", false);
+				o.set("status_auto", false);
+				o.set("delisted_why", "");
+			}
+			put("releases", k, o);
+		}
+		if(action.compare(0, 6, "barred") == 0){
+			json::Value au = load("authors", jstr(rel, "author"));
+			au.set("barred_until", (int64_t)0);
+			put("authors", jstr(rel, "author"), au);
+		}
+		m->audit(this, by, id, "restore", "appeal", text, false, true);
+		m->statement(this, subject(id), "restored", "appeal", text, by);
+	}
+	void decided(const json::Value &rep, bool upheld)
+	{
+		const ss_ h = jstr(rep, "key");
+		if(h.empty())
+			return;
+		json::Value k = load("reporters", h);
+		if(!k.is_object())
+			k = json::object();
+		const char *f = upheld ? "upheld" : "rejected";
+		auto n = [&](const char *x){
+			return k.get(x).is_number() ? (int64_t)k.get(x).as_number() : 0;
+		};
+		k.set(f, n(f) + 1);
+		// Mostly rejected: not heard for a month, as on Starport
+		if(n("rejected") >= 5 && n("rejected") > 3 * n("upheld"))
+			k.set("muted_until", now_s() + 30 * 86400);
+		put("reporters", h, k);
+	}
+	// simplified: the moderators see the queue on their page; no events
+	void event(const sv_<ss_> &to, const ss_ &by, const ss_ &text)
+	{
+		log_i(MODULE, "%s", cs(text));
+	}
+	// The author reads it on their Aitta page; no mail
+	void notify(const json::Value &s){}
+
+	// -----------------------------------------------------------------------
 	// The app: an author binds a key; the admin delists and sets settings
 
 	void on_req(const network::Packet &packet)
@@ -658,10 +1407,12 @@ struct Module: public interface::Module
 		json::Value res = json::object();
 		res.set("id", q.get("id"));
 		ss_ name;
-		bool admin = false;
+		bool admin = false, reviewer = false;
 		accounts::access(m_server, [&](accounts::Interface *a){
 			name = a->name_of(packet.sender);
 			admin = !name.empty() && a->is_admin(name);
+			reviewer = !name.empty() &&
+					a->level(name) >= accounts::LV_MODERATOR;
 		});
 		ss_ error;
 		json::Value result;
@@ -671,7 +1422,16 @@ struct Module: public interface::Module
 			error = "join first";
 		else {
 			try {
-				result = handle(name, admin, jstr(q, "cmd"), q);
+				const ss_ cmd = jstr(q, "cmd");
+				if(cmd.compare(0, 7, "review_") == 0 || cmd == "playtest" ||
+						cmd.compare(0, 4, "mod_") == 0){
+					if(!reviewer)
+						throw Exception("for the reviewers: this server's "
+								"moderators and admins");
+					result = cmd.compare(0, 4, "mod_") == 0 ?
+							handle_mod(name, cmd, q) : handle_review(name, cmd, q);
+				} else
+					result = handle(name, admin, reviewer, cmd, q);
 			} catch(std::exception &e){
 				error = e.what();
 			}
@@ -686,13 +1446,66 @@ struct Module: public interface::Module
 		});
 	}
 
-	json::Value handle(const ss_ &name, bool admin, const ss_ &cmd,
+	// [AITTA_REPORTS] The moderators' side of builtin/moderation: the
+	// queue, a group, its decision, the audit log, the appeals
+	json::Value handle_mod(const ss_ &name, const ss_ &cmd,
 			const json::Value &q)
 	{
+		json::Value v;
+		moderation::access(m_server, [&](moderation::Interface *m){
+			if(cmd == "mod_queue")
+				v = m->queue(this);
+			else if(cmd == "mod_group")
+				v = m->group(this, jstr(q, "group"));
+			else if(cmd == "mod_decide"){
+				m->decide(this, name, q);
+				v = json::Value(true);
+			} else if(cmd == "mod_audit")
+				v = m->audit_log(this);
+			else if(cmd == "mod_appeals")
+				v = m->appeals(this);
+			else if(cmd == "mod_decide_appeal"){
+				m->decide_appeal(this, name, q);
+				v = json::Value(true);
+			} else
+				throw Exception("no such command: "+cmd);
+		});
+		return v;
+	}
+
+	json::Value handle(const ss_ &name, bool admin, bool reviewer,
+			const ss_ &cmd, const json::Value &q)
+	{
+		// [AITTA_REPORTS] An author's statements of reasons, newest first,
+		// and an appeal of one
+		if(cmd == "statements"){
+			sv_<json::Value> mine;
+			for(const ss_ &k : store("statements")->list("")){
+				const json::Value st = load("statements", k);
+				if(jstr(st, "owner") == name)
+					mine.push_back(st);
+			}
+			std::sort(mine.begin(), mine.end(), [](const json::Value &a,
+					const json::Value &b){
+				return a.get("ts").as_number() > b.get("ts").as_number();
+			});
+			json::Value out = json::array();
+			for(size_t i = 0; i < mine.size() && i < 100; i++)
+				out.append(mine[i]);
+			return out;
+		}
+		if(cmd == "appeal"){
+			ss_ id;
+			moderation::access(m_server, [&](moderation::Interface *m){
+				id = m->appeal(this, name, q);
+			});
+			return json::Value(id);
+		}
 		if(cmd == "me"){
 			json::Value v = json::object();
 			v.set("account", name);
 			v.set("admin", admin);
+			v.set("reviewer", reviewer);
 			const ss_ author = get("owners", name);
 			v.set("author", author);
 			v.set("key", author.empty() ? "" : jstr(load("authors", author), "key"));

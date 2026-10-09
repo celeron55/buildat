@@ -99,7 +99,38 @@ only once it is "page_delay" seconds old (3600 by default), and only one
 whose audience is "everyone" or "teen". The admin changes a setting
 with the app's request {"cmd": "set_settings", "settings": {...}}.
 
-    GET  /api/aitta/list                      the listed releases, JSON
+The server's moderators and admins are its reviewers: "Review releases"
+on Aitta's page lists the releases to review, oldest first; a release's
+page has its meta, its files (each viewable as text), a diff against the
+package's last reviewed release, a checklist, and Reviewed, Needs
+changes (the note to the author), Relabel (the audience; the author
+cannot set it back without a review) and Delist, each in the audit log
+with whether the reviewer playtested it. Playtest makes a ticket (an
+hour, one fetch of each file, a release not listed too) and leaves to
+the launcher, which asks in its own dialog before it installs the release
+under <user>/review/<author>__<name>/<version>, apart from the installed
+ones, and starts it: to its server "review.<author>__<name>", saves of
+its own. Its tile is badged Playtest, with a "remove" tile beside it.
+
+Anyone reports a release: "Report..." on Aitta's page in the launcher or
+on an installed tile, or the form on a package's web page. The reasons
+are Starport's and malware, licence and broken. A report weighs the
+setting "anon_weight" (0.01) without a key and "key_weight" (0.1) with
+the client's report key, more or less by the key's record; one network
+counts once in a group (a release and a reason). Past the "thresholds"
+({hide, delist} by reason; malware and CSAM 1 and 2) a release is out of
+the list until a moderator looks. "Reports" on Aitta's page is the
+moderators' queue: dismiss, or unreview, delist the release, delist the
+package or bar the author from publishing (days, or until lifted). The
+author reads what was done on their Aitta page ("What was done to my
+releases") and appeals there; another moderator than the one who acted
+decides. A delisted release installed in a client is noted on its tile
+when the launcher next fetches that Aitta's list.
+
+    GET  /api/aitta/list                      the listed releases, JSON, and
+                                              the delisted ones with why
+    POST /api/aitta/report                    {release, reason, text, key}
+    POST /api/aitta/report_status             {key, receipts}: outcomes
     GET  /api/aitta/archive/<sha256>.zip|.sig a listed release's files
     GET  /api/aitta/info?key=<public key>     {ok, licences, author}: the
                                               author the key is bound to
@@ -118,9 +149,10 @@ settings (https://aitta.buildat.org by default; the managed file's
 on several is shown once. Each release has Install, or Update where
 another version of it is installed. The client fetches the release and
 its .sig and checks them itself before installing; the new version is on
-the grid at once. Aitta's list is unreviewed content: where the Starport
-filters hide that ("Apps from Aitta (unreviewed)", under the lock, or the
-managed file's filters.unreviewed), there is no tile at all.
+the grid at once. Each release says whether it is reviewed. Where the
+Starport filters hide unreviewed content ("Apps from Aitta (unreviewed)",
+under the lock, or the managed file's filters.unreviewed), a package
+shows only its newest reviewed release, and one with none is not shown.
 
 Running an installed app
 ------------------------

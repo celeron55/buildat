@@ -73,14 +73,15 @@ local function menu_actions()
 			description = "By its address, on this network or from the Starports",
 			run = function() M.screens().show_connect_to_server() end},
 	}
-	-- [AITTA_MVP]: Aitta's list is unreviewed content, so where the
-	-- filters (under Starport's lock) hide that, there is no tile at all
+	-- [AITTA_REVIEW]: where the filters (under Starport's lock) hide
+	-- unreviewed content, the tile lists reviewed releases only
 	local ok, starport = pcall(require, "buildat/extension/starport")
-	if ok and type(starport) == "table" and starport.safe.aitta_shown() then
+	if ok and type(starport) == "table" then
 		out[#out + 1] = {id = "aitta", label = "Apps from Aitta", order = 3,
 			icon = "launch_menu/res/icon_network.png", resolved_icon = true,
-			description = "Install apps others made: unreviewed, each in " ..
-					"the server's box",
+			description = "Install apps others made: " ..
+					(starport.safe.aitta_shown() and "reviewed or not" or
+					"reviewed ones") .. ", each in the server's box",
 			-- "Discuss" on a release: its home Hearth, at the package's place
 			run = function() starport.safe.open_aitta(function(rel)
 				local home = hearth_target(rel.home_hearth,
@@ -186,7 +187,7 @@ local function run_launcher(log, source)
 			-- An app installed from a release launches itself and nothing
 			-- else: its launcher names the app as it is in its tree, and
 			-- the tile is that version of it ([AITTA_MVP])
-			if source.kind == "installed" then
+			if source.kind == "installed" or source.kind == "review" then
 				request = {app = source.name, params = request.params}
 			end
 			-- And an author's own in <user>/dev_apps ([AITTA_PUBLISH_UI])
@@ -219,7 +220,8 @@ local function run_launcher(log, source)
 	return actions, from
 end
 
-local KIND_ORDER = {menu = 0, app = 1, installed = 1, dev = 1, builtin = 2,
+local KIND_ORDER = {menu = 0, app = 1, installed = 1, dev = 1, review = 1,
+	builtin = 2,
 	extension = 3}
 
 -- Every action the tree offers, checked and in the grid's order: explicit
@@ -333,6 +335,62 @@ function M.actions(log)
 						params = {aitta_move_saves = 1}})
 				end}
 		end
+		-- **A playtest** ([AITTA_REVIEW]): unreviewed, from its Aitta, and
+		-- there until removed
+		if source.kind == "review" and actions and actions[1] then
+			local f = io.open(source.path .. "/.aitta_from", "rb")
+			local aitta = f and f:read("*l") or "?"
+			if f then f:close() end
+			for _, a in ipairs(actions) do
+				a.description = "Playtest, unreviewed, from " .. aitta
+			end
+			actions[#actions + 1] = {id = "remove",
+				label = tostring(actions[1].label) .. " " ..
+						source.name:match("@(.*)$") .. ": remove",
+				description = "Remove this playtest from the grid",
+				category = "action",
+				run = function()
+					local ok, why = __buildat_remove_review(source.name)
+					log:info("playtest: removed " .. source.name .. ": " ..
+							tostring(ok or why))
+					local menu = buildat.menu_extension()
+					if menu and type(menu.refresh) == "function" then
+						menu.refresh()
+					end
+				end}
+		end
+		-- **Report...** on a release from an Aitta, to that Aitta, and the
+		-- note of its delisting there ([AITTA_REPORTS])
+		if (source.kind == "installed" or source.kind == "review") and
+				actions and actions[1] then
+			local function read(name)
+				local f = io.open(source.path .. "/" .. name, "rb")
+				local s = f and f:read("*a")
+				if f then f:close() end
+				return s
+			end
+			local note = read(".aitta_delisted")
+			if note then
+				for _, a in ipairs(actions) do
+					a.description = "Delisted by its Aitta: " .. note
+				end
+			end
+			local aitta = (read(".aitta_from") or ""):match("^(https?://%S+)")
+			local author, name, version = source.name:gsub("^review:", ""):
+					match("^([%w_]+)%.([%w_]+)@(.+)$")
+			local ok, starport = pcall(require, "buildat/extension/starport")
+			if aitta and author and ok and type(starport) == "table" then
+				actions[#actions + 1] = {id = "report",
+					label = tostring(actions[1].label) .. " " .. version ..
+							": report...",
+					description = "Report this release to " .. aitta,
+					category = "action",
+					run = function()
+						starport.report_release(aitta, author .. "/" .. name ..
+								"/" .. version)
+					end}
+			end
+		end
 		-- **"Feedback..." to the app's home Hearth** ([PACKAGE_SUBJECT]),
 		-- the package and versions filled in there
 		local home = source.kind == "installed" and actions and actions[1] and
@@ -362,7 +420,8 @@ function M.actions(log)
 				local icon = ICON_FALLBACK
 				if a.resolved_icon then
 					icon = a.icon
-				elseif source.kind == "installed" or source.kind == "dev" then
+				elseif source.kind == "installed" or source.kind == "dev" or
+						source.kind == "review" then
 					-- simplified: an installed app's icon is the fallback,
 					-- as <user>/installed is no resource dir; the upgrade
 					-- is copying it under the cache as
@@ -379,7 +438,9 @@ function M.actions(log)
 				out[#out + 1] = {
 					id = a.id, icon = icon,
 					-- Every installed version is a tile, and says which
-					label = (source.kind == "installed" and a.id ~= "move_saves") and
+					label = ((source.kind == "installed" or source.kind ==
+							"review") and a.id ~= "move_saves" and
+							a.id ~= "remove") and
 							a.label.." "..source.name:match("@(.*)$") or a.label,
 					description = type(a.description) == "string" and
 							a.description or nil,
@@ -387,7 +448,8 @@ function M.actions(log)
 					kind = source.kind, from = from,
 					category = category_of(a) or
 							((source.kind == "app" or source.kind == "installed" or
-							source.kind == "dev") and "app" or "action"),
+							source.kind == "dev" or source.kind == "review") and
+							"app" or "action"),
 					significance = significance_of(a, source, app_sizes),
 					network = short_name(a.network),
 					listed_by = short_name(a.listed_by),

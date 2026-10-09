@@ -114,6 +114,22 @@
 			lua_setfield(L, -2, "launcher");
 			lua_rawseti(L, -2, i++);
 		}
+		// And a reviewer's playtests ([AITTA_REVIEW]), as installed ones
+		for(const ss_ &id : review_app_ids()){
+			const ss_ path = interface::fs::get_absolute_path(
+					review_app_dir(id));
+			lua_newtable(L);
+			lua_pushstring(L, "review");
+			lua_setfield(L, -2, "kind");
+			lua_pushstring(L, id.c_str());
+			lua_setfield(L, -2, "name");
+			lua_pushstring(L, path.c_str());
+			lua_setfield(L, -2, "path");
+			lua_pushboolean(L, interface::fs::path_exists(
+					path+"/launcher/init.lua"));
+			lua_setfield(L, -2, "launcher");
+			lua_rawseti(L, -2, i++);
+		}
 		// And an author's own ([AITTA_PUBLISH_UI]): an app with its
 		// launcher, run as dev:<name>; an extension as an installed one
 		for(const DevEntry &e : dev_entries()){
@@ -568,13 +584,19 @@
 		return 1;
 	}
 
-	// aitta_install(zip, sig) -> the directory, or nil and why: a release
-	// fetched from an Aitta, checked and installed under <user>/installed
-	// ([AITTA_MVP]). Trusted only: client/extensions/starport.
+	// aitta_install(zip, sig[, aitta[, review]]) -> the directory, or nil
+	// and why: a release fetched from an Aitta, checked and installed under
+	// <user>/installed ([AITTA_MVP]); with review, a reviewer's playtest
+	// under <user>/review ([AITTA_REVIEW]). The Aitta, where given, in its
+	// .aitta_from: where its tile's Report... goes ([AITTA_REPORTS]).
+	// Trusted only: client/extensions/starport.
 	static int l_aitta_install(lua_State *L)
 	{
 		const ss_ zip = lua_bindings::lua_tocppstring(L, 1);
 		const ss_ sig = lua_bindings::lua_tocppstring(L, 2);
+		const ss_ from = lua_isstring(L, 3) ?
+				lua_bindings::lua_tocppstring(L, 3) : "";
+		const bool review = lua_toboolean(L, 4);
 		const ss_ tmp = g_client_config.get<ss_>("cache_path")+"/tmp/aitta-"+
 				interface::sha256::hex(interface::bignum::random_bytes(8));
 		try {
@@ -588,7 +610,11 @@
 					throw Exception("cannot write "+f.first);
 			}
 			const ss_ dir = interface::aitta::install(tmp+".zip", tmp+".sig",
-					g_client_config.get<ss_>("user_path"));
+					g_client_config.get<ss_>("user_path"), review);
+			if(!from.empty()){
+				std::ofstream o(dir+"/.aitta_from", std::ios::binary);
+				o<<from<<"\n";
+			}
 			interface::fs::remove_all(tmp+".zip");
 			interface::fs::remove_all(tmp+".sig");
 			lua_pushstring(L, dir.c_str());
@@ -600,6 +626,23 @@
 			lua_pushstring(L, e.what());
 			return 2;
 		}
+	}
+
+	// remove_review(id) -> true, or nil and why: a playtest's tile gone
+	// ([AITTA_REVIEW]), its directory with it. simplified: its saves stay
+	// under <user>/apps/review.<author>__<name>, for a playtest again.
+	// Trusted only: the grid.
+	static int l_remove_review(lua_State *L)
+	{
+		const ss_ dir = review_app_dir(lua_bindings::lua_tocppstring(L, 1));
+		if(dir.empty() || !interface::fs::path_exists(dir)){
+			lua_pushnil(L);
+			lua_pushstring(L, "no such playtest");
+			return 2;
+		}
+		interface::fs::remove_all(dir);
+		lua_pushboolean(L, true);
+		return 1;
 	}
 
 	// list_apps() -> {{name=, size=, kind=}, ...}; kind is main/meta.json's
@@ -616,6 +659,9 @@
 		}
 		std::sort(names.begin(), names.end());
 		for(const ss_ &id : installed_app_ids())
+			names.push_back(id);
+		// And a reviewer's playtests ([AITTA_REVIEW])
+		for(const ss_ &id : review_app_ids())
 			names.push_back(id);
 		// And an author's own ([AITTA_PUBLISH_UI])
 		for(const DevEntry &e : dev_entries())
@@ -658,7 +704,8 @@
 		{
 			const char *u = getenv("BUILDAT_UNCONFINED");
 			const char *w = getenv("BUILDAT_WINDOWS_BOX");
-			if(!installed_app_dir(game).empty() &&
+			if((!installed_app_dir(game).empty() ||
+					!review_app_dir(game).empty()) &&
 					((u && ss_(u) == "1") || (w && ss_(w) == "0"))){
 				lua_pushboolean(L, false);
 				lua_pushstring(L, "An installed app runs only in the server's\n"

@@ -816,6 +816,46 @@ buildat.safe.aitta_bind = function()
 	feedback = nil
 	return {author = tostring(f.bind.author), key = tostring(f.bind.key)}
 end
+-- **A reviewer's playtest** ([AITTA_REVIEW]): offer_playtest{release =
+-- "author/name/version", ticket =, sha256 =}, from an Aitta's review page,
+-- leaves to the launcher, which asks the player in its own dialog
+-- (client/extensions/starport playtest()) before it fetches the release by
+-- the ticket from the Aitta this client is on and installs it apart. The
+-- page only offers: nothing is installed without the yes. -> true, or
+-- false and why
+buildat.safe.offer_playtest = function(o)
+	local address = __buildat_server_address()
+	if type(o) ~= "table" or type(o.release) ~= "string" or
+			not o.release:match("^[%w_]+/[%w_]+/[%w%.%-%+_]+$") or
+			type(o.ticket) ~= "string" or not o.ticket:match("^%x+$") or
+			type(o.sha256) ~= "string" or not o.sha256:match("^%x+$") then
+		return false, "offer_playtest{release =, ticket =, sha256 =}"
+	end
+	if not address then
+		return false, "not on an Aitta"
+	end
+	local url = address:match("^https?://") and address or
+			address:gsub("^wss://", "https://"):gsub("^ws://", "http://")
+	if not url:match("^https?://") then
+		url = "http://" .. url
+	end
+	local offer = {aitta = url:gsub("/+$", ""), release = o.release,
+		ticket = o.ticket, sha256 = o.sha256}
+	leave_reason = nil
+	if not leave_to_launcher() then
+		return false, "no launcher to go back to"
+	end
+	log:info("playtest: offered " .. offer.release .. " from " .. offer.aitta)
+	local magic = require("buildat/extension/urho3d").safe
+	local sub
+	sub = magic.SubscribeToEvent("Update", function()
+		magic.UnsubscribeFromEvent("Update", sub)
+		require("buildat/extension/starport").playtest(offer, function(app)
+			launch_grid.screens().start_local_app(app, "")
+		end)
+	end)
+	return true
+end
 -- discussed_server() -> {name, address, subject, title} or nil, once: the
 -- Hearth's side of the above, for a Hearth from before discussed()
 buildat.safe.discussed_server = function()

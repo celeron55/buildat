@@ -309,6 +309,7 @@ local function gather()
 					(a.listed_by and ", " .. a.listed_by or "") or
 					cat == "game" and "Luanti" or
 					a.kind == "installed" and "Aitta" or
+					a.kind == "review" and "Playtest" or
 					a.kind == "dev" and "Dev" or nil
 			local e = add({label = a.label, kind = kind,
 				network = network, listed_by = a.listed_by,
@@ -1210,6 +1211,12 @@ end
 
 -- Drawn again, as at boot: what it lists has changed under it
 M.refresh = to_home
+
+-- [CMD_EVENT] `event join <address>`: a scripted run joins as the Join
+-- screen would, with the launcher under the game (apps/aitta/review_check.sh)
+magic.SubscribeToEvent("command_seq:join", function(event_type, event_data)
+	api.join_server(event_data:GetString("Param"))
+end)
 
 magic.SubscribeToEvent("Update", function()
 	if deferred then

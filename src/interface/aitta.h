@@ -54,8 +54,11 @@ namespace interface
 		// <user>/installed/<author>/<name>/<version>/. The first install of
 		// an author/name keeps its key, and a later version signed by
 		// another key is refused. Returns the directory; throws why not.
+		// review: a reviewer's playtest ([AITTA_REVIEW]), an app only, into
+		// <user>/review/<author>__<name>/<version>/, no key kept, over one
+		// there was.
 		ss_ install(const ss_ &zip_path, const ss_ &sig_path,
-				const ss_ &user_path);
+				const ss_ &user_path, bool review = false);
 	}
 }
 // vim: set noet ts=4 sw=4:

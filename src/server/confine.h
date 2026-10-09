@@ -39,7 +39,7 @@ namespace server
 	// for an app installed from a release ([AITTA_MVP]),
 	// .../installed/<author>/<name>/<version>, "<author>.<name>" -- every
 	// version one app, with one save directory, and no tree app's name
-	// has a dot in it
+	// has a dot in it; a playtest's "review.<author>__<name>"
 	inline ss_ app_of(const ss_ &module_path)
 	{
 		sv_<ss_> parts;
@@ -56,6 +56,11 @@ namespace server
 		const size_t n = parts.size();
 		if(n >= 4 && parts[n - 4] == "installed")
 			return parts[n - 3]+"."+parts[n - 2];
+		// A reviewer's playtest ([AITTA_REVIEW]),
+		// .../review/<author>__<name>/<version>: its saves apart
+		if(n >= 3 && parts[n - 3] == "review" &&
+				parts[n - 2].find("__") != ss_::npos)
+			return "review."+parts[n - 2];
 		if(n == 0 || parts[n - 1] == "..")
 			return "unnamed";
 		return parts[n - 1];

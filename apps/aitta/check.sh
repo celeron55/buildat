@@ -91,7 +91,9 @@ BUILDAT_AITTA_REQS='{"cmd":"delist","release":"tester/demo/1.0"}' \
 	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 -s 127.0.0.1:$P \
 	-c @"$t/cmds" > "$t/cl2.log" 2>&1
 grep -aq 'ai: {"id":1,"ok":true' "$t/cl2.log" || fail "the delist did not go through"
-curl -s "http://127.0.0.1:$P/api/aitta/list" | grep -q '"version":"1.0"' &&
+# The releases, not the "delisted" beside them ([AITTA_REPORTS])
+curl -s "http://127.0.0.1:$P/api/aitta/list" | python3 -c 'import json,sys
+sys.exit(0 if any(r["version"] == "1.0" for r in json.load(sys.stdin)["releases"]) else 1)' &&
 	fail "a delisted release is listed"
 [ "$(curl -s -o /dev/null -w '%{http_code}' \
 	"http://127.0.0.1:$P/api/aitta/archive/$sha.zip")" = 404 ] ||

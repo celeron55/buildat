@@ -2233,8 +2233,8 @@ end
 -- settings, each release with Install, or Update where an older version
 -- of it is installed. Installing fetches the release and its signature
 -- and checks both on this side (__buildat_aitta_install); a version is
--- installed beside the others, never over one. Hidden entirely where the
--- filters hide unreviewed content. `query`: only the releases whose
+-- installed beside the others, never over one. Where the filters hide
+-- unreviewed content, reviewed releases only. `query`: only the releases whose
 -- author/name or description has it, case aside.
 local function aitta_installed()
 	local have = {}
@@ -2255,6 +2255,107 @@ local function aitta_installed()
 	return have
 end
 
+-- **A report on a release** ([AITTA_REPORTS]), to its Aitta: a reason
+-- and what is wrong, with this client's report key for that Aitta where
+-- the settings send keys (a Starport's key_for, by the Aitta's address)
+local AITTA_REASONS = {
+	{"malware", "Malware or harmful code"},
+	{"licence", "Licence or copyright violation"},
+	{"broken", "Broken"},
+	{"category", "Wrong audience"},
+	{"illegal", "Illegal content"},
+	{"csam", "Child sexual abuse material"},
+	{"harassment", "Harassment or abuse"},
+	{"scam", "Scam or phishing"},
+	{"impersonation", "Impersonation"},
+	{"spam", "Spam"},
+	{"other", "Other"},
+}
+local function aitta_report(aitta, id)
+	local root, w = open_window("aitta report", 620)
+	add_text(w, "Report " .. id .. " to " .. aitta)
+	add_text(w, "A moderator of that Aitta decides; the author is told " ..
+			"what was done and why, not who reported it.", DIM)
+	local reason
+	local buttons = {}
+	for _, r in ipairs(AITTA_REASONS) do
+		buttons[#buttons + 1] = add_button(w, r[2], function()
+			reason = r[1]
+			for i, b in ipairs(buttons) do
+				b:GetChild(0).text = (AITTA_REASONS[i][1] == reason and
+						"> " or "") .. AITTA_REASONS[i][2]
+			end
+		end)
+	end
+	add_text(w, "What is wrong (optional):")
+	local text = add_edit(w, "")
+	local status = add_text(w, "")
+	local r = add_row(w)
+	add_button(r, "Send", function()
+		if not reason then
+			status.text = "Choose a reason"
+			return
+		end
+		local body = {release = id, reason = reason, text = text:GetText()}
+		if load_state().send_key then
+			body.key = key_for(aitta)
+		end
+		status.text = "Sending..."
+		network.http_post(aitta .. "/api/aitta/report", network.write_json(body),
+				function(answer, err)
+			local v = answer and network.parse_json(answer)
+			if type(v) == "table" and v.ok then
+				status.text = "Sent; receipt " .. tostring(v.receipt)
+				log:info("aitta report: sent " .. id .. " " .. reason .. ": " ..
+						tostring(v.receipt))
+			else
+				status.text = "Not sent: " .. tostring(type(v) == "table" and
+						v.error or err)
+			end
+		end, {description = "Aitta"})
+	end)
+	add_button(r, "Close", function() uistack.main:pop(root) end)
+	log:info("aitta report: " .. id)
+end
+-- For a tile's "Report..." (client/launch_grid.lua)
+M.report_release = aitta_report
+
+-- [AITTA_REPORTS] A release its Aitta delisted, installed here: a note in
+-- its directory for its tile, from each fetch of the list; gone when it is
+-- listed again. simplified: noted when the Aitta page fetches the list,
+-- not on its own -- a check at the grid's start when a user asks
+local function aitta_note(rel, why)
+	local a, n, v = tostring(rel.author), tostring(rel.name),
+			tostring(rel.version)
+	if not (a:match("^[%w_]+$") and n:match("^[%w_]+$") and
+			v:match("^[%w%.%-%+_]+$") and v ~= "." and v ~= "..") then
+		return
+	end
+	local dir = __buildat_get_path("user") .. "/installed/" .. a .. "/" ..
+			n .. "/" .. v
+	local probe = io.open(dir .. "/meta.json", "rb")
+	if not probe then
+		return
+	end
+	probe:close()
+	if not why then
+		os.remove(dir .. "/.aitta_delisted")
+		return
+	end
+	local f = io.open(dir .. "/.aitta_delisted", "wb")
+	if f then
+		f:write(tostring(why):sub(1, 500))
+		f:close()
+		log:info("aitta page: delisted " .. a .. "." .. n .. "@" .. v .. ": " ..
+				tostring(why))
+		-- The grid behind, its tile with the note
+		local menu = buildat.menu_extension()
+		if menu and type(menu.refresh) == "function" then
+			menu.refresh()
+		end
+	end
+end
+
 -- on_discuss(release): "Discuss" on a release that names its home
 -- Hearth ([PACKAGE_SUBJECT]); the grid connects there
 local function aitta_page(message, query, on_discuss)
@@ -2262,14 +2363,12 @@ local function aitta_page(message, query, on_discuss)
 	local root, w = open_window("aitta", 900)
 	add_text(w, "Apps from Aitta: " .. (#e.aittas > 0 and
 			table.concat(e.aittas, ", ") or "none in the Starport settings"))
-	if not e.filters.unreviewed then
-		add_text(w, "This client's filters hide unreviewed content, and " ..
-				"everything on Aitta is unreviewed.", WARN)
-		add_button(w, "Back", function() uistack.main:pop(root) end)
-		return
-	end
-	add_text(w, "Nobody has reviewed these. An app runs in the server's " ..
-			"box: it cannot reach your files, only its own saves.", DIM)
+	-- [AITTA_REVIEW]: under the lock, a package's newest reviewed release
+	-- only, and none of a package with none
+	local only_reviewed = not e.filters.unreviewed
+	add_text(w, (only_reviewed and "This client's filters hide unreviewed " ..
+			"releases: reviewed ones only. " or "") .. "An app runs in the " ..
+			"server's box: it cannot reach your files, only its own saves.", DIM)
 	if message then
 		add_text(w, message, WARN)
 	end
@@ -2288,18 +2387,34 @@ local function aitta_page(message, query, on_discuss)
 	local lists, errors, waiting = {}, {}, #e.aittas
 	local show
 	local function show_all()
-		local v, seen = {releases = {}}, {}
+		local v, seen, newest = {releases = {}}, {}, {}
 		for _, a in ipairs(e.aittas) do
 			for _, rel in ipairs(lists[a] or {}) do
 				local id = type(rel) == "table" and table.concat({
 						tostring(rel.author), tostring(rel.name),
 						tostring(rel.version), tostring(rel.key)}, "/")
-				if id and not seen[id] then
+				if id and not seen[id] and (not only_reviewed or
+						rel.review == "reviewed") then
 					seen[id] = true
 					rel.aitta = a
 					v.releases[#v.releases + 1] = rel
+					local k = tostring(rel.author) .. "/" .. tostring(rel.name)
+					if not newest[k] or (tonumber(rel.time) or 0) >
+							(tonumber(newest[k].time) or 0) then
+						newest[k] = rel
+					end
 				end
 			end
+		end
+		if only_reviewed then
+			local kept = {}
+			for _, rel in ipairs(v.releases) do
+				if newest[tostring(rel.author) .. "/" ..
+						tostring(rel.name)] == rel then
+					kept[#kept + 1] = rel
+				end
+			end
+			v.releases = kept
 		end
 		show(v)
 		if #errors > 0 then
@@ -2311,6 +2426,17 @@ local function aitta_page(message, query, on_discuss)
 			local v = body and network.parse_json(body)
 			if type(v) == "table" and v.ok and type(v.releases) == "table" then
 				lists[a] = v.releases
+				for _, rel in ipairs(v.releases) do
+					if type(rel) == "table" then
+						aitta_note(rel, nil)
+					end
+				end
+				for _, d in ipairs(type(v.delisted) == "table" and
+						v.delisted or {}) do
+					if type(d) == "table" then
+						aitta_note(d, d.why ~= "" and d.why or "delisted")
+					end
+				end
 			else
 				errors[#errors + 1] = a .. ": " .. tostring(body and
 						"the answer was not a list" or err)
@@ -2335,7 +2461,9 @@ local function aitta_page(message, query, on_discuss)
 				local mine = have[k]
 				local r = add_row(w)
 				add_label(r, k .. " " .. tostring(rel.version) ..
-						(rel.kind == "extension" and " (extension)" or "") .. "  " ..
+						(rel.kind == "extension" and " (extension)" or "") ..
+						(rel.review == "reviewed" and ", reviewed" or
+						", unreviewed") .. "  " ..
 						tostring(rel.license_code) .. " / " ..
 						tostring(rel.license_media) .. "  " ..
 						math.floor((tonumber(rel.size) or 0) / 1000) .. " kB", 560)
@@ -2355,7 +2483,8 @@ local function aitta_page(message, query, on_discuss)
 								status:SetText("Could not fetch: " .. tostring(err2))
 								return
 							end
-							local dir, why = __buildat_aitta_install(zip, sig)
+							local dir, why = __buildat_aitta_install(zip, sig,
+									rel.aitta)
 							uistack.main:pop(root)
 							-- The grid behind, with the new tile on it
 							local menu = dir and buildat.menu_extension()
@@ -2378,6 +2507,9 @@ local function aitta_page(message, query, on_discuss)
 						rel.home_hearth:match("^https?://")) then
 					rel.home_hearth = M.safe.fallback_hearth(rel.aitta)
 				end
+				add_button(r, "Report...", function()
+					aitta_report(rel.aitta, k .. "/" .. tostring(rel.version))
+				end)
 				if on_discuss and rel.home_hearth then
 					add_button(r, "Discuss", function()
 						uistack.main:pop(root)
@@ -2389,16 +2521,79 @@ local function aitta_page(message, query, on_discuss)
 				end
 			end
 		end
+		for _, rel in ipairs(v.releases) do
+			log:info("aitta page: " .. tostring(rel.author) .. "/" ..
+					tostring(rel.name) .. " " .. tostring(rel.version) .. " " ..
+					(rel.review == "reviewed" and "reviewed" or "unreviewed"))
+		end
 		status:SetText(q == "" and #v.releases .. " releases" or
 				shown .. " of " .. #v.releases .. " releases match")
 	end
+end
+
+-- **A reviewer's playtest** ([AITTA_REVIEW]), offered by an Aitta's review
+-- page (buildat.offer_playtest, client/api.lua) after leaving to the
+-- launcher: asked here, in the launcher's own dialog; on yes the release
+-- and its signature fetched by the ticket, checked as an install is, put
+-- under <user>/review apart from the installed ones, and started with
+-- start(app). A client whose filters hide unreviewed content says so.
+function M.playtest(offer, start)
+	local ui = require("buildat/extension/ui_utils").safe
+	local id = offer.release
+	if not effective().filters.unreviewed then
+		log:info("playtest: refused by the filters")
+		ui.show_message_dialog("This client's filters hide unreviewed " ..
+				"content, so it cannot playtest " .. id .. ". A reviewer's " ..
+				"client allows it: the Starport settings, Filters.")
+		return
+	end
+	ui.show_confirm_dialog("Playtest " .. id .. " from " .. offer.aitta ..
+			"? Not reviewed. It is installed apart, under your user " ..
+			"folder's review/, and runs in the server's box.", function()
+		log:info("playtest: yes, " .. id)
+		local base = offer.aitta .. "/api/aitta/archive/" .. offer.sha256
+		local function failed(why)
+			log:warning("playtest: " .. id .. ": " .. tostring(why))
+			ui.show_message_dialog("Not installed: " .. tostring(why))
+		end
+		-- The network's own leave for the Aitta's address is asked as for
+		-- any fetch, once
+		local options = {description = "Aitta (playtest)"}
+		network.http_get(base .. ".sig?ticket=" .. offer.ticket, function(sig, e1)
+			if not sig or not sig:match("^%s*{") then
+				return failed(sig and "the ticket was refused" or e1)
+			end
+			network.http_get(base .. ".zip?ticket=" .. offer.ticket,
+					function(zip, e2)
+				if not zip or zip:sub(1, 2) ~= "PK" then
+					return failed(zip and "the ticket was refused" or e2)
+				end
+				local dir, why = __buildat_aitta_install(zip, sig, offer.aitta,
+						true)
+				if not dir then
+					return failed(why)
+				end
+				local author, name, version = id:match("^(.-)/(.-)/(.*)$")
+				local app = "review:" .. author .. "." .. name .. "@" .. version
+				log:info("playtest: installed " .. app .. " in " .. dir)
+				local menu = buildat.menu_extension()
+				if menu and type(menu.refresh) == "function" then
+					menu.refresh()
+				end
+				start(app)
+			end, options)
+		end, options)
+	end, function()
+		log:info("playtest: no, " .. id)
+	end, "Playtest", "Cancel")
 end
 
 function M.safe.open_aitta(on_discuss)
 	aitta_page(nil, nil, type(on_discuss) == "function" and on_discuss or nil)
 end
 
--- Whether Aitta is shown at all: the filters' "unreviewed"
+-- Whether Aitta's unreviewed releases are shown: the filters'
+-- "unreviewed"; under the lock, only reviewed ones ([AITTA_REVIEW])
 function M.safe.aitta_shown()
 	return effective().filters.unreviewed == true
 end

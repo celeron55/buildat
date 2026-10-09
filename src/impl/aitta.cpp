@@ -369,7 +369,8 @@ ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir)
 	return base+".zip";
 }
 
-ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path)
+ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
+		bool review)
 {
 	const ss_ zip = read_file(zip_path);
 	json::json_error_t e;
@@ -387,7 +388,7 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path)
 
 	// Unpacked beside where it goes, and moved into place once its
 	// manifest has been read: nothing half there under its own name
-	const ss_ installed = user_path+"/installed";
+	const ss_ installed = user_path+(review ? "/review" : "/installed");
 	const ss_ incoming = installed+"/.incoming-"+
 			sha256::hex(bignum::random_bytes(8));
 	fs::create_directories(incoming);
@@ -397,12 +398,29 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path)
 		const ss_ why = check_manifest(m);
 		if(!why.empty())
 			throw Exception("meta.json: "+why);
+		const ss_ kind = kind_of(m);
+		if(review){
+			// [AITTA_REVIEW] A playtest: apart from the installed ones,
+			// no key kept, and a second one of a version replaces the first.
+			// simplified: apps only; an extension is reviewed by its files
+			if(kind != "app")
+				throw Exception("only an app is playtested; an extension "
+						"is reviewed by its files");
+			const ss_ app = installed+"/"+m.get("author").as_string()+"__"+
+					m.get("name").as_string();
+			const ss_ dir = app+"/"+m.get("version").as_string();
+			fs::remove_all(dir);
+			fs::create_directories(app);
+			if(!fs::rename(incoming, dir))
+				throw Exception("cannot move it into "+dir);
+			write_file(dir+"/.aitta_sha256", sstr("sha256")+"\n");
+			return dir;
+		}
 		const ss_ app = installed+"/"+m.get("author").as_string()+"/"+
 				m.get("name").as_string();
 		const ss_ dir = app+"/"+m.get("version").as_string();
 		if(fs::path_exists(dir))
 			throw Exception("already installed: "+dir);
-		const ss_ kind = kind_of(m);
 		if(kind == "extension" && !fs::path_exists(incoming+"/init.lua"))
 			throw Exception("an extension with no init.lua at its root");
 		// An author/name stays the kind it was first installed as

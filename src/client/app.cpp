@@ -993,6 +993,45 @@ static ss_ installed_app_dir(const ss_ &id)
 			name+"/"+version;
 }
 
+// **A reviewer's playtest** ([AITTA_REVIEW]): "review:<author>.<name>
+// @<version>" on the grid and to start_local_server(), in
+// <user>/review/<author>__<name>/<version>/, apart from the installed
+// ones; its server calls it "review.<author>__<name>", its saves its own
+static ss_ review_app_dir(const ss_ &id)
+{
+	if(id.compare(0, 7, "review:") != 0)
+		return "";
+	const ss_ inner = id.substr(7);
+	const ss_ dir = installed_app_dir(inner);
+	if(dir.empty())
+		return "";
+	const size_t dot = inner.find('.'), at = inner.find('@');
+	return g_client_config.get<ss_>("user_path")+"/review/"+
+			inner.substr(0, dot)+"__"+inner.substr(dot + 1, at - dot - 1)+"/"+
+			inner.substr(at + 1);
+}
+
+// Every playtest's id, sorted
+static sv_<ss_> review_app_ids()
+{
+	const ss_ review = g_client_config.get<ss_>("user_path")+"/review";
+	sv_<ss_> ids;
+	for(const auto &p : interface::fs::list_directory(review)){
+		const size_t sep = p.name.find("__");
+		if(!p.is_directory || sep == ss_::npos)
+			continue;
+		for(const auto &v : interface::fs::list_directory(review+"/"+p.name)){
+			const ss_ id = "review:"+p.name.substr(0, sep)+"."+
+					p.name.substr(sep + 2)+"@"+v.name;
+			if(v.is_directory && review_app_dir(id) == review+"/"+p.name+"/"+
+					v.name)
+				ids.push_back(id);
+		}
+	}
+	std::sort(ids.begin(), ids.end());
+	return ids;
+}
+
 // **An author's own app or extension** ([AITTA_PUBLISH_UI]), in
 // <user>/dev_apps/<name>/, run as it is there: an app is "dev:<name>" on
 // the grid and to start_local_server(), and its server calls it <name>,
@@ -1082,6 +1121,8 @@ static ss_ app_dir(const ss_ &id)
 		return g_client_config.get<ss_>("share_path")+"/apps/"+id;
 	if(!dev_app_dir(id).empty())
 		return dev_app_dir(id);
+	if(!review_app_dir(id).empty())
+		return review_app_dir(id);
 	return installed_app_dir(id);
 }
 
@@ -1112,6 +1153,11 @@ static ss_ server_app_id(const ss_ &id)
 	const size_t at = id.find('@');
 	if(!dev_app_dir(id).empty())
 		return id.substr(4);
+	if(!review_app_dir(id).empty()){
+		const size_t dot = id.find('.');
+		return "review."+id.substr(7, dot - 7)+"__"+
+				id.substr(dot + 1, at - dot - 1);
+	}
 	return installed_app_dir(id).empty() ? id : id.substr(0, at);
 }
 
@@ -2392,6 +2438,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(disconnect)
 		DEF_BUILDAT_FUNC(list_apps)
 		DEF_BUILDAT_FUNC(aitta_install)
+		DEF_BUILDAT_FUNC(remove_review)
 		DEF_BUILDAT_FUNC(aitta_dev)
 		DEF_BUILDAT_FUNC(open_url)
 		DEF_BUILDAT_FUNC(open_log_folder)
