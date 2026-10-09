@@ -82,6 +82,7 @@ do
 	-- properties panel, which is for the selection and the tools, and a
 	-- page of their own). A viewer gets the export.
 	local function plan_settings_page()
+		S.pause_page = "plan"
 		local w = dialog("Plan settings")
 		local st = settings()
 		local sid = E.doc.settings().id
@@ -207,6 +208,34 @@ do
 				choose({ground = v})
 			end)
 			panel.view_only = not edit
+			-- **The branch point** ([FP_GHOST]): the plan as it was, or
+			-- another plan imported as that, drawn faded under it in 2D
+			-- simplified: the plan imported is typed by its name, not
+			-- picked from the plan list
+			local info = E.doc.ghost_info
+			panel.label(w, "Branch point: " .. (info ~= "" and info or "none"))
+			if info ~= "" then
+				panel.check(w, "Its ghost in 2D", st.ghost == 1, function()
+					st.ghost = st.ghost == 1 and 0 or 1
+					send({{op = "set", ent = {id = sid, ints = {ghost = st.ghost}}}})
+					plan_settings_page()
+				end)
+			end
+			if edit then
+				panel.button(w, "Set the branch point here", function()
+					E.doc.branch_point("here")
+				end)
+				panel.field(w, "Import the plan named", "", function(t)
+					if t ~= "" then
+						E.doc.branch_point("import", t)
+					end
+				end)
+				if info ~= "" then
+					panel.button(w, "Remove the branch point", function()
+						E.doc.branch_point("remove")
+					end)
+				end
+			end
 			-- The pictures in the save's images/, and the ones placed, locked
 			for _, file in ipairs(E.doc.images) do
 				panel.button(w, "Trace over " .. file, function()
@@ -586,6 +615,11 @@ do
 			E.doc.admin_message = nil
 			open_pause()
 		end)
+	end
+	M.ghost_changed = function()
+		if E.pause_win and S.pause_page == "plan" then
+			plan_settings_page()
+		end
 	end
 	M.members_changed = function()
 		if E.pause_win and S.pause_page == "members" then

@@ -263,6 +263,8 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"grid", 1, 1000, 100}, // mm, what the plan snaps to
 		// Floor to floor, where "Add a floor above" puts one ([FP_LAYOUTS])
 		{"floor_step", 1000, 20000, 3000},
+		// The branch point drawn as a ghost in 2D ([FP_GHOST])
+		{"ghost", 0, 1, 0},
 	}, {}, {}, true},
 	// A floor or a building placed in the world ([FP_LAYOUTS]): its own
 	// coordinates turned by yaw (millidegrees) and moved to x, y, z. The
@@ -620,6 +622,11 @@ struct Plan
 	// closes.
 	ss_ m_backup_of;
 	int64_t m_backup_id = 0;
+	// The branch point's entities ([FP_GHOST]), read when first sent, and
+	// whether its ghost was last sent on
+	sv_<Entity> m_ghost;
+	bool m_ghost_read = false;
+	bool m_ghost_on = false;
 
 	Plan(interface::Server *server, const ss_ &name):
 		m_server(server), m_name(name)
@@ -1321,7 +1328,8 @@ struct Module: public interface::Module
 				"fp:voxels", "fp:lock", "fp:unlock",
 				"fp:preview", "fp:presence", "fp:export", "fp:import",
 				"fp:backups", "fp:open_backup", "fp:restore_backup",
-				"fp:set_editing", "fp:group", "fp:group_chat"})
+				"fp:set_editing", "fp:group", "fp:group_chat",
+				"fp:branch_point"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+name));
 	}
@@ -1345,6 +1353,8 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:packet_received/fp:leave_plan", on_leave_plan,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:copy_plan", on_copy_plan,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:branch_point", on_branch_point,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:export", on_export,
 				network::Packet)
@@ -1863,6 +1873,7 @@ struct Module: public interface::Module
 			all.push_back(pair.second);
 		send(peer_id, "fp:snapshot", pack(all));
 		send(peer_id, "fp:images", pack(plan->m_images));
+		send_ghost(plan, peer_id);
 		for(auto &pair : plan->m_voxels){
 			if(!plan->m_ents.count(pair.first))
 				continue;
@@ -2019,8 +2030,14 @@ struct Module: public interface::Module
 			if(!n.is_directory)
 				ok = fs::copy_file(from+"/images/"+n.name, to+"/images/"+n.name) &&
 						ok;
+		// Its branch point with it ([FP_GHOST])
+		const ss_ dir = slash == ss_::npos ? ss_(".") : from.substr(0, slash);
+		if(ok && fs::path_exists(dir+"/"+bp_name(from_plan->m_name)+"/save.sqlite"))
+			ok = copy_save(dir+"/"+bp_name(from_plan->m_name),
+					dir+"/"+bp_name(name));
 		Plan *copy = ok ? open_plan(name, false) : nullptr;
 		if(!copy){
+			fs::remove_all(dir+"/"+bp_name(name));
 			log_e(MODULE, "Could not copy the plan %s into %s",
 					cs(from_plan->m_name), cs(to));
 			fs::remove_all(to);
@@ -2035,6 +2052,173 @@ struct Module: public interface::Module
 		refuse("");
 		enter_plan(packet.sender, copy);
 		send_plans_to_idle();
+	}
+
+	// **The branch point** ([FP_GHOST], user 2026-10-09): the plan as it
+	// was, or another plan imported as that, a frozen copy in the save
+	// _bp_<plan> beside it -- hidden as every _ name is -- noted in the
+	// plan's meta/branch_point ("<time> <from>"). One a plan; a new one
+	// replaces it. With the plan's "ghost" setting on, its entities go to
+	// everyone in the plan, and the client draws the current layout's
+	// walls and rooms of it faded in 2D; the ids are the plan's own, a
+	// copy keeping them, so a layout is matched by its id.
+	// simplified: the whole save is sent, not only the layout viewed, and
+	// its bytes are not counted in the owner's storage
+	static ss_ bp_name(const ss_ &plan)
+	{
+		return "_bp_"+plan;
+	}
+
+	// A save's database and write-ahead log into another directory
+	static bool copy_save(const ss_ &from, const ss_ &to)
+	{
+		namespace fs = interface::fs;
+		fs::remove_all(to);
+		fs::create_directories(to);
+		bool ok = fs::copy_file(from+"/save.sqlite", to+"/save.sqlite");
+		if(fs::path_exists(from+"/save.sqlite-wal"))
+			ok = fs::copy_file(from+"/save.sqlite-wal", to+"/save.sqlite-wal") &&
+					ok;
+		if(!ok)
+			fs::remove_all(to);
+		return ok;
+	}
+
+	bool ghost_on(Plan *plan)
+	{
+		ss_ bp;
+		if(!plan->m_store || !plan->m_store->get("meta/branch_point", bp) ||
+				bp.empty())
+			return false;
+		for(auto &pair : plan->m_ents){
+			if(pair.second.type == "settings"){
+				auto it = pair.second.ints.find("ghost");
+				return it != pair.second.ints.end() && it->second == 1;
+			}
+		}
+		return false;
+	}
+
+	// The branch point's save read, and closed again
+	void read_ghost(Plan *plan)
+	{
+		if(plan->m_ghost_read)
+			return;
+		plan->m_ghost_read = true;
+		plan->m_ghost.clear();
+		Plan bp(m_server, bp_name(plan->m_name));
+		storage::access(m_server, [&](storage::Interface *istorage){
+			bp.m_save = istorage->open(bp.m_name);
+		});
+		if(!bp.m_save){
+			log_w(MODULE, "Could not open the branch point %s", cs(bp.m_name));
+			return;
+		}
+		bp.m_store = bp.m_save->store("main");
+		if(bp.load())
+			for(auto &pair : bp.m_ents)
+				plan->m_ghost.push_back(pair.second);
+		close_save(&bp);
+	}
+
+	struct GhostOut
+	{
+		ss_ info;               // "" with no branch point
+		sv_<Entity> ents;       // empty with the ghost off
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(info, ents);
+		}
+	};
+
+	// To everyone in the plan, or to one peer
+	void send_ghost(Plan *plan, network::PeerId only = 0)
+	{
+		GhostOut out;
+		ss_ bp;
+		if(plan->m_store && plan->m_store->get("meta/branch_point", bp) &&
+				!bp.empty()){
+			const size_t sp = bp.find(' ');
+			const int64_t t = std::atoll(bp.substr(0, sp).c_str());
+			out.info = backup_label(t, (int64_t)time(nullptr))+
+					(sp == ss_::npos ? ss_() : ", from "+bp.substr(sp + 1));
+		}
+		plan->m_ghost_on = ghost_on(plan);
+		if(plan->m_ghost_on){
+			read_ghost(plan);
+			out.ents = plan->m_ghost;
+		}
+		const ss_ data = pack(out);
+		for(auto &pair : m_peers)
+			if(pair.second.plan == plan->m_name &&
+					(only == 0 || pair.first == only))
+				send(pair.first, "fp:ghost", data);
+	}
+
+	struct BranchPointRequest
+	{
+		ss_ cmd;   // "here", "import" or "remove"
+		ss_ arg;   // the plan imported
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(cmd, arg);
+		}
+	};
+
+	// For whoever may edit the plan; an import needs the other plan read
+	void on_branch_point(const network::Packet &packet)
+	{
+		BranchPointRequest r;
+		Plan *plan = plan_of(packet.sender);
+		if(!plan || !unpack(packet.data, r))
+			return;
+		const ss_ user = m_peers[packet.sender].name;
+		auto refuse = [&](const ss_ &why){
+			send(packet.sender, "fp:chat", pack(why));
+		};
+		if(!plan->m_backup_of.empty() || !role_edits(peer_role(packet.sender)))
+			return refuse("Only an editor of the plan sets its branch point");
+		namespace fs = interface::fs;
+		const ss_ path = plan->m_save->path();
+		const size_t slash = path.find_last_of("/\\");
+		const ss_ to = (slash == ss_::npos ? ss_(".") : path.substr(0, slash))+
+				"/"+bp_name(plan->m_name);
+		ss_ said;
+		if(r.cmd == "remove"){
+			storage::access(m_server, [&](storage::Interface *istorage){
+				istorage->remove(bp_name(plan->m_name));
+			});
+			plan->m_store->remove("meta/branch_point");
+			said = user+" removed the branch point";
+		} else if(r.cmd == "here" || r.cmd == "import"){
+			Plan *from = plan;
+			if(r.cmd == "import"){
+				bool exists = false;
+				for(const ss_ &n : plan_names())
+					exists |= n == r.arg;
+				if(!exists || role_in(plan_meta(r.arg), user).empty())
+					return refuse("No plan called "+r.arg+" is open to you");
+				from = open_plan(r.arg, false);
+				if(!from)
+					return refuse("Could not open the plan "+r.arg);
+			}
+			from->flush();
+			if(!copy_save(from->m_save->path(), to)){
+				log_e(MODULE, "Could not copy %s into %s", cs(from->m_name),
+						cs(to));
+				return refuse("Could not copy the plan");
+			}
+			plan->m_store->set("meta/branch_point",
+					itos((int64_t)time(nullptr))+" "+from->m_name);
+			said = user+" set the branch point"+(from == plan ? ss_() :
+					" from the plan "+from->m_name);
+		} else {
+			return;
+		}
+		log_i(MODULE, "%s (%s)", cs(said), cs(plan->m_name));
+		plan->m_ghost_read = false;
+		send_ghost(plan);
+		send_to_plan(plan->m_name, "fp:chat", pack("*** "+said));
 	}
 
 	// **A plan's backups, to look at** ([FP_BACKUPS], user 2026-09-30):
@@ -2575,6 +2759,7 @@ struct Module: public interface::Module
 			close_plan(name);
 			storage::access(m_server, [&](storage::Interface *istorage){
 				istorage->remove(name);
+				istorage->remove(bp_name(name));
 			});
 			log_i(MODULE, "%s deleted the plan %s", cs(by), cs(name));
 			for(auto &pair : m_groups)
@@ -3717,6 +3902,8 @@ struct Module: public interface::Module
 				broadcast_changes(*plan, batch.seq, packet.sender, changed,
 						deleted);
 				note_edit(peer.name);
+				if(ghost_on(plan) != plan->m_ghost_on)
+					send_ghost(plan);
 			}
 		}
 		result.seq = batch.seq;

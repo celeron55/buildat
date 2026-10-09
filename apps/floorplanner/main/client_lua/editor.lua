@@ -7180,6 +7180,7 @@ function M.start(d)
 	M.folded = panel.folded
 	doc.members_changed = M.members_changed
 	doc.backups_changed = M.backups_changed
+	doc.ghost_changed = M.ghost_changed
 	S.material = nil
 	doc.listeners[#doc.listeners + 1] = function(changed, deleted)
 		if S.suspended then

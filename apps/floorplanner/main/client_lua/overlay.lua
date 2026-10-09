@@ -28,6 +28,8 @@ local plan_lines_node = scene:CreateChild("PlanLines")
 -- And the grid, over three times the view each way, made again when the
 -- view leaves that or the step changes
 local grid_node = scene:CreateChild("PlanGrid")
+-- And the branch point's ghost ([FP_GHOST])
+local ghost_node = scene:CreateChild("PlanGhost")
 -- And the selection's outlines (draw_overlay)
 M.sel_lines_node = scene:CreateChild("SelLines")
 M.build_gen = 0
@@ -37,6 +39,7 @@ local function draw_overlay()
 	local y = S.view == "2d" and W(settings().cut) - 0.001 or 0.004
 	plan_lines_node.enabled = false
 	grid_node.enabled = false
+	ghost_node.enabled = false
 	M.sel_lines_node.enabled = false
 	local function P(x, z, yy)
 		return magic.Vector3(W(x), yy or y, W(z))
@@ -148,6 +151,82 @@ local function draw_overlay()
 			for gz = math.floor(z0 / step) * step, z1, step do
 				debug:AddLine(P(x0, gz, gy), P(x1, gz, gy),
 						gz % 1000 == 0 and major or fine, true)
+			end
+		end
+		-- **The branch point's ghost** ([FP_GHOST]): its walls' outlines
+		-- and its rooms' edges on this layout (matched by id), one faded
+		-- colour, just over the floors so the plan's own walls cover it;
+		-- nothing picks or snaps to it, and 3D draws none of it
+		-- simplified: no doors, windows or objects of it
+		local gh = E.doc.ghost
+		if gh then
+			local key = E.doc.ghost_gen .. ":" .. tostring(S.layout)
+			if key ~= M.ghost_key then
+				M.ghost_key = key
+				local function on(id)
+					local n = gh[id]
+					return n and n.type == "node" and n.ints.layout == S.layout and
+							n.ints
+				end
+				local walls, segs = {}, {}
+				local function poly(pts)
+					for i = 1, #pts do
+						local p, q = pts[i], pts[i % #pts + 1]
+						segs[#segs + 1] = {p[1], p[2], q[1], q[2]}
+					end
+				end
+				for id, e in pairs(gh) do
+					local a, b = on(e.ints.a), on(e.ints.b)
+					if e.type == "wall" and a and b then
+						walls[id] = {ax = a.x, az = a.z, bx = b.x, bz = b.z,
+								a_node = e.ints.a, b_node = e.ints.b,
+								thickness = e.ints.thickness,
+								justify = e.ints.justify, shift = e.ints.shift,
+								group = wall_span(e.ints) > 0 and 1 or 0}
+					elseif e.type == "room" and e.lists.nodes then
+						local pts = {}
+						for _, nid in ipairs(e.lists.nodes) do
+							local n = on(nid)
+							if not n then
+								pts = {}
+								break
+							end
+							pts[#pts + 1] = {n.x, n.z}
+						end
+						poly(pts)
+					end
+				end
+				for _, o in pairs(geom.wall_outlines(walls)) do
+					poly(o.pts)
+				end
+				M.ghost_segs = segs
+				M.ghost_built = false
+			end
+			local col = magic.Color(0.25, 0.4, 0.9, 0.55)
+			local gy = 0.035
+			if buildat.set_line_geometry then
+				if not M.ghost_built then
+					M.ghost_built = true
+					local out = {}
+					for _, sg in ipairs(M.ghost_segs) do
+						for j = 0, 1 do
+							local k = #out
+							out[k + 1], out[k + 2], out[k + 3] =
+									W(sg[1 + 2 * j]), gy, W(sg[2 + 2 * j])
+							out[k + 4], out[k + 5], out[k + 6], out[k + 7] =
+									col.r, col.g, col.b, col.a
+						end
+					end
+					buildat.set_line_geometry(ghost_node, out)
+					ghost_node:GetComponent("CustomGeometry"):SetMaterial(0,
+							flat_material)
+				end
+				ghost_node.enabled = true
+			else
+				for _, sg in ipairs(M.ghost_segs) do
+					debug:AddLine(P(sg[1], sg[2], gy), P(sg[3], sg[4], gy), col,
+							true)
+				end
 			end
 		end
 		-- The rooms' names and areas

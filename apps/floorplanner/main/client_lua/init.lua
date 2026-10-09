@@ -811,6 +811,29 @@ function doc.request_backups()
 	doc.backups = nil
 	buildat.send_packet("fp:backups", "")
 end
+-- **The branch point** ([FP_GHOST]): what it is ("" with none), and
+-- with the plan's ghost setting on its entities by id, else nil; set,
+-- imported from another plan or removed by an editor
+local GHOST = {"object", {"info", "string"}, {"ents", {"array", ENTITY}}}
+doc.ghost_info, doc.ghost, doc.ghost_gen = "", nil, 0
+buildat.sub_packet("fp:ghost", function(data)
+	local g = cereal.binary_input(data, GHOST)
+	doc.ghost_info = g.info
+	doc.ghost = nil
+	for _, e in ipairs(g.ents) do
+		doc.ghost = doc.ghost or {}
+		doc.ghost[e.id] = e
+	end
+	doc.ghost_gen = doc.ghost_gen + 1
+	if doc.ghost_changed then
+		doc.ghost_changed()
+	end
+end)
+function doc.branch_point(cmd, arg)
+	buildat.send_packet("fp:branch_point", cereal.binary_output(
+			{cmd = cmd, arg = arg or ""},
+			{"object", {"cmd", "string"}, {"arg", "string"}}))
+end
 buildat.sub_packet("fp:backups", function(data)
 	doc.backups = cereal.binary_input(data, BACKUPS)
 	if doc.backups_changed then
@@ -1446,6 +1469,7 @@ buildat.sub_packet("fp:closed", function(data)
 	doc.joined_once = false
 	doc.ents, doc.voxels, doc.voxel_version = {}, {}, {}
 	doc.others, doc.privs = {}, {}
+	doc.ghost_info, doc.ghost = "", nil
 	doc.undo_stack, doc.redo_stack = {}, {}
 	doc.suspend_editor()
 	if why ~= "" then
