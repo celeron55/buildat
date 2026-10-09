@@ -206,10 +206,7 @@ local function page_text(w, t, color)
 	l:SetStyleAuto()
 	l:SetWordwrap(true)
 	if page_windows[w] then
-		-- At a fractional UI scale (a phone's) a line draws a little wider
-		-- than it was wrapped at: 2% to spare, so that it stays in the
-		-- window
-		l:SetFixedWidth(math.floor((w.width - 32) * 0.98))
+		l:SetFixedWidth(w.width - 32)
 	end
 	l:SetText(t)
 	if color then
@@ -2243,11 +2240,7 @@ server_element = function()
 		pcall(function() sw.page:Remove() end)
 	end
 	local p = sw.view:CreateChild("UIElement")
-	-- A wide right margin: Urho3D's wrap measures a line up to a tenth
-	-- short of what it draws, and a long page's text ran under the bar.
-	-- simplified: the margin rather than a width on each wrapped text
-	p:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(4, 4,
-			8 + math.floor(sw.width * 0.08), 4))
+	p:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(4, 4, 8, 4))
 	p:SetFixedWidth(sw.width)
 	sw.view.contentElement = p
 	sw.view.viewPosition = magic.IntVector2(0, 0)

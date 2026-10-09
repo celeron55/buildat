@@ -66,10 +66,8 @@ local function text(parent, s, color, width, size)
 		t:SetFontSize(size)
 	end
 	if width then
-		-- At a fractional UI scale a line draws a little wider than it
-		-- was wrapped at: 2% to spare, so that its end is not cut off
 		t:SetWordwrap(true)
-		t:SetFixedWidth(math.floor(width * 0.98))
+		t:SetFixedWidth(width)
 	end
 	t:SetText(s)
 	if color then

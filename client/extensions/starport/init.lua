@@ -768,10 +768,9 @@ local function add_text(parent, text, color)
 	local t = parent:CreateChild("Text")
 	t:SetStyleAuto()
 	t:SetWordwrap(true)
-	-- Urho3D's wrap lets the last characters of a line past the width it
-	-- is given: a window's text is given less (24, its margins)
+	-- A window's text is given its width less its margins (24)
 	if parent.width > 24 then
-		t:SetFixedWidth(math.floor((parent.width - 24) * 0.95))
+		t:SetFixedWidth(parent.width - 24)
 	end
 	t.text = text
 	if color then
