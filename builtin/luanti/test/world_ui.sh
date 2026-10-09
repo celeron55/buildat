@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# [WORLD_LIST]: the world screen, driven -- the launcher's VoxeLibre tile,
+# [WORLD_LIST]: the world screen, driven -- the launcher's VoxeLibre row,
 # the row SAVE (buildat_test_sprites unless given; a test save of this
 # tree's own, a VoxeLibre one) picked, its
 # glance in the panel, "Creative mode" ticked and the save's world.mt
@@ -21,10 +21,10 @@ save=$BUILDAT_USER_PATH/apps/vanilla/saves/$SAVE
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 cli=""
 trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; check_pkill -INT buildat_server 2>/dev/null' EXIT
-# **The grid by name, not by preference** (2026-09-24): this drives
+# **The menu by name, not by preference** (2026-09-24): this drives
 # the launch menu's own screens, and a desk whose `launch_ui` is set
 # to something else -- the room, the console -- booted that instead
-# and the scan found no tiles. `-m launch_menu` asks for the thing the
+# and the scan found no rows. `-m launch_menu` asks for the thing the
 # check is about ([MENU_FALLBACK]: a launcher nobody drives is a
 # launcher nobody notices breaking).
 bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" \
@@ -77,10 +77,11 @@ def flag(key):
         pass
     return None
 time.sleep(8)
+write("text voxel")
 els = scan("a")
 if not els: fail("no menu scan")
 b = find(els, "VoxeLibre")
-if not b: fail("no VoxeLibre tile; saw " + ", ".join(e[5] for e in els)[:300])
+if not b: fail("no VoxeLibre row; saw " + ", ".join(e[5] for e in els)[:300])
 click(b)
 time.sleep(3)
 els = scan("b")
@@ -117,12 +118,12 @@ c = els and find(els, "Creative mode")
 if not c or not c[5].startswith("[ ]"): fail("the untick did not show: " + str(c and c[5]))
 time.sleep(0.5)
 if flag("creative_mode") != "false": fail("world.mt not put back")
-# Escape on the world screen is Back to the grid ([BOX_PLAYTEST_2] 6)
+# Escape on the world screen is Back to the menu ([BOX_PLAYTEST_2] 6)
 write("keypress Escape", "delay 500")
 els = scan("esc")
-if not (els and find(els, "Luanti settings") and not find(els, "Creative mode")):
-    fail("Escape did not leave the world screen for the grid; saw " + ", ".join(e[5] for e in els or [])[:200])
-print("PASS (creative_mode was %s before; false now; Escape back to the grid)" % before)
+if not (els and find(els, "Browse") and not find(els, "Creative mode")):
+    fail("Escape did not leave the world screen for the menu; saw " + ", ".join(e[5] for e in els or [])[:200])
+print("PASS (creative_mode was %s before; false now; Escape back to the menu)" % before)
 write("quit")
 PY
 status=$?

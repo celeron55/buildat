@@ -57,7 +57,7 @@ client(){
 	printf '%s\n' "$@" quit | sed "s#^shot #screenshot $t/#" > "$t/$n.cmds"
 	BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin \
 	BUILDAT_AITTA_PASSWORD=checkpass BUILDAT_AITTA_CODE=$code \
-		timeout 240 bin/buildat -o launch_ui=launch_menu_v2 -D "$t/$u" \
+		timeout 240 bin/buildat -o launch_ui=launch_menu -D "$t/$u" \
 		-C "$t/c_$u" -w 800x600 -l 3 -o sound_mute=1 -c @"$t/$n.cmds" \
 		> "$t/$n.log" 2>&1
 }

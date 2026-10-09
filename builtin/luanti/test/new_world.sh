@@ -25,10 +25,10 @@ rm -rf "$saves/mgtest" "$saves/taken"
 # the name taken
 mkdir -p "$saves/taken"; : > "$saves/taken/save.sqlite"
 fifo="$out/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
-# **The grid by name, not by preference** (2026-09-24): this drives
+# **The menu by name, not by preference** (2026-09-24): this drives
 # the launch menu's own screens, and a desk whose `launch_ui` is set
 # to something else -- the room, the console -- booted that instead
-# and the scan found no tiles. `-m launch_menu` asks for the thing the
+# and the scan found no rows. `-m launch_menu` asks for the thing the
 # check is about ([MENU_FALLBACK]: a launcher nobody drives is a
 # launcher nobody notices breaking).
 ( cd "$here/Build" && bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" \

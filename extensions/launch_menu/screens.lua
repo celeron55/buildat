@@ -233,7 +233,7 @@ function M.join_listed(address)
 	end, true)
 end
 
--- **Join a Buildat server**: launch_menu_v2's Servers layout
+-- **Join a Buildat server**: launch_menu's Servers layout
 -- (playtest, 2026-10-07): a title, the servers in one list, sectioned,
 -- and a column beside it with the picked one, the address fields and Join
 local PANEL_WIDTH = 300
@@ -418,7 +418,7 @@ function M.show_connect_to_server()
 		local q = filter_text()
 		for name, b in pairs(tab_buttons) do
 			b.selected = (name == tab)
-			-- In the main button's amber, as launch_menu_v2's locked row
+			-- In the main button's amber, as launch_menu's locked row
 			b:GetChild("ButtonText").color = magic.Color(ui_utils.rgb(
 					name == tab and "main" or "text"))
 		end

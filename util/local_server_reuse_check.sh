@@ -31,11 +31,11 @@ delay 2000'
 # The world list's first world, then Play; in the world, Escape and the
 # pause menu's "Leave the game" (positions at 800x600, from a scan)
 cat > "$t/cmds" <<C
-wait_log_any 20000 launch_menu_v2: home
+wait_log_any 20000 launch_menu: home
 delay 800
 $launch
 keypress Escape
-wait_log 20000 launch_menu_v2: home
+wait_log 20000 launch_menu: home
 delay 1500
 $launch
 mouse_pos 270 156
@@ -52,7 +52,7 @@ mouse_click left
 wait_log 20000 Local server stopped
 quit
 C
-timeout 240 Build/bin/buildat -o launch_ui=launch_menu_v2 -w 800x600 -l 4 \
+timeout 240 Build/bin/buildat -o launch_ui=launch_menu -w 800x600 -l 4 \
 	-o sound_mute=1 -c @"$t/cmds" > "$t/log" 2>&1
 n(){ grep -ac "$1" "$t/log"; }
 [ "$(n 'Starting local server')" = 1 ] || fail "$(n 'Starting local server') starts, not 1"

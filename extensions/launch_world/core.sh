@@ -70,7 +70,7 @@ fi
 	echo "keypress Down"
 	echo "wait_log 5000 attract: back to the standing place"
 	# **The 2D menu and back** ([LAUNCH_WORLD] stage 2's done-when): the
-	# dialog's third row (launch_menu_v2, the room closed), then its
+	# dialog's third row (launch_menu, the room closed), then its
 	# Display and sound by the keyboard -- typed and taken, the Launch UI
 	# row opened and the room picked from the list, which boots a new
 	# one. One Tab afterwards is one station: a window of the menu's left

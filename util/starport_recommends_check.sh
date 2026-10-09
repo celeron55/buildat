@@ -79,7 +79,7 @@ printf 'accepted,address,description,created,last_attempt,name,icon,server\n"tru
 	$SP $(date +%s) $(date +%s) > "$tmp/cl/network_addresses.csv"
 launcher() { # cmds log
 	BUILDAT_STARPORT_OFFER=1 timeout 120 Build/bin/buildat \
-		-o launch_ui=launch_menu_v2 -D "$tmp/cl" -w 800x600 -l 4 \
+		-o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 4 \
 		-o sound_mute=1 -c @"$1" > "$2" 2>&1
 }
 # The dialog at 800x600: the second Aitta unchecked, then "Add"

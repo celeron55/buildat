@@ -1,8 +1,8 @@
 #!/bin/bash
 # tier: quick
 # cost: ~25 s (2026-10-09)
-# covers: extensions/ui_utils/init.lua extensions/launch_menu_v2/init.lua
-# [UI_DROPDOWN]: ui_utils.dropdown, on launch_menu_v2's Servers filter.
+# covers: extensions/ui_utils/init.lua extensions/launch_menu/init.lua
+# [UI_DROPDOWN]: ui_utils.dropdown, on launch_menu's Servers filter.
 # The mouse opens it, Down twice and Enter pick LAN; Enter opens it again,
 # Down and Escape close it with LAN kept, and the screen stays up (its
 # Escape not seen). The Luanti server list's consent is declined ahead.
@@ -44,9 +44,9 @@ delay 500
 quit
 CMDS
 cd "$(dirname "$0")/../../Build"
-timeout 90 bin/buildat -o launch_ui=launch_menu_v2 -D "$t/cl" -C "$t/cache" \
+timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -C "$t/cache" \
 	-w 1024x640 -l 3 -o sound_mute=1 -c @"$t/cmds" > "$t/cl.log" 2>&1
-lists=$(grep -ao "launch_menu_v2: server, [0-9]* rows, by recent, .*" "$t/cl.log" |
+lists=$(grep -ao "launch_menu: server, [0-9]* rows, by recent, .*" "$t/cl.log" |
 	sed 's/.*, //')
 [ "$lists" = "All
 LAN" ] || fail "the filter went: $(echo $lists) ($t/cl.log)"

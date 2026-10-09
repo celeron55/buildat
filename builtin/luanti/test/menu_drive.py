@@ -33,7 +33,7 @@ WAIT_TIMEOUT_S = 600
 # seconds, and each must differ from the last unless the screen is
 # waiting for input
 STILL_EVERY_S = 4.0
-# The grid's titles for the game ids the rules name
+# The menu titles for the game ids the rules name
 TITLES = {"mineclone2": "VoxeLibre", "minetest_game": "Minetest Game"}
 SETTLE_S = 1.2
 
@@ -179,6 +179,20 @@ def click(write, e):
     write("mouse_pos %d %d" % (x, y), "delay 150", "mouse_click left", "delay 150")
 
 
+def find_game(write, s, game):
+    """The game's row on the launch menu, or ContentDB's when the game is
+    not there yet; None while a search for it is typed. Home lists only
+    the recent ones, the rest come by a search. The search's own line says
+    what was typed, so a prefix is typed, which that line does not match
+    the whole title with."""
+    title = TITLES.get(game, game)
+    e = s.find(title, "Text") or s.find("ContentDB", "Text")
+    if e is None and not s.find("Search:", "Text"):
+        write("text " + title[:5].lower(), "delay 800")
+    elif e is None and not s.find("Search: content", "Text"):
+        write("keypress Escape", "delay 300", "text content", "delay 800")
+    return e
+
 def type_into(write, e, text):
     click(write, e)
     # What the field held goes first; the fields here are short
@@ -230,16 +244,13 @@ def run(write, read_block, say, seed, game="mineclone2", save_name="menu_run", m
             say("FAILED menu: screen %s did not change in %d s" % (s.name, limit))
             return False
         acted = False
-        if name.endswith("boot") or name.endswith("local_game"):
-            # The launcher's grid ([LAUNCH_GRID]): a tile per Luanti game
-            # by its title, or ContentDB's when the game is not there yet
-            e = s.find(TITLES.get(game, game), "Text")
-            if e is None:
-                e = s.find("ContentDB", "Text")
-            if e is None:
-                say("FAILED menu: neither %s nor ContentDB on the grid" % game)
+        if name.endswith("launch_menu") or name.endswith("local_game"):
+            e = find_game(write, s, game)
+            if e is None and s.find("Search: content", "Text"):
+                say("FAILED menu: neither %s nor ContentDB in the menu" % game)
                 return False
-            click(write, e)
+            if e:
+                click(write, e)
             acted = True
         elif waiting:
             pass  # the still-pair check is what watches it

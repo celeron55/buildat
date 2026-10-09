@@ -1,6 +1,6 @@
 [
 	["nav", "${URL}"],
-	["waitlog", "launch_menu_v2", 120],
+	["waitlog", "launch_menu", 120],
 	["wait", 3000],
 	["tap", 300, 457],
 	["wait", 1500],

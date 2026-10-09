@@ -4900,7 +4900,7 @@ local PAUSE_ITEMS = {
 		-- so switching is one action from either side ([TWO_AUDIENCES])
 		-- rather than a flag and a restart.
 		close_room()
-		local ok, why = api.set_launch_ui("launch_menu_v2", {close = true})
+		local ok, why = api.set_launch_ui("launch_menu", {close = true})
 		if not ok then
 			log:warning("pause: " .. tostring(why))
 			notice(tostring(why))

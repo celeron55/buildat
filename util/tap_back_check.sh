@@ -2,7 +2,7 @@
 # tier: quick
 # cost: ~15 s, ~40 s with the web part (2026-10-06)
 # covers: client/extensions/uistack/init.lua src/client/app.cpp
-# [TAP_BACK]: a click on nothing is Back. launch_menu_v2's Settings stays up
+# [TAP_BACK]: a click on nothing is Back. launch_menu's Settings stays up
 # for a click in its window, goes for a click beside it, and Home, the
 # first screen, stays as it is for one (no Quit dialog). Escape's Quit
 # dialog then goes by the arrows: Left, Right, Enter is Cancel, and Down,
@@ -26,7 +26,7 @@ fail(){ echo "FAIL: $*"; cp "$t/log" /tmp/tap_back_check.log; echo "log in /tmp/
 # Positions at 800x600: Home's Settings row, Settings' heading, and the
 # left edge, where nothing is
 cat > "$t/cmds" <<C
-wait_log_any 20000 launch_menu_v2: home
+wait_log_any 20000 launch_menu: home
 delay 1000
 mouse_pos 260 350
 mouse_click left
@@ -85,18 +85,18 @@ keypress Return
 delay 3000
 quit
 C
-timeout 60 Build/bin/buildat -o launch_ui=launch_menu_v2 -D "$t/u" -w 800x600 -l 4 \
+timeout 60 Build/bin/buildat -o launch_ui=launch_menu -D "$t/u" -w 800x600 -l 4 \
 	-o sound_mute=1 -c @"$t/cmds" > "$t/log" 2>&1
 # Each scan's "Display and sound" header says Settings is up
 scans=$(grep -a "^scan scan: ui\|UIStack:p\|click on nothing" "$t/log")
-n=$(grep -c "push(): .*launch_menu_v2 settings" <<< "$scans")
+n=$(grep -c "push(): .*launch_menu settings" <<< "$scans")
 [ "$n" = 1 ] || fail "Settings opened $n times"
 grep -c "click on nothing" <<< "$scans" | grep -qx 1 ||
 	fail "not exactly one Back: $(grep "click on nothing" <<< "$scans")"
 # The first scan (after the click inside) still has Settings' header
 awk '/UIStack:pop/{exit} /text "Display and sound"/{f=1} END{exit !f}' <<< "$scans" ||
 	fail "a click in Settings' window closed it"
-grep -q 'pop(): .*launch_menu_v2 settings' <<< "$scans" || fail "Settings did not go"
+grep -q 'pop(): .*launch_menu settings' <<< "$scans" || fail "Settings did not go"
 # Each scan's focus, by its number: 4 a hovered row, 5 none (the mouse
 # left), 6 that row again (Down), 7 the row above (Up, the mouse gone
 # away), 8 and 9 the third row, before and after the second's screen came
@@ -118,7 +118,7 @@ grep -aq "command: quit" "$t/log" && fail "the arrows' Quit did not quit"
 # Home's Browse > Servers, its rows at 800x600: a click on the second, the
 # mouse on the third, then Down
 cat > "$t/cmds2" <<C
-wait_log_any 20000 launch_menu_v2: home
+wait_log_any 20000 launch_menu: home
 delay 800
 keypress Down
 keypress Return
@@ -134,15 +134,15 @@ delay 400
 event scan
 quit
 C
-timeout 60 Build/bin/buildat -o launch_ui=launch_menu_v2 -D "$t/u2" -w 800x600 -l 4 \
+timeout 60 Build/bin/buildat -o launch_ui=launch_menu -D "$t/u2" -w 800x600 -l 4 \
 	-o sound_mute=1 -c @"$t/cmds2" > "$t/log2" 2>&1
 cp "$t/log2" "$t/log"
-grep -aq "launch_menu_v2: locked Join a Buildat server" "$t/log2" || fail "the click locked nothing"
+grep -aq "launch_menu: locked Join a Buildat server" "$t/log2" || fail "the click locked nothing"
 # The panel's heading, and the focus, in each scan
 p(){ awk -v n="$1" '/command: event scan/{i++} i == n && /size 166x20 text/{
 	sub(/.*text /, ""); print; exit}' "$t/log2"; }
 [ "$(p 1)" = '"Join a Buildat server"' ] || fail "the panel left the locked row for the hovered one: $(p 1)"
-grep -aq "launch_menu_v2: unlocked" "$t/log2" || fail "Down did not let go"
+grep -aq "launch_menu: unlocked" "$t/log2" || fail "Down did not let go"
 [ "$(p 2)" != '"Join a Buildat server"' ] || fail "the panel stayed locked after Down"
 echo "ok: a click on nothing is Back above the first screen, and nothing on it; a click locks a row"
 

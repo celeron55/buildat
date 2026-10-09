@@ -172,7 +172,7 @@ drawn at a fraction of the window size, with the UI left at native
 resolution), `vsync`, `max_fps`, `multisampling`, `sound_volume`,
 `sound_mute`, and `default_username`, the name an app offers when it asks for
 one. They live in `user/settings.json` beside the remembered
-window size; the launch grid's "Engine settings" tile edits them, or set
+window size; the launch menu's Settings, "Display and sound", edits them, or set
 them for one run with `-o`, which is not written back:
 
     $ bin/buildat -o render_scale=0.5,vsync=0,sound_mute=1

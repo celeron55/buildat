@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [MENU_CONTEXT]: leaving a menu-only game for the launcher, driven -- the
-# VoxeLibre tile opens the world screen (a local server behind it), "< back
-# to the launcher" returns to the grid with the client still up and the
-# server gone, then the tile is opened a second time and the world screen
-# comes again over a fresh connection. Prints PASS or FAIL.
+# VoxeLibre row opens the world screen (a local server behind it), "< back
+# to the launcher" returns to the menu with the client still up, then the
+# row is opened a second time and the world screen comes again over a
+# fresh connection -- to the same server, which holds no world and so
+# stays for the next launch ([SERVER_REUSE], 2026-10-06). Prints PASS or
+# FAIL.
 #
 #   builtin/luanti/test/leave_ui.sh
 set -u
@@ -20,10 +22,10 @@ check_pgrep buildat_server >/dev/null && { echo "FAIL: a buildat_server is runni
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 cli=""
 trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; check_pkill -INT buildat_server 2>/dev/null' EXIT
-# **The grid by name, not by preference** (2026-09-24): this drives
+# **The menu by name, not by preference** (2026-09-24): this drives
 # the launch menu's own screens, and a desk whose `launch_ui` is set
 # to something else -- the room, the console -- booted that instead
-# and the scan found no tiles. `-m launch_menu` asks for the thing the
+# and the scan found no rows. `-m launch_menu` asks for the thing the
 # check is about ([MENU_FALLBACK]: a launcher nobody drives is a
 # launcher nobody notices breaking).
 bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" \
@@ -70,12 +72,13 @@ def fail(why):
 def server_up():
     return subprocess.run(["bash", "-c", "check_pgrep buildat_server"], capture_output=True).returncode == 0
 def open_worlds(tag):
+    write("text voxel")
     els = scan("grid" + tag)
-    # The tile, not the selected entry's name in the logo row (the same
+    # The row, not the selected entry's name in the logo row (the same
     # word, higher up): the lowest match
     tiles = [e for e in els or [] if "voxelibre" in e[5].lower() and e[3] > 0]
     b = tiles and max(tiles, key=lambda e: e[2])
-    if not b: fail("no VoxeLibre tile (%s); saw %s" % (tag, ", ".join(e[5] for e in els or [])[:300]))
+    if not b: fail("no VoxeLibre row (%s); saw %s" % (tag, ", ".join(e[5] for e in els or [])[:300]))
     click(b)
     for i in range(40):
         time.sleep(1)
@@ -91,18 +94,16 @@ if not b: fail("no back row")
 click(b)
 time.sleep(2)
 els = scan("back")
-if not (els and find(els, "VoxeLibre") and not find(els, "which world?")):
-    fail("not back on the grid; saw " + ", ".join(e[5] for e in els or [])[:300])
-for i in range(40):
-    if not server_up(): break
-    time.sleep(1)
-if server_up():
-    pid = subprocess.run(["bash", "-c", "check_pgrep buildat_server"], capture_output=True, text=True).stdout.split()[0]
-    bt = subprocess.run(["gdb", "-batch", "-p", pid, "-ex", "thread apply all bt 8"], capture_output=True, text=True).stdout
-    open(log + ".server_stack", "w").write(bt)
-    fail("the local server is still running after leaving; its stack is in " + log + ".server_stack")
+if not (els and find(els, "Browse") and not find(els, "which world?")):
+    fail("not back in the menu; saw " + ", ".join(e[5] for e in els or [])[:300])
+def server_pids():
+    return subprocess.run(["bash", "-c", "check_pgrep buildat_server"],
+            capture_output=True, text=True).stdout.split()
+kept = server_pids()
+if not kept: fail("the world-less server did not stay ([SERVER_REUSE])")
 els = open_worlds("b")
-if not server_up(): fail("no local server the second time")
+if server_pids() != kept:
+    fail("the second launch did not reuse the server: %s, then %s" % (kept, server_pids()))
 errors = [l for l in open(log, "rb").read().decode("utf-8", "replace").splitlines()
           if " E " in l[:40] or "Exception" in l]
 if errors: fail("error lines: " + errors[0][:200])

@@ -3,9 +3,9 @@
 # tier: full
 # cost: 150s (this desk, 2026-09-27; local/run_all/costs corrects it per machine)
 # [MENU_LEAVE]: **leaving a world**, which nothing drove before -- leave_ui.sh
-# leaves the world *screen* for the grid, and everything between picking a
-# world and coming back out of it was untested. The launcher's grid, the
-# VoxeLibre tile, a world played for ten seconds, Escape, and "Leave the
+# leaves the world *screen* for the menu, and everything between picking a
+# world and coming back out of it was untested. The launcher's menu, the
+# VoxeLibre row, a world played for ten seconds, Escape, and "Leave the
 # game" from the game's own pause menu. What it holds:
 #
 #   * the played world has none of the launcher over it -- the "Starting
@@ -39,7 +39,7 @@ fi
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 cli=""
 trap 'exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; check_pkill -INT buildat_server 2>/dev/null; rm -rf "$tmp"' EXIT
-# The grid by name, not by preference ([MENU_FALLBACK]); leave_ui.sh says why
+# The menu by name, not by preference ([MENU_FALLBACK]); leave_ui.sh says why
 bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" \
 	> "$out/cli.log" 2>&1 &
 cli=$!
@@ -104,11 +104,12 @@ def logtext():
     return open(log, "rb").read().decode("utf-8", "replace")
 
 time.sleep(8)
+write("text voxel")
 els = scan("grid")
 tiles = [e for e in els or [] if "voxelibre" in e[5].lower() and e[3] > 0]
 tile = tiles and max(tiles, key=lambda e: e[2])
 if not tile:
-    fail("no VoxeLibre tile; saw " + ", ".join(e[5] for e in els or [])[:300])
+    fail("no VoxeLibre row; saw " + ", ".join(e[5] for e in els or [])[:300])
 click(tile)
 for i in range(40):
     time.sleep(1)
@@ -171,15 +172,15 @@ time.sleep(4)
 write("screenshot %s/after_leave.png" % out, "delay 1500")
 time.sleep(3)
 els = scan("back")
-if not find(els, "VoxeLibre"):
-    fail("not back on the grid; saw " +
+if not find(els, "Browse"):
+    fail("not back in the menu; saw " +
          ", ".join(e[5] for e in els or [] if e[5].strip())[:300])
 left = [l for l in logtext().splitlines() if "what is left after" in l]
 if not left:
     fail("the client said nothing about what the leave left")
 print("the client says: " + left[-1].split(": ", 1)[-1][:200])
 if "the preferred image is still here" in left[-1]:
-    fail("the last frame of the world is still on the screen under the grid")
+    fail("the last frame of the world is still on the screen under the menu")
 print("PASS: the world came up clean, Escape paused it, and the leave took "
       "the game's picture with it")
 write("quit")

@@ -14,7 +14,7 @@
 --
 -- A dropdown per preference, of the values worth offering
 -- ([ENGINE_SETTINGS_DROPDOWNS], user 2026-10-06: they were buttons that
--- cycled), in launch_menu_v2's Server filter's style. The menu's arrows
+-- cycled), in launch_menu's Server filter's style. The menu's arrows
 -- reach each one and Enter opens it, Urho3D's own.
 -- Run by the menu's own verb, so it loads on either side
 -- ([LAUNCH_SANDBOX]): `require` answers an extension's safe half inside

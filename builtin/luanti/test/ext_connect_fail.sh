@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
 # cost: 16s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
-# [BOX_PLAYTEST_2] (2): the "Join a Luanti server" tile from the grid,
+# [BOX_PLAYTEST_2] (2): the "Join a Luanti server" row in the menu,
 # a connect to an address nothing answers at: the failure must be said in
-# a dialog and OK must return to the connect screen, not the grid and not
+# a dialog and OK must return to the connect screen, not the menu and not
 # the desktop. Prints PASS or FAIL.
 #
 #   builtin/luanti/test/ext_connect_fail.sh
@@ -17,10 +17,10 @@ file=$BUILDAT_USER_PATH/luanti_client/settings.json
 [ -f "$file" ] && cp "$file" "$tmp/settings.bak"
 trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; if [ -f "$tmp/settings.bak" ]; then cp "$tmp/settings.bak" "$file"; else rm -f "$file"; fi' EXIT
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
-# **The grid by name, not by preference** (2026-09-24): this drives
+# **The menu by name, not by preference** (2026-09-24): this drives
 # the launch menu's own screens, and a desk whose `launch_ui` is set
 # to something else -- the room, the console -- booted that instead
-# and the scan found no tiles. `-m launch_menu` asks for the thing the
+# and the scan found no rows. `-m launch_menu` asks for the thing the
 # check is about ([MENU_FALLBACK]: a launcher nobody drives is a
 # launcher nobody notices breaking).
 bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" \
@@ -65,10 +65,11 @@ def click(e):
 def fail(why):
     print("FAIL: " + why); write("quit"); sys.exit(1)
 time.sleep(8)
+write("text join a lua")
 els = scan("a")
 if not els: fail("no menu scan")
 tiles = [e for e in els if "join a luanti server" in e[5].lower() and e[3] > 0]
-if not tiles: fail("no connect tile; saw " + ", ".join(e[5] for e in els)[:300])
+if not tiles: fail("no connect row; saw " + ", ".join(e[5] for e in els)[:300])
 click(max(tiles, key=lambda e: e[2]))
 addr = None
 for i in range(5):
@@ -84,7 +85,7 @@ b = [e for e in els if e[5] in ("Join", "[J]oin") and e[3] > 0]
 if not b: fail("no Join button")
 click(b[0])
 # The login to nothing times out; the dialog must say so, and OK must go
-# back to the connect screen rather than the grid
+# back to the connect screen rather than the menu
 seen_dialog = None
 for i in range(40):
     els = scan("c%d" % i)

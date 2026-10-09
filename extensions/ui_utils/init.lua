@@ -798,7 +798,7 @@ function M.safe.vertical_menu(root, options)
 end
 
 -- **A list in a viewport that clips it** and scrolls by moving it
--- (launch_menu_v2's, shared since [HEARTH_UI]). Its rows are anything:
+-- (launch_menu's, shared since [HEARTH_UI]). Its rows are anything:
 -- view:row() makes the menus' one-line button, and a caller with rows of
 -- its own (a forum message: a box of wrapped text, its height its own)
 -- creates them on view.list and calls fit().
@@ -1017,7 +1017,7 @@ function M.safe.add_paged(menu, items, options)
 	return pages, page
 end
 
--- **A list of servers** in a list_view, the rows launch_menu_v2's
+-- **A list of servers** in a list_view, the rows launch_menu's
 -- Servers screen has ([SERVER_LIST]; that look since the playtest of
 -- 2026-10-07): one line each, the name and a dim badge, and the row
 -- under the mouse or picked last described in options.panel, the column
@@ -1117,7 +1117,7 @@ end
 local message_handle = nil
 
 -- **One dropdown for every choice of one** ([UI_DROPDOWN], user
--- 2026-10-09), launch_menu_v2's filter's look: the "▼" at its right end,
+-- 2026-10-09), launch_menu's filter's look: the "▼" at its right end,
 -- the row under the pointer highlighted and the chosen one less
 -- (main_style.xml's button and button-line greys). choices are
 -- {label, value} (a plain string is both), current a value;
@@ -1400,7 +1400,7 @@ end
 
 -- **A way back to the menu** (user, 2026-10-06): a "Menu" button in the
 -- bottom right corner of parent, for a launch UI with no menu of its own
--- to switch from (the console, the room). It switches to launch_menu_v2;
+-- to switch from (the console, the room). It switches to launch_menu;
 -- before(), if given, runs first, for one that has to take its own
 -- screen down, and opts go to set_launch_ui ({close = true}). Returns
 -- the button, whose visible the caller may set.
@@ -1427,7 +1427,7 @@ function M.safe.menu_button(parent, before, opts)
 	magic.SubscribeToEvent(b, "Released", function()
 		if before then before() end
 		local ok, why = (buildat.safe or buildat).set_launch_ui(
-				"launch_menu_v2", opts)
+				"launch_menu", opts)
 		if not ok then
 			log:warning("menu_button: " .. tostring(why))
 			M.safe.show_message_dialog(tostring(why))

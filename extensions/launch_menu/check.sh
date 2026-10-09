@@ -4,7 +4,7 @@
 # covers: extensions/ui_utils/** client/extensions/uistack/** extensions/launch_menu/** apps/vanilla/main/client_lua/**
 # (this is the runner that drives them: every launch UI booted by name,
 # a game of vanilla's left through the stack, a screen pushed over the
-# grid, and a dead server's dialog)
+# menu, and a dead server's dialog)
 # [MENU_FALLBACK]: **every launch UI boots**. Nothing started
 # `launch_menu` in any check, so the quick tier signed off version one
 # while `-m launch_menu` was aborting the client (user, 2026-09-23) --
@@ -56,11 +56,11 @@ for n in $names; do
 done
 echo "$(echo "$names" | wc -w) launch UIs booted, $bad of them badly"
 
-# **And the grid can be left.** A launcher that cannot be gone back to
+# **And a game can be left.** A launcher that cannot be gone back to
 # leaves a client with no server and no menu, and nothing short of
 # [FIRST_RUN]'s twenty minutes was driving it: the menu had no
 # `leave_app` at all, so a game started from the default launcher was
-# a one-way trip (2026-09-24). This boots the grid straight into a
+# a one-way trip (2026-09-24). This boots the menu straight into a
 # game's own screen (-a runs one launch action), clicks that screen's
 # "< back to the launcher", and asks the client to describe itself
 # afterwards -- a dead client answers nothing.
@@ -78,10 +78,10 @@ if grep -aq "Crash: SIG" "$out/back.log"; then
 	grep -a "Crash: SIG" -A 6 "$out/back.log" | head -8
 	exit 1
 fi
-grid=$(grep -ac "back to the grid" "$out/back.log")
+home=$(grep -ac "launch_menu: back to Home" "$out/back.log")
 lost=$(grep -ac "leave: no launcher to go back to" "$out/back.log")
 alive=$(grep -ac "scan b: ui" "$out/back.log")
-echo "leaving a game: back to the grid $grid times, $alive elements" 		"drawn after it"
+echo "leaving a game: back to Home $home times, $alive elements" 		"drawn after it"
 # **And the launch was remembered** ([LAUNCH_API]): the history is the
 # API's, so "recently played" is one list every launch UI reads rather
 # than one per launcher that disagrees with the next
@@ -98,20 +98,19 @@ if [ "$runs" -gt 1 ]; then
 			"the whole menu is drawn again over the one on the screen"
 	exit 1
 fi
-if [ "$grid" -lt 1 ] || [ "$lost" -gt 0 ] || [ "$alive" -lt 10 ]; then
-	echo "FAIL: a game started from the grid cannot be left -- the client" 			"is left with no server and no menu"
+if [ "$home" -lt 1 ] || [ "$lost" -gt 0 ] || [ "$alive" -lt 10 ]; then
+	echo "FAIL: a game started from the menu cannot be left -- the client" 			"is left with no server and no menu"
 	grep -a "leave:\|Failed to run function" "$out/back.log" | head -3
 	exit 1
 fi
-# **And the console opens over the grid** ([LAUNCH_CONSOLE] offers its
-# screen to every launch UI, and the room had it first). The selection
-# starts on the first tile, "Engine settings"; one right is the console,
-# Return opens it and Escape hands the grid back.
-# **The pointer goes to a corner first**: a tile under the mouse takes the
-# selection as the grid appears (HoverBegin), and the run then arrowed
-# from whichever game happened to sit in the middle of the window.
+# **And the console opens over the menu** ([LAUNCH_CONSOLE] offers its
+# screen to every launch UI, and the room had it first). A search for it
+# leaves its row the only one and selected; Return opens it and Escape
+# hands the menu back.
+# **The pointer goes to a corner first**: a row under the mouse takes the
+# selection as the menu appears (HoverBegin).
 { echo "delay 600"; echo "mouse_pos 2 2"
-	echo "delay 4000"; echo "keypress Right"; echo "delay 400"
+	echo "delay 4000"; echo "text developer c"; echo "delay 800"
 	echo "keypress Return"; echo "delay 2500"
 	echo "keypress Escape"; echo "delay 1500"; echo "quit"; } \
 	> "$out/cmds_console.txt"
@@ -120,10 +119,10 @@ timeout 120 bin/buildat -m launch_menu -w 1024x640 -l 3 \
 	-L "$out/console.log" -c @"$out/cmds_console.txt" > /dev/null 2>&1
 copened=$(grep -ac "console: .* lines of the API document" "$out/console.log")
 cclosed=$(grep -ac "console: closed" "$out/console.log")
-echo "the grid's console opened $copened times, closed $cclosed"
+echo "the menu's console opened $copened times, closed $cclosed"
 if [ "$copened" -lt 1 ] || [ "$cclosed" -lt 1 ]; then
-	echo "FAIL: the grid cannot open the developer console"
-	grep -a "Menu entry\|console:" "$out/console.log" | tail -3
+	echo "FAIL: the menu cannot open the developer console"
+	grep -a "launch_menu: \|console:" "$out/console.log" | tail -3
 	exit 1
 fi
 

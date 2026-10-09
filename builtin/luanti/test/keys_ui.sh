@@ -23,10 +23,10 @@ cli=""
 trap 'exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; check_pkill -INT buildat_server 2>/dev/null;
 	if [ -f "$tmp/settings.json.bak" ]; then cp "$tmp/settings.json.bak" "$settings"; else rm -f "$settings"; fi;
 	[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"' EXIT
-# **The grid by name, not by preference** (2026-09-24): this drives
+# **The menu by name, not by preference** (2026-09-24): this drives
 # the launch menu's own screens, and a desk whose `launch_ui` is set
 # to something else -- the room, the console -- booted that instead
-# and the scan found no tiles. `-m launch_menu` asks for the thing the
+# and the scan found no rows. `-m launch_menu` asks for the thing the
 # check is about ([MENU_FALLBACK]: a launcher nobody drives is a
 # launcher nobody notices breaking).
 bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" \
@@ -71,12 +71,13 @@ def click(e):
 def fail(why):
     print("FAIL: " + why); write("quit"); sys.exit(1)
 time.sleep(8)
+write("text luanti sett")
 els = scan("a")
 if not els: fail("no menu scan")
 b = find(els, "Luanti settings")
 if not b: fail("no settings button; saw " + ", ".join(e[5] for e in els)[:300])
 click(b)
-# The game's server starts behind the tile: scanned until its screen is up
+# The game's server starts behind the row: scanned until its screen is up
 b = None
 for i in range(20):
     els = scan("b%d" % i)

@@ -19,10 +19,10 @@ file=$BUILDAT_USER_PATH/luanti_client/settings.json
 trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; if [ -f "$tmp/settings.bak" ]; then cp "$tmp/settings.bak" "$file"; else rm -f "$file"; fi' EXIT
 run() {   # $1 = which pass; drives one client through the python below
 	local fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
-# **The grid by name, not by preference** (2026-09-24): this drives
+# **The menu by name, not by preference** (2026-09-24): this drives
 # the launch menu's own screens, and a desk whose `launch_ui` is set
 # to something else -- the room, the console -- booted that instead
-# and the scan found no tiles. `-m launch_menu` asks for the thing the
+# and the scan found no rows. `-m launch_menu` asks for the thing the
 # check is about ([MENU_FALLBACK]: a launcher nobody drives is a
 # launcher nobody notices breaking).
 	bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" \
@@ -66,9 +66,10 @@ def click(e):
 def fail(why):
     print("FAIL: " + why); write("quit"); sys.exit(1)
 time.sleep(8)
+write("text join a lua")
 els = scan("a")
 tile = find(els, "Join a Luanti server")
-if not tile: fail("no Luanti tile; saw " + ", ".join(e[5] for e in els or [])[:300])
+if not tile: fail("no Luanti row; saw " + ", ".join(e[5] for e in els or [])[:300])
 click(tile)
 els = scan("b")
 label = find(els, "Filter")

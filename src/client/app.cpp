@@ -427,7 +427,9 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 				*error = "launch_ui: \""+value+"\" is not an extension name";
 				return false;
 			}
-			opt->launch_ui = value;
+			// launch_menu_v2 took launch_menu's place and name
+			// ([RETIRE_DEAD]); a preference saved before says the same
+			opt->launch_ui = value == "launch_menu_v2" ? "launch_menu" : value;
 			continue;
 		}
 		if(key == "default_username"){
@@ -3302,14 +3304,14 @@ struct CApp: public App, public magic::Application
 	// **Which extension is the launch UI** ([LAUNCH_SANDBOX]: a slot an
 	// extension fills, not a setting with three values). `-m` wins for
 	// the run it is given on; otherwise it is the saved preference,
-	// which defaults to `launch_menu_v2`.
+	// which defaults to `launch_menu`.
 	ss_ launch_ui_name()
 	{
 		const ss_ named = g_client_config.get<ss_>("menu_extension_name");
 		if(!named.empty())
 			return named;
 		if(m_options.launch_ui.empty())
-			return "launch_menu_v2";
+			return "launch_menu";
 		return m_options.launch_ui;
 	}
 

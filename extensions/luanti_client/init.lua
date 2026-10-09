@@ -3571,7 +3571,7 @@ show_connect_dialog = function(address, name)
 	root.defaultStyle = magic.cache:GetResource(
 			"XMLFile", "launch_menu/res/main_style.xml")
 
-	-- **launch_menu_v2's Servers layout** (playtest, 2026-10-07): a
+	-- **launch_menu's Servers layout** (playtest, 2026-10-07): a
 	-- title, the source and the filter, the list, and beside it the
 	-- picked server, the fields and Join
 	local PANEL_WIDTH = 300
@@ -3730,7 +3730,7 @@ show_connect_dialog = function(address, name)
 	local function show()
 		for name, b in pairs(source_buttons) do
 			b.selected = (name == source)
-			-- In the main button's amber, as launch_menu_v2's locked row
+			-- In the main button's amber, as launch_menu's locked row
 			b:GetChild("ButtonText").color = magic.Color(ui_utils.rgb(
 					name == source and "main" or "text"))
 		end

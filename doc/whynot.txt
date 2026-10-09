@@ -75,4 +75,4 @@ Taken out of `extensions/launch_world` on purpose (2026-09-24 and
 - The three other walls and their pocket allocation (same dates): the
   games stand in a formation on one wall, each with its name beside it.
 - The room as the default launch UI is not a goal (2026-10-04); the
-  default is launch_menu_v2 (2026-10-06).
+  default is launch_menu (2026-10-06).

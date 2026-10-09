@@ -1069,7 +1069,7 @@ keyboard_page(win)
   ([NO_LETTER_KEYS]).
 menu_button(parent [, before, opts]) -> element
 - A "Menu" button in parent's bottom right corner that switches to
-  launch_menu_v2, for a launch UI with no menu of its own; before() runs
+  launch_menu, for a launch UI with no menu of its own; before() runs
   first, opts go to set_launch_ui ({close = true}). Not focusable.
 
 uistack

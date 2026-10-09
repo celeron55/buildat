@@ -1292,7 +1292,7 @@ local trust_shown = true
 local trust_in_game = nil
 -- **A local save is a game from its start** ([LOCAL_SAVE_STARPORT]): the
 -- launcher's "Starting <game>..." screen is up (launch_menu's
--- screens.lua, which launch_menu_v2 uses too), or the connecting screen
+-- screens.lua), or the connecting screen
 -- that follows it, before there is a server address to go by
 local was_launching = false
 local function launching_local()

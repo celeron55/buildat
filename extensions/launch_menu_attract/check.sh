@@ -15,11 +15,12 @@ cd "$here/Build"
 if check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
-# Escape would quit the menu; Right and Return move and pick, which is
-# the menu's own keyboard. "Engine settings" is the first tile and opens
-# a screen of the menu's, so picking it proves the input went there.
+# A search typed and Escape to clear it, which is the menu's own
+# keyboard: its "rows for" line proves the typing went there, and the
+# room must not answer the Escape with its pause.
 { echo "delay 5000"
-	echo "keypress Return"
+	echo "text zq"; echo "delay 600"
+	echo "keypress Escape"
 	echo "delay 1200"
 	echo "screenshot $out/menu-over-room.png"
 	echo "delay 400"
@@ -33,12 +34,12 @@ if grep -aq "Crash: SIG" "$out/cli.log"; then
 fi
 room=$(grep -ac "launch_w.*: room: a backdrop" "$out/cli.log")
 menu=$(grep -ac "launch_m.*: the menu, over the room" "$out/cli.log")
-picked=$(grep -ac "Menu entry: " "$out/cli.log")
+picked=$(grep -ac 'launch_menu: [0-9]* rows for "zq"' "$out/cli.log")
 # The room's own answer to a key: it logs a mode change for Tab and a
 # pause for Escape, and a backdrop must do neither
 roomkeys=$(grep -acE "launch_w.*: (mode:|pause:)" "$out/cli.log")
 echo "the room came up as a backdrop $room, the menu over it $menu," \
-		"the menu took $picked pick(s), the room answered $roomkeys keys"
+		"the menu took $picked search(es), the room answered $roomkeys keys"
 if [ "$room" -lt 1 ] || [ "$menu" -lt 1 ]; then
 	echo "FAIL: the composition did not come up"
 	exit 1
@@ -70,12 +71,12 @@ rm -f "$out/back.log" "$out/back_server.log"
 bin/buildat -o launch_ui=launch_menu_attract -a app/vanilla/contentdb \
  -w 1280x720 -l 3 -L "$out/back.log" \
 	-c @"$out/cmds_back.txt" > /dev/null 2>&1
-grid=$(grep -ac "back to the grid" "$out/back.log")
+home=$(grep -ac "launch_menu: back to Home" "$out/back.log")
 lost=$(grep -ac "leave: no launcher to go back to" "$out/back.log")
 alive=$(grep -ac "scan b: ui" "$out/back.log")
-echo "a game launched from the composition: back to the grid $grid times," \
+echo "a game launched from the composition: back to Home $home times," \
 		"$alive elements drawn after it"
-if [ "$grid" -lt 1 ] || [ "$lost" -gt 0 ] || [ "$alive" -lt 10 ]; then
+if [ "$home" -lt 1 ] || [ "$lost" -gt 0 ] || [ "$alive" -lt 10 ]; then
 	echo "FAIL: a game launched from the composition cannot be left"
 	grep -a "leave:" "$out/back.log" | head -2
 	exit 1

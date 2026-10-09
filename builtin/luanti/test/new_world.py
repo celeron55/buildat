@@ -15,6 +15,30 @@ def say(s):
     print(s, flush=True)
 
 GAME = "mineclone2"
+
+def offered_mapgens():
+    """The mapgens the menu lists for GAME, in its order: main.cpp's
+    game_mapgens, read from the same game.conf and minetest.conf."""
+    game = os.path.join(saves, "..", "..", "..", "shared", "vanilla", "games", GAME)
+    def conf(name, key):
+        try:
+            for line in open(os.path.join(game, name)):
+                k, _, v = line.partition("=")
+                if k.strip() == key:
+                    return v.strip()
+        except IOError:
+            pass
+        return ""
+    def names(key):
+        return set(n.strip() for n in conf("game.conf", key).split(",") if n.strip())
+    allowed, disallowed = names("allowed_mapgens"), names("disallowed_mapgens")
+    out = [n for n in ("v7", "v5", "valleys", "carpathian", "flat", "fractal",
+                       "v6", "singlenode")
+           if (not allowed or n in allowed) and n not in disallowed]
+    chosen = conf("minetest.conf", "mg_name")
+    if chosen in out:
+        out.remove(chosen); out.insert(0, chosen)
+    return out
 phase = 0
 notes = {}
 n = 0
@@ -30,8 +54,8 @@ while time.time() - t0 < 600:
     name = s.name or ""
     if phase >= 3:
         break
-    if name.endswith("boot") or name.endswith("local_game"):
-        e = s.find(menu_drive.TITLES.get(GAME, GAME), "Text")
+    if name.endswith("launch_menu") or name.endswith("local_game"):
+        e = menu_drive.find_game(write, s, GAME)
         if e: click(write, e)
     elif "vanilla menu: saves" in name:
         e = s.find("New world", "Text") or s.find("New save", "Text")
@@ -82,12 +106,22 @@ while time.time() - t0 < 600:
             notes["pasted"] = edits[0][5]
             say("Ctrl+V put %r in the name field" % notes["pasted"])
             type_into(write, edits[0], "mgtest")
-            e = s.find("mapgen valleys", "Text")
-            if e is None:
-                say("FAIL: no mapgen row on the screen")
+            # A dropdown since [UI_DROPDOWN], whose list the scan does not
+            # see: opened, and valleys picked by the keys at its place in
+            # what the game offers
+            label = s.find("Mapgen", "Text")
+            drops = [d for d in s.ui if d[0] == "DropDownList" and label and
+                     abs(d[2] - label[2]) < 10]
+            if not drops:
+                say("FAIL: no mapgen dropdown on the screen")
                 write("quit"); sys.exit(1)
-            click(write, e)
-            write("delay 300")
+            order = offered_mapgens()
+            if "valleys" not in order:
+                say("FAIL: %s offers no valleys: %s" % (GAME, order))
+                write("quit"); sys.exit(1)
+            click(write, drops[0])
+            write("delay 500", *(["keypress Down", "delay 150"] * order.index("valleys")))
+            write("keypress Return", "delay 500")
             e = s.find("Create and play", "Text")
             click(write, e)
             phase = 3
