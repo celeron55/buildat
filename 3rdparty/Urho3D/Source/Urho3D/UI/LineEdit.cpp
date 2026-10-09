@@ -46,6 +46,7 @@ LineEdit::LineEdit(Context* context) :
     lastFontSize_(0),
     cursorPosition_(0),
     dragBeginCursor_(M_MAX_UNSIGNED),
+    lastDoubleClick_(0),
     cursorBlinkRate_(1.0f),
     cursorBlinkTimer_(0.0f),
     maxLength_(0),
@@ -118,9 +119,87 @@ void LineEdit::Update(float timeStep)
     cursor_->SetVisible(cursorVisible);
 }
 
+// buildat [TEXT_KEYS]: a word is readline's -- letters, digits and _, any
+// non-ASCII character a letter, so a Finnish word is one. A move or a delete
+// skips what is not a word, then the word; a line break is a step of its own,
+// taken with the spaces beside it.
+static bool IsWordChar(unsigned c)
+{
+    return c >= 128 || c == '_' || isalnum((int)c);
+}
+
+static PODVector<unsigned> Chars(const String& s)
+{
+    PODVector<unsigned> cs;
+    for (unsigned i = 0; i < s.Length();)
+        cs.Push(s.NextUTF8Char(i));
+    return cs;
+}
+
+static bool IsBlank(unsigned c)
+{
+    return c == ' ' || c == '\t';
+}
+
+static unsigned WordLeft(const PODVector<unsigned>& cs, unsigned pos)
+{
+    if (pos > 0 && cs[pos - 1] == '\n')
+    {
+        for (--pos; pos > 0 && IsBlank(cs[pos - 1]); --pos);
+        return pos;
+    }
+    while (pos > 0 && !IsWordChar(cs[pos - 1]) && cs[pos - 1] != '\n')
+        --pos;
+    while (pos > 0 && IsWordChar(cs[pos - 1]))
+        --pos;
+    return pos;
+}
+
+static unsigned WordRight(const PODVector<unsigned>& cs, unsigned pos)
+{
+    if (pos < cs.Size() && cs[pos] == '\n')
+    {
+        for (++pos; pos < cs.Size() && IsBlank(cs[pos]); ++pos);
+        return pos;
+    }
+    while (pos < cs.Size() && !IsWordChar(cs[pos]) && cs[pos] != '\n')
+        ++pos;
+    while (pos < cs.Size() && IsWordChar(cs[pos]))
+        ++pos;
+    return pos;
+}
+
+void LineEdit::SelectRange(unsigned start, unsigned end)
+{
+    text_->SetSelection(start, end - start);
+    dragBeginCursor_ = start;
+    cursorPosition_ = end;
+    UpdateCursor();
+}
+
 void LineEdit::OnClickBegin(const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers,
     Cursor* cursor)
 {
+    // buildat [TEXT_KEYS]: a third click within the double-click time selects
+    // the whole text, or the line in a multi-line edit
+    if (button == MOUSEB_LEFT && textSelectable_ && lastDoubleClick_ &&
+        SDL_GetTicks() - lastDoubleClick_ < (unsigned)(GetSubsystem<UI>()->GetDoubleClickInterval() * 1000))
+    {
+        lastDoubleClick_ = 0;
+        if (!multiLine_)
+        {
+            SelectRange(0, line_.LengthUTF8());
+            return;
+        }
+        PODVector<unsigned> cs = Chars(line_);
+        unsigned start = Min(cursorPosition_, cs.Size()), end = start;
+        while (start > 0 && cs[start - 1] != '\n')
+            --start;
+        while (end < cs.Size() && cs[end] != '\n')
+            ++end;
+        SelectRange(start, end);
+        return;
+    }
     if (button == MOUSEB_LEFT && cursorMovable_)
     {
         unsigned pos = GetCharIndex(position);
@@ -135,8 +214,27 @@ void LineEdit::OnClickBegin(const IntVector2& position, const IntVector2& screen
 void LineEdit::OnDoubleClick(const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers,
     Cursor* cursor)
 {
-    if (button == MOUSEB_LEFT)
-        text_->SetSelection(0);
+    // buildat [TEXT_KEYS]: the word under it, not the whole text
+    if (button != MOUSEB_LEFT || !textSelectable_)
+        return;
+    lastDoubleClick_ = SDL_GetTicks();
+    if (!lastDoubleClick_)
+        lastDoubleClick_ = 1;
+    PODVector<unsigned> cs = Chars(line_);
+    unsigned pos = GetCharIndex(position);
+    if (pos == M_MAX_UNSIGNED || cs.Empty())
+        return;
+    if (pos >= cs.Size())
+        pos = cs.Size() - 1;
+    unsigned start = pos, end = pos + 1;
+    if (IsWordChar(cs[pos]))
+    {
+        while (start > 0 && IsWordChar(cs[start - 1]))
+            --start;
+        while (end < cs.Size() && IsWordChar(cs[end]))
+            ++end;
+    }
+    SelectRange(start, end);
 }
 
 void LineEdit::OnDragBegin(const IntVector2& position, const IntVector2& screenPosition, int buttons, int qualifiers,
@@ -218,6 +316,8 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
 #endif
     bool changed = false;
     bool cursorMoved = false;
+    // buildat [TEXT_KEYS]: Home and End are the ends; Ctrl with an arrow a word
+    bool ends = false;
 
     // buildat [HEARTH_MVP]: a multi-line edit moves by rows, and Enter is a
     // line break; Ctrl+Enter is what finishes it
@@ -314,8 +414,14 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
         }
         break;
 
+    // buildat [TEXT_KEYS]: Ctrl+A selects all
+    case KEY_A:
+        if (textSelectable_ && qualifiers & QUAL_CTRL && line_.Length())
+            SelectRange(0, line_.LengthUTF8());
+        return;
+
     case KEY_HOME:
-        qualifiers |= QUAL_CTRL;
+        ends = true;
         // Fallthru
 
     case KEY_LEFT:
@@ -324,8 +430,10 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
             if (textSelectable_ && qualifiers & QUAL_SHIFT && !text_->GetSelectionLength())
                 dragBeginCursor_ = cursorPosition_;
 
-            if (qualifiers & QUAL_CTRL)
+            if (ends)
                 cursorPosition_ = 0;
+            else if (qualifiers & QUAL_CTRL)
+                cursorPosition_ = WordLeft(Chars(line_), cursorPosition_);
             else if (text_->GetSelectionLength() && !(qualifiers & QUAL_SHIFT))
                 cursorPosition_ = text_->GetSelectionStart();
             else
@@ -347,7 +455,7 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
         break;
 
     case KEY_END:
-        qualifiers |= QUAL_CTRL;
+        ends = true;
         // Fallthru
 
     case KEY_RIGHT:
@@ -356,8 +464,10 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
             if (textSelectable_ && qualifiers & QUAL_SHIFT && !text_->GetSelectionLength())
                 dragBeginCursor_ = cursorPosition_;
 
-            if (qualifiers & QUAL_CTRL)
+            if (ends)
                 cursorPosition_ = line_.LengthUTF8();
+            else if (qualifiers & QUAL_CTRL)
+                cursorPosition_ = WordRight(Chars(line_), cursorPosition_);
             else if (text_->GetSelectionLength() && !(qualifiers & QUAL_SHIFT))
                 cursorPosition_ = text_->GetSelectionStart() + text_->GetSelectionLength();
             else
@@ -383,9 +493,13 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
         {
             if (!text_->GetSelectionLength())
             {
+                // buildat [TEXT_KEYS]: Ctrl+Delete to the next word's end
+                unsigned end = cursorPosition_ + 1;
+                if (qualifiers & QUAL_CTRL)
+                    end = WordRight(Chars(line_), cursorPosition_);
                 if (cursorPosition_ < line_.LengthUTF8())
                 {
-                    line_ = line_.SubstringUTF8(0, cursorPosition_) + line_.SubstringUTF8(cursorPosition_ + 1);
+                    line_ = line_.SubstringUTF8(0, cursorPosition_) + line_.SubstringUTF8(end);
                     changed = true;
                 }
             }
@@ -426,13 +540,15 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
         {
             if (!text_->GetSelectionLength())
             {
+                // buildat [TEXT_KEYS]: Alt+Backspace (readline's) and
+                // Ctrl+Backspace back to the previous word's start
                 if (line_.LengthUTF8() && cursorPosition_)
                 {
-                    if (cursorPosition_ < line_.LengthUTF8())
-                        line_ = line_.SubstringUTF8(0, cursorPosition_ - 1) + line_.SubstringUTF8(cursorPosition_);
-                    else
-                        line_ = line_.SubstringUTF8(0, cursorPosition_ - 1);
-                    --cursorPosition_;
+                    unsigned start = cursorPosition_ - 1;
+                    if (qualifiers & (QUAL_CTRL | QUAL_ALT))
+                        start = WordLeft(Chars(line_), cursorPosition_);
+                    line_ = line_.SubstringUTF8(0, start) + line_.SubstringUTF8(cursorPosition_);
+                    cursorPosition_ = start;
                     changed = true;
                 }
             }

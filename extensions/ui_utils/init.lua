@@ -1976,6 +1976,19 @@ function M.safe.scan_ui(label, element, depth, out)
 				if okt and text then
 					line = line .. " text " .. dump(text)
 				end
+				-- A field's cursor and its selection ([TEXT_KEYS])
+				local okc, c = pcall(function()
+					return kind == "LineEdit" and child.cursorPosition or nil
+				end)
+				if okc and c then
+					line = line .. " cursor " .. c
+				end
+				local oks, from, n = pcall(function()
+					return child.selectionStart, child.selectionLength
+				end)
+				if kind == "Text" and oks and n and n > 0 then
+					line = line .. " selection " .. from .. "+" .. n
+				end
 			end
 			if kind == "BorderImage" or kind == "Sprite" or
 					kind == "Button" then

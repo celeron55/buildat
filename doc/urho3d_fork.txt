@@ -290,6 +290,22 @@ the field's width, the cursor and the scroll follow its row, and Up, Down,
 Home and End move by rows (GetCharIndexOnRow). Hearth's message fields are
 multi-line.
 
+The common editor keys ([TEXT_KEYS])
+------------------------------------
+UI/LineEdit.{cpp,h}
+
+Ctrl+A selects all. Ctrl+Left/Right move by word (Urho's went to the ends;
+Home, End and Ctrl+Home/End still do), with Shift selecting. Alt+Backspace
+(readline's) and Ctrl+Backspace delete back to the previous word's start,
+Ctrl+Delete forward to the next word's end. A word is readline's: letters,
+digits and _, any non-ASCII character a letter; a move skips what is not a
+word, then the word, and a line break is a step of its own with the spaces
+beside it. A double-click selects the word under it (Urho's selected all),
+a third click within the double-click time the whole text, or the line in a
+multi-line field (lastDoubleClick_, SelectRange). In the browser the
+textarea does all of it but Alt+Backspace, which src/client/web/index.html
+does by the same rule.
+
 The web's touch: the first finger's mouse in pixels ([FP_TOUCH])
 ----------------------------------------------------------------
 Source/ThirdParty/SDL/src/video/emscripten/SDL_emscriptenevents.c

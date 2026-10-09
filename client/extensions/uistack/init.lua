@@ -345,6 +345,31 @@ function M.safe.set_world_scan(on)
 	M.world_scan = on and true or false
 end
 
+-- The focused element's line of a scan, and a field's cursor and selection
+local function focus_line(label, lines)
+	local ui_utils = require("buildat/extension/ui_utils").safe
+	local focus = magic.ui.focusElement
+	if focus then
+		local at = focus.screenPosition
+		local x, y, w, h = ui_utils.scan_pixels(at.x, at.y, focus.width, focus.height)
+		local text = ""
+		pcall(function() text = focus:GetText() end)
+		-- A field's cursor and selection, wherever it is ([TEXT_KEYS])
+		local field = ""
+		pcall(function()
+			if focus:GetTypeName() == "LineEdit" then
+				field = string.format(" cursor %d selection %d+%d",
+						focus.cursorPosition, focus.textElement.selectionStart,
+						focus.textElement.selectionLength)
+			end
+		end)
+		lines[#lines + 1] = string.format("scan %s: focus %s at %d,%d size %dx%d text %s%s",
+				label, focus:GetTypeName(), x, y, w, h, dump(text), field)
+	else
+		lines[#lines + 1] = string.format("scan %s: focus none", label)
+	end
+end
+
 -- `event scan <res> <label>` on a menu screen ([FIRST_RUN]): the screen on
 -- top of the main stack by its name, every element under it with its
 -- rectangle and text (ui_utils.scan_ui, the lines a form gives), and
@@ -359,7 +384,16 @@ do
 		-- the world's scan answers then; between two screens the top is
 		-- empty for a moment too, and that gets an answer of its name
 		-- alone, so a driver's read does not time out on the gap
+		-- With no screen at all (a game's own UI, Hearth's), the field in
+		-- focus alone, for a check of the text keys ([TEXT_KEYS])
 		if top == nil then
+			local f = magic.ui.focusElement
+			if f and f:GetTypeName() == "LineEdit" then
+				local label = (event_data:GetString("Param") or ""):match("^%d*%s*(%S+)") or "scan"
+				local lines = {}
+				focus_line(label, lines)
+				log:info(table.concat(lines, "\n"))
+			end
 			return
 		end
 		-- The launcher's placeholder while a game runs: the world's scan
@@ -394,17 +428,7 @@ do
 				M.scan_extra = nil
 			end
 		end
-		local focus = magic.ui.focusElement
-		if focus then
-			local at = focus.screenPosition
-			local x, y, w, h = ui_utils.scan_pixels(at.x, at.y, focus.width, focus.height)
-			local text = ""
-			pcall(function() text = focus:GetText() end)
-			lines[#lines + 1] = string.format("scan %s: focus %s at %d,%d size %dx%d text %s",
-					label, focus:GetTypeName(), x, y, w, h, dump(text))
-		else
-			lines[#lines + 1] = string.format("scan %s: focus none", label)
-		end
+		focus_line(label, lines)
 		lines[#lines + 1] = string.format("scan %s: done, %d lines", label, #lines)
 		log:info(table.concat(lines, "\n"))
 	end)

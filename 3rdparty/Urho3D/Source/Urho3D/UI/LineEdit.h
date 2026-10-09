@@ -137,6 +137,8 @@ protected:
     void UpdateCursor(bool follow = true);
     /// Return char index corresponding to position within element, or M_MAX_UNSIGNED if not found.
     unsigned GetCharIndex(const IntVector2& position);
+    /// buildat [TEXT_KEYS]: select from start to end, the cursor at the end.
+    void SelectRange(unsigned start, unsigned end);
     /// buildat: the character nearest a position in the text's own coordinates, on its row.
     unsigned GetCharIndexOnRow(const IntVector2& textPosition);
 
@@ -154,6 +156,8 @@ protected:
     unsigned cursorPosition_;
     /// Drag begin cursor position.
     unsigned dragBeginCursor_;
+    /// buildat [TEXT_KEYS]: when the last double-click was (SDL ticks), for a triple-click; 0 none.
+    unsigned lastDoubleClick_;
     /// Cursor blink rate.
     float cursorBlinkRate_;
     /// Cursor blink timer.

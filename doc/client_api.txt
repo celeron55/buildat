@@ -818,9 +818,18 @@ Cursor:DefineShape(shape, image, rect, hot_spot)
 
 LineEdit.multiLine, UIElement:IsMultiLine()
 - The fork's multi-line LineEdit (urho3d_fork.txt): Enter breaks the line,
-  Ctrl+Enter sends TextFinished, the text wraps. IsMultiLine() is asked of
-  the focus, which reads as a UIElement: ui_utils' keyboard_page leaves Up
-  and Down to such a field.
+  Ctrl+Enter sends TextFinished, the text wraps. ui_utils' keyboard_page
+  asks IsMultiLine() of the focus and leaves Up and Down to such a field.
+- Every field has the common editor keys ([TEXT_KEYS], urho3d_fork.txt):
+  Ctrl+A, Ctrl+Left/Right by word, Alt+Backspace and Ctrl+Backspace back a
+  word, Ctrl+Delete forward, a double-click a word, a triple-click all (in a
+  multi-line field the line).
+
+magic.ui.focusElement, Text.selectionStart, Text.selectionLength
+- The focus reads as what it is when its class is whitelisted, as GetChild's
+  children do: a field as a LineEdit, with its cursorPosition and
+  textElement. A Text's selection is read-only; uistack's scan prints a
+  focused field's "cursor N selection S+L" ([TEXT_KEYS]).
 
 XMLFile:GetRoot([name]) -> XMLElement, XMLFile:ToString([indentation])
 - An app's own XML, read: the file comes out of the resource cache like any
@@ -2415,7 +2424,7 @@ magic.TU_NORMAL:
 magic.TU_NORMALBUFFER: 
 magic.TU_SPECULAR: 
 magic.Technique: 
-magic.Text: ClearSelection, SetColor, SetFontSize, SetHoverColor, SetSelection, SetSelectionColor, SetTextAlignment, SetTextEffect, SetWordwrap, effectColor, text
+magic.Text: ClearSelection, SetColor, SetFontSize, SetHoverColor, SetSelection, SetSelectionColor, SetTextAlignment, SetTextEffect, SetWordwrap, effectColor, selectionLength, selectionStart, text
 magic.Text3D: SetAlignment, SetColor, SetFont, effectColor, effectStrokeThickness, faceCameraMode, fixedScreenSize, fontSize, material, opacity, text, textEffect, width, wordwrap
 magic.Texture: SetNumLevels, filterMode, height, width
 magic.Texture2D: GetRenderSurface, SetData, SetSize, new

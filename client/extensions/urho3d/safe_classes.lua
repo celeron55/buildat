@@ -2321,6 +2321,9 @@ function M.define(dst, util)
 		properties = {
 			text = util.simple_property("string"),
 			effectColor = util.simple_property(dst.Color),
+			-- Where a field's selection is, for a check's scan ([TEXT_KEYS])
+			selectionStart = util.read_only_property("number"),
+			selectionLength = util.read_only_property("number"),
 		},
 	})
 
@@ -2870,7 +2873,21 @@ function M.define(dst, util)
 			root = util.simple_property(dst.UIElement),
 			-- Read-only ([SEC_SECRET_FOCUS]): the focus moves by
 			-- SetFocusElement, which keeps it on a secret field
-			focusElement = util.read_only_property({dst.UIElement, "__nil"}),
+			-- Wrapped as what it is, as GetChild does: a focused field reads
+			-- as a LineEdit, its cursor and selection with it ([TEXT_KEYS])
+			focusElement = {
+				get = function(v)
+					if v == nil then
+						return nil
+					end
+					local tn = v:GetTypeName()
+					local class = dst[tn]
+					if class and getmetatable(class) and getmetatable(class).wrap then
+						return util.wrap_instance(tn, v)
+					end
+					return util.wrap_instance("UIElement", v)
+				end,
+			},
 			scale = {
 				get = function(current_value)
 					return current_value

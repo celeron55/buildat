@@ -426,6 +426,22 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		},
 	};
 	document.addEventListener('selectionchange', selected);
+	// The native field's word rule ([TEXT_KEYS], LineEdit.cpp WordLeft):
+	// back over what is not a word, then the word, any non-ASCII a letter;
+	// a line break is a step of its own, with the spaces before it.
+	// util/text_keys_check.sh runs this function.
+	function wordLeft(v, a){
+		var word = function(c){ return c > '\x7f' || /\w/.test(c); };
+		if(a > 0 && v[a - 1] === '\n'){
+			for(a--; a > 0 && (v[a - 1] === ' ' || v[a - 1] === '\t'); a--);
+			return a;
+		}
+		while(a > 0 && !word(v[a - 1]) && v[a - 1] !== '\n')
+			a--;
+		while(a > 0 && word(v[a - 1]))
+			a--;
+		return a;
+	}
 	[ta, pw].forEach(function(e){
 		e.addEventListener('select', selected);
 		e.addEventListener('compositionstart', function(){ composing = true; });
@@ -460,6 +476,17 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		});
 		// And a password input's, which puts nothing in the text
 		e.addEventListener('keydown', function(ev){
+			// Alt+Backspace deletes back a word, which Firefox and Chromium
+			// on Linux do not
+			if(ev.key === 'Backspace' && ev.altKey && !ev.ctrlKey && !e.readOnly){
+				ev.preventDefault();
+				var a = e.selectionStart, b = e.selectionEnd;
+				if(a === b)
+					a = wordLeft(e.value, a);
+				e.setRangeText('', a, b, 'end');
+				e.dispatchEvent(new Event('input'));
+				return;
+			}
 			if(ev.key === 'Enter' && e === pw){
 				ev.preventDefault();
 				actions.push('e');
