@@ -372,9 +372,12 @@ end
 -- simplified: at most MAX_ROWS rows a folder, in name order; a folder of
 -- more wants a search field
 local MAX_ROWS = 300
-function M.pick_export(accept, cb, dir)
+function M.pick_export(accept, cb, dir, back)
 	local exports = __buildat_get_path("user") .. "/exports"
 	dir = dir or exports
+	-- What had the focus, which has it again once the picker is gone
+	-- (uistack's pop focuses a plain element: the keys went nowhere)
+	back = back or magic.ui.focusElement
 	local root = uistack.main:push({desc="file picker"})
 	root.defaultStyle = magic.cache:GetResource(
 			"XMLFile", "launch_menu/res/main_style.xml")
@@ -405,8 +408,9 @@ function M.pick_export(accept, cb, dir)
 		guard.stop()
 		close_dialog(root)
 		if to then
-			return M.pick_export(accept, cb, to)
+			return M.pick_export(accept, cb, to, back)
 		end
+		pcall(function() back:SetFocus(true) end)
 		if not name then
 			return cb(nil, "no file picked")
 		end
@@ -476,8 +480,8 @@ function M.pick_export(accept, cb, dir)
 		for i = 1, math.min(#rows, MAX_ROWS) do
 			local f = rows[i]
 			local folder = f:sub(-1) == "/"
-			menu:add(view:row({label = f, glyph = folder and "📁" or nil}),
-					function()
+			local b = menu:add(view:row({label = f,
+					glyph = folder and "📁" or nil}), function()
 				if folder then
 					finish(nil, (dir:sub(-1) == "/" and dir or dir .. "/") ..
 							f:sub(1, -2))
@@ -485,6 +489,10 @@ function M.pick_export(accept, cb, dir)
 					finish(f)
 				end
 			end)
+			-- The keys start in the list, the places a key Up above it
+			if i == 1 then
+				b:SetFocus(true)
+			end
 		end
 		view:fit()
 		if #rows > MAX_ROWS then
