@@ -31,5 +31,10 @@
 	["wait", 4000],
 	["shot", "${OUT}/3d.png"],
 	["key", "F1"],
+	["wait", 1000],
+	["key", "Escape"],
+	["wait", 1500],
+	["shot", "${OUT}/pause.png"],
+	["key", "Escape"],
 	["wait", 1000]
 ]
