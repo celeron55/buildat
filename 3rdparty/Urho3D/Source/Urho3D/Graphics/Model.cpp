@@ -144,6 +144,14 @@ bool Model::BeginLoad(Deserializer& source)
 
         SharedPtr<VertexBuffer> buffer(new VertexBuffer(context_));
         unsigned vertexSize = VertexBuffer::GetVertexSize(desc.vertexElements_);
+        // Buildat: a size past 32 bits wraps, and the buffer allocated by it
+        // is smaller than the vertex count the geometry is checked against
+        if ((unsigned long long)desc.vertexCount_ * vertexSize > M_MAX_UNSIGNED)
+        {
+            URHO3D_LOGERROR("Model " + GetName() + " has a vertex buffer too large");
+            loadVBData_.Clear();
+            return false;
+        }
         desc.dataSize_ = desc.vertexCount_ * vertexSize;
 
         // Prepare vertex buffer data to be uploaded during EndLoad()
@@ -175,6 +183,18 @@ bool Model::BeginLoad(Deserializer& source)
     {
         unsigned indexCount = source.ReadUInt();
         unsigned indexSize = source.ReadUInt();
+        // Buildat: an index is 2 or 4 bytes. The buffer is allocated by
+        // that and was read into by the file's word: a larger one wrote
+        // the file's bytes past it, a smaller one was read past in EndLoad.
+        // And no size past 32 bits, as for the vertices.
+        if ((indexSize != sizeof(unsigned short) && indexSize != sizeof(unsigned)) ||
+            (unsigned long long)indexCount * indexSize > M_MAX_UNSIGNED)
+        {
+            URHO3D_LOGERROR("Model " + GetName() + " has an invalid index buffer");
+            loadVBData_.Clear();
+            loadIBData_.Clear();
+            return false;
+        }
 
         SharedPtr<IndexBuffer> buffer(new IndexBuffer(context_));
 

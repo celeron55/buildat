@@ -416,8 +416,11 @@ Graphics/Model.cpp, Graphics/Geometry.cpp, Graphics/IndexBuffer.cpp
 Model::BeginLoad refuses a vertex element type or semantic past its enum
 and a primitive type past TRIANGLE_FAN (each indexed a table sized by its
 enum), and Geometry and IndexBuffer check an index draw range without the
-start + count sum, which could wrap past the check. util/fuzz/fuzz.sh
-model.
+start + count sum, which could wrap past the check. And
+([SECURITY_RUN_4]) it refuses an index size other than 2 or 4 and a
+vertex or index buffer whose byte size passes 32 bits: the buffer was
+allocated by the size and filled by the file's word, so a larger index
+size wrote past it. util/fuzz/fuzz.sh model.
 
 Many collision shapes on one node ([VOXEL_PHYSICS_LAG])
 -------------------------------------------------------

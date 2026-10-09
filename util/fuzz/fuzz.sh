@@ -41,7 +41,7 @@ declare -A srcs=(
 	[image_data]="3rdparty/Urho3D/Source/Urho3D/Resource/Image.cpp 3rdparty/Urho3D/Source/Urho3D/Resource/Decompress.cpp"
 	# The model and animation parsers and the glTF loader, the same way
 	# (model_fuzz.cpp)
-	[model]="3rdparty/Urho3D/Source/Urho3D/Graphics/Model.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/Geometry.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/IndexBuffer.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/Animation.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/GLTFLoader.cpp"
+	[model]="3rdparty/Urho3D/Source/Urho3D/Graphics/Model.cpp 3rdparty/Urho3D/Source/Urho3D/IO/MemoryBuffer.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/Geometry.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/IndexBuffer.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/Animation.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/GLTFLoader.cpp"
 	# The XML and JSON parsers a server's Material/Technique/XMLFile/
 	# JSONFile run: pugixml 1.7 and XMLFile/JSONFile compiled in (the
 	# latter pulls in header-only rapidjson); the rest from the library
@@ -96,7 +96,7 @@ urho_extra="$(sed -n 's/^CXX_\(DEFINES\|INCLUDES\) = //p' "$uflags" 2>/dev/null)
 declare -A extra=(
 	[image]="$urho_extra"
 	[image_data]="$urho_extra"
-	[model]="$urho_extra -fno-sanitize=pointer-overflow -I$here/3rdparty/Urho3D/Source/ThirdParty/tinygltf"
+	[model]="$urho_extra -fno-sanitize=pointer-overflow,alignment -I$here/3rdparty/Urho3D/Source/ThirdParty/tinygltf"
 	[xml]="$urho_extra -fno-sanitize=pointer-overflow"
 	# stb_vorbis's sample conversion overflows a signed int in its
 	# float-to-int trick and casts inf to int on a garbage stream; the

@@ -407,7 +407,9 @@ struct Module: public interface::Module, public Interface
 			return;
 		for(json::Iterator it(v); it.valid(); it.next()){
 			const json::Value &l = it.value();
-			if(!l.get("id").is_string() || !l.get("secret").is_string())
+			// A secret is 64 hex digits; unhex throws on anything else
+			if(!l.get("id").is_string() || !l.get("secret").is_string() ||
+					!interface::sha256::is_hex(l.get("secret").as_string(), 64))
 				continue;
 			Listing listing;
 			listing.id = l.get("id").as_string();
@@ -740,7 +742,13 @@ struct Module: public interface::Module, public Interface
 			std::lock_guard<std::mutex> lock(m_mutex);
 			m_blocked[url] = blocked;
 		}
-		if(v.get("id").is_string() && v.get("secret").is_string()){
+		// The Starport's word: a secret not 64 hex digits threw in unhex,
+		// in this thread, which ended the server ([SECURITY_RUN_4])
+		if(v.get("id").is_string() && v.get("secret").is_string() &&
+				!interface::sha256::is_hex(v.get("secret").as_string(), 64))
+			log_w(MODULE, "Announce to %s: a listing secret that is not "
+					"64 hex digits; not kept", cs(url));
+		else if(v.get("id").is_string() && v.get("secret").is_string()){
 			std::lock_guard<std::mutex> lock(m_mutex);
 			Listing &l = m_listings[url];
 			const bool fresh = l.id != v.get("id").as_string();

@@ -378,13 +378,23 @@ compile(){
 	return "${PIPESTATUS[0]}"
 }
 
+# A line into a file in server i's app directory, which its sandboxed app
+# writes too: the name removed and made anew with noclobber (O_EXCL), so a
+# link the app put there is not followed out of the sandbox
+app_note(){ # i file text
+	local f="${users[$1]}/apps/${ids[$1]}/$2"
+	mkdir -p "${users[$1]}/apps/${ids[$1]}"
+	rm -f "$f"
+	( set -o noclobber; printf '%s\n' "$3" > "$f" ) 2>/dev/null ||
+		say "could not write $f"
+}
+
 # One server onto the current version: told why, stopped, started, and
 # waited for until it listens (or exits, or 10 minutes pass)
 restart(){
 	local i=$1 why=$2
 	if [ -n "${pids[$i]:-}" ] && kill -0 "${pids[$i]}" 2>/dev/null; then
-		mkdir -p "${users[$i]}/apps/${ids[$i]}"
-		printf '%s\n' "$why" > "${users[$i]}/apps/${ids[$i]}/shutdown_reason"
+		app_note "$i" shutdown_reason "$why"
 	fi
 	stop "$i"
 	rm -f "${users[$i]}/apps/${ids[$i]}/shutdown_reason"
@@ -406,7 +416,9 @@ restart(){
 # Who is on server i, by its /health; 0 when it does not answer
 players(){
 	local i=$1 tok="${users[$1]}/apps/${ids[$1]}/health_token.txt" auth=()
-	[ -f "$tok" ] && auth=(-H "Authorization: Bearer $(head -n 1 "$tok")")
+	# Not through a link the app put there (dd's nofollow)
+	[ -f "$tok" ] && auth=(-H "Authorization: Bearer $(dd if="$tok" \
+		iflag=nofollow bs=256 count=1 2>/dev/null | head -n 1 | tr -d '\r')")
 	local n
 	n=$(curl -s -m 5 "${auth[@]}" "http://127.0.0.1:${ports[$i]}/health" |
 		grep -o '"players": *[0-9]*' | grep -o '[0-9]*$')
@@ -458,9 +470,8 @@ update_when_quiet(){
 		[ -z "$pending" ] && v="a new version"
 		for i in "${on[@]}"; do
 			say "warning ${games[$i]} on port ${ports[$i]}: updating to $v in 60 s"
-			mkdir -p "${users[$i]}/apps/${ids[$i]}"
-			echo "The server updates to $v in 60 s" > "${users[$i]}/apps/${ids[$i]}/notice"
-			echo "updating to $v" > "${users[$i]}/apps/${ids[$i]}/shutdown_reason"
+			app_note "$i" notice "The server updates to $v in 60 s"
+			app_note "$i" shutdown_reason "updating to $v"
 		done
 	fi
 }
