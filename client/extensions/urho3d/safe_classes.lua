@@ -2216,6 +2216,21 @@ function M.define(dst, util)
 					return math.min(v, 999)
 				end,
 			},
+			-- Whether a click raises it over the rest, a Window's habit:
+			-- false keeps a panel under a menu given a higher priority
+			-- ([FP_MENU_BEHIND]). Only off: on, a click would lift it to
+			-- a priority past the cap above.
+			bringToFront = {
+				get = function(v)
+					return v
+				end,
+				set = function(v)
+					if v ~= false then
+						error("bringToFront: only false")
+					end
+					return v
+				end,
+			},
 		},
 	})
 

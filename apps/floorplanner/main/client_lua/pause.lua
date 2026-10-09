@@ -18,14 +18,64 @@ local open_pause, close_pause
 -- For the toolbar's Menu, built before these are
 M.open_pause = function() open_pause() end
 do
+	-- **Over the panels, and within the screen** ([FP_MENU_BEHIND]: a
+	-- tester's Client settings went behind the palette, rebuilt after it
+	-- or clicked, and could not be closed): over every panel and the
+	-- HUD's 90, and the page in a view that scrolls where it is taller
+	-- than the screen (a large UI size on a small window)
+	local view, fit
+	-- Hidden, and removed on the next frame: a dropdown's pick rebuilds
+	-- the page while its popup is modal, and the engine then puts the
+	-- window it was in back in the root (UI::SetElementModal's revert)
+	local replaced = {}
 	local function dialog(title)
 		if E.pause_win then
-			E.pause_win:Remove()
+			E.pause_win.visible = false
+			replaced[#replaced + 1] = E.pause_win
 		end
 		E.pause_win = panel.window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
-		E.pause_win.minWidth = 300
-		panel.label(E.pause_win, title)
-		return E.pause_win
+		E.pause_win.priority = 95
+		view = E.pause_win:CreateChild("ScrollView")
+		view:SetStyleAuto()
+		view.scrollBarsAutoVisible = false
+		local page = view:CreateChild("UIElement")
+		page:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
+		page.minWidth = 300
+		view.contentElement = page
+		panel.label(page, title)
+		fit()
+		return page
+	end
+	-- The view the page's size, up to the screen's height less a margin;
+	-- each frame, as a page fills and changes
+	function fit()
+		if not E.pause_win then
+			return
+		end
+		-- Its layout's size (minHeight is only what was set)
+		-- simplified: a page that shrinks in place keeps the view's
+		-- height, the view stretching it; every page is built anew
+		-- The panel's border: 8 (the default style's is 4 a side); a bar
+		-- only where the page is larger that way
+		local page, root = view.contentElement, magic.ui.root
+		local wide = page.width + 8 + view.verticalScrollBar.width > root.width - 20
+		local tall = page.height + 8 + (wide and
+				view.horizontalScrollBar.height or 0) > root.height - 40
+		local w = wide and root.width - 20 or
+				page.width + 8 + (tall and view.verticalScrollBar.width or 0)
+		local h = tall and root.height - 40 or
+				page.height + 8 + (wide and view.horizontalScrollBar.height or 0)
+		if view.width ~= w or view.height ~= h then
+			view:SetScrollBarsVisible(wide, tall)
+			view:SetFixedSize(w, h)
+		end
+	end
+	function E.fit_pause()
+		for i = #replaced, 1, -1 do
+			replaced[i]:Remove()
+			replaced[i] = nil
+		end
+		fit()
 	end
 
 	-- **The plan's settings**, everyone's in it (user: out of the

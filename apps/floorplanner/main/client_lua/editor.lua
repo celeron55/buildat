@@ -7108,6 +7108,7 @@ function M.update(dt)
 		M.keyed_win = E.pause_win
 		panel.keyboard_menu(E.pause_win)
 	end
+	E.fit_pause()
 	if S.panels_stale and not doc.typing() then
 		refresh_panels()
 	end

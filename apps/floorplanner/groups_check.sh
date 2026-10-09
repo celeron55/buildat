@@ -86,7 +86,7 @@ last a3.log "Plans:" | grep -q "pb" && fail "a sees b's copy: $(last a3.log Plan
 echo "ok: b reads a's plan, cannot edit it, and b's copy is b's alone"
 
 # Editable: b edits; then removed, b is out of the plan and the group
-printf 'wait_log 40000 Privileges: can_edit\ndelay 1000\nmouse_pos 254 9\nmouse_click left\nwait_log 40000 no longer let into\ndelay 1000\nquit\n' > "$tmp/cb3"
+printf 'wait_log 40000 Privileges: can_edit\ndelay 1000\nclick Button "Start editing"\nwait_log 40000 no longer let into\ndelay 1000\nquit\n' > "$tmp/cb3"
 CMDS="$tmp/cb3" client b b3.log 0 BUILDAT_FP_PLAN=pa &
 cb=$!
 sleep 10

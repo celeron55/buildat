@@ -20,6 +20,9 @@ function M.window(halign, valign, x, y, horizontal)
 	-- A click on the panel itself, not on a control, takes the focus from
 	-- a field, as a click on the view does (user)
 	w:SetFocusMode(magic.FM_FOCUSABLE)
+	-- A click leaves it where it is, under the menu ([FP_MENU_BEHIND]); a
+	-- client older than the setting raises it
+	pcall(function() w.bringToFront = false end)
 	return w
 end
 
