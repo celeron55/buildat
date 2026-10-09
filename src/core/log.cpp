@@ -388,7 +388,11 @@ bool log_lines_since_contain(long long since, const char *text)
 	long long first = recent_count - (long long)recent_lines.size();
 	size_t i = 0;
 	for(const std::string &line : recent_lines){
-		if(first + (long long)i >= since && line.find(text) != std::string::npos)
+		// A scripted run's own wait lines carry the text they wait for:
+		// a wait_log_any found its own "command: wait_log_any <text>"
+		if(first + (long long)i >= since && line.find(text) != std::string::npos &&
+				line.compare(0, 17, "command: wait_log") != 0 &&
+				line.compare(0, 10, "wait_log: ") != 0)
 			return true;
 		i++;
 	}

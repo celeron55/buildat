@@ -1472,6 +1472,57 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.Resource,
 	})
 
+	-- **2D sprites** ([GENVADERS]): pixel art drawn by Urho2D. A sprite
+	-- sheet comes from the resource cache only (no constructor is bound),
+	-- an XML naming its image and its rectangles; the cache keeps both
+	-- inside the resource paths. What it reads is its own image; it writes
+	-- nothing. A sprite is an opaque handle to give a StaticSprite2D. Not
+	-- the 2D physics, particles or tile maps.
+	util.wc("Sprite2D", {
+		inherited_from_by_wrapper = dst.Resource,
+	})
+	util.wc("SpriteSheet2D", {
+		inherited_from_by_wrapper = dst.Resource,
+		instance = {
+			-- nil for a name the sheet does not have
+			GetSprite = util.wrap_function({"SpriteSheet2D", "string"},
+				function(self, name)
+					local s = self:GetSprite(name)
+					return s and util.wrap_instance("Sprite2D", s) or nil
+				end),
+		},
+	})
+	util.wc("Drawable2D", {
+		inherited_from_by_wrapper = dst.Drawable,
+		properties = {
+			-- The draw order: by layer, then by order in it
+			layer = util.simple_property("number"),
+			orderInLayer = util.simple_property("number"),
+		},
+	})
+	-- Setters rather than properties for the colour and the hot spot: a
+	-- `Color&` property's write is lost (urho3d-tolua-const-ref-property)
+	util.wc("StaticSprite2D", {
+		inherited_from_by_wrapper = dst.Drawable2D,
+		instance = {
+			SetSprite = util.self_function("SetSprite", {},
+					{"StaticSprite2D", "Sprite2D"}),
+			SetColor = util.self_function("SetColor", {},
+					{"StaticSprite2D", "Color"}),
+			SetAlpha = util.self_function("SetAlpha", {},
+					{"StaticSprite2D", "number"}),
+			SetFlipX = util.self_function("SetFlipX", {},
+					{"StaticSprite2D", "boolean"}),
+			SetFlipY = util.self_function("SetFlipY", {},
+					{"StaticSprite2D", "boolean"}),
+			-- (0, 1) puts the sprite's top left corner on its node
+			SetUseHotSpot = util.self_function("SetUseHotSpot", {},
+					{"StaticSprite2D", "boolean"}),
+			SetHotSpot = util.self_function("SetHotSpot", {},
+					{"StaticSprite2D", "Vector2"}),
+		},
+	})
+
 	util.wc("Node", {
 		class = {
 			new = function()
