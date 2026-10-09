@@ -314,7 +314,6 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 	edit.minWidth = 380
 	edit:SetText((entry and entry.description ~= "" and entry.description) or
 			suggested or "")
-	edit:SetFocus(true)
 
 	local guard = guard_dialog(root, function()
 		log:warning("The permission dialog for "..uri.." was changed "..
@@ -339,8 +338,15 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 		on_answer(accepted, description)
 	end
 
-	menu:add("Accept", function() answer(true) end)
+	local accept = menu:add("Accept", function() answer(true) end)
 	menu:add("Decline", function() answer(false) end)
+	-- ([ACCEPT_FOCUS]) A description already there leaves Enter to accept
+	-- it; an empty one wants typing first
+	if edit:GetText() ~= "" then
+		accept:SetFocus(true)
+	else
+		edit:SetFocus(true)
+	end
 	menu:on_key(function(key)
 		if key == KEY_ESCAPE then
 			answer(false)
