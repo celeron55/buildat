@@ -427,6 +427,8 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"handmade", 0, 1000, 0},
 	}, {
 		{"name", "material"},
+		// [FP_SAMPLE_FIT]'s samples: "rrggbb name" each, ';' between
+		{"samples", ""},
 	}, {}},
 };
 
@@ -1094,7 +1096,10 @@ struct Plan
 					f = &ff;
 			if(!f)
 				return "A "+e.type+" has no field "+pair.first;
-			if(pair.second.size() > MAX_STRING ||
+			// simplified: the samples are one text, 4000 bytes or a
+			// hundred-odd samples; a list of their own is the upgrade
+			if(pair.second.size() > (ss_(f->name) == "samples" ?
+					4000 : MAX_STRING) ||
 					!valid_text(pair.second))
 				return e.type+"."+pair.first+" is not a valid text";
 			e.strs[f->name] = pair.second;

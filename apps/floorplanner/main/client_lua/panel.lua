@@ -517,10 +517,12 @@ function M.sweep()
 	end
 end
 
--- Takes the picker's window down; what is in it is not asked again
+-- Takes the picker's window down; what is in it is not asked again.
+-- Removed at the sweep: the Find field's Enter rebuilds the window from
+-- inside that field's handler, which reads the field after
 function M.close_picker(w)
 	sheet = nil
-	w:Remove()
+	M.discard(w)
 end
 
 function M.color_sheet(parent, cols, o)

@@ -21,6 +21,7 @@ local function load(name)
 end
 local geom = load("geom.lua")
 local panel = load("panel.lua")
+local fit = load("fit.lua")
 local keys = load("keys.lua")
 
 local M = {}
@@ -3532,20 +3533,7 @@ local function build_replace()
 	panel.button(r, "Cancel (Esc)", close_picker)
 end
 
-build_picker = function()
-	if picker_win then
-		panel.close_picker(picker_win)
-		picker_win = nil
-	end
-	if S.replace then
-		return build_replace()
-	end
-	local pk = S.picker
-	local e = pk and doc.ents[pk.ent]
-	if not e then
-		S.picker = nil
-		return
-	end
+local function load_named()
 	if not named_colours then
 		named_colours = {}
 		for _, file in ipairs({"main/colors.txt", "main/colors_tikkurila.txt"}) do
@@ -3561,8 +3549,118 @@ build_picker = function()
 			end
 		end
 	end
+	return named_colours
+end
+
+-- **Fit to samples** ([FP_SAMPLE_FIT]): the picker's window as a list of
+-- colours sampled off a real surface, the entry as the fit would make it,
+-- Apply as one edit. S.picker = {ent, fit = {samples = {{rgb, name}},
+-- adding, query}}; "Add a sample" turns it into the colour picker, any
+-- named colour, until a pick.
+local function build_fit(pk, e)
+	local ft = pk.fit
+	local named = load_named()
+	if ft.adding then
+		picker_win = panel.color_picker({title = "Add a sample",
+			rgb = ft.last or e.ints.base, named = named, query = ft.query,
+			on_pick = function(rgb)
+				local name = ""
+				for _, n in ipairs(named) do
+					if n.rgb == rgb then
+						name = n.name
+						break
+					end
+				end
+				ft.samples[#ft.samples + 1] = {rgb = rgb, name = name}
+				ft.adding, ft.last, ft.query = false, rgb, nil
+				build_picker()
+			end,
+			on_query = function(q)
+				ft.query = q
+				build_picker()
+			end,
+			on_close = function()
+				ft.adding = false
+				build_picker()
+			end})
+		return
+	end
+	local woods, rgbs = {}, {}
+	for _, n in ipairs(named) do
+		if n.group == "wood" then
+			woods[#woods + 1] = n
+		end
+	end
+	for i, smp in ipairs(ft.samples) do
+		rgbs[i] = smp.rgb
+	end
+	local r = fit.fit(e.ints, rgbs, woods)
+	local w = panel.window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
+	picker_win = w
+	w.minWidth = 340
+	panel.label(w, e.strs.name .. ": fit to samples")
+	for i, smp in ipairs(ft.samples) do
+		local row = panel.row(w)
+		panel.chip(row, smp.rgb, 14)
+		panel.label(row, (smp.name ~= "" and smp.name or
+				string.format("%06x", smp.rgb)) ..
+				(r and string.format("  dE %.1f", r.near[i]) or ""))
+		panel.button(row, "Remove", function()
+			table.remove(ft.samples, i)
+			build_picker()
+		end)
+	end
+	panel.button(w, "Add a sample...", function()
+		ft.adding = true
+		build_picker()
+	end)
+	if r then
+		local function chips(label, list)
+			local row = panel.row(w)
+			panel.label(row, label)
+			for _, v in ipairs(list) do
+				panel.chip(row, v, 18)
+			end
+		end
+		chips("Samples, darkest, mean, lightest:", r.target)
+		chips("The fit:", {r.look[1], r.look[4], r.look[3]})
+		panel.label(w, string.format("Off by dE %.1f", r.err))
+		if #r.changes == 0 then
+			panel.label(w, "The entry already matches: nothing changes")
+		end
+		for _, c in ipairs(r.changes) do
+			panel.label(w, c)
+		end
+	end
+	local row = panel.row(w)
+	panel.button(row, "Apply", function()
+		-- One edit, so one undo; the samples kept on the entry
+		send({{op = "set", ent = {id = pk.ent, ints = r and r.ints or {},
+				strs = {samples = fit.format(ft.samples)}}}})
+		close_picker()
+	end)
+	panel.button(row, "Cancel (Esc)", close_picker)
+end
+
+build_picker = function()
+	if picker_win then
+		panel.close_picker(picker_win)
+		picker_win = nil
+	end
+	if S.replace then
+		return build_replace()
+	end
+	local pk = S.picker
+	local e = pk and doc.ents[pk.ent]
+	if not e then
+		S.picker = nil
+		return
+	end
+	if pk.fit then
+		return build_fit(pk, e)
+	end
 	local named = {}
-	for _, n in ipairs(named_colours) do
+	for _, n in ipairs(load_named()) do
 		for _, g in ipairs(pk.groups) do
 			if n.group == g then
 				named[#named + 1] = n
@@ -3788,6 +3886,16 @@ build_palette = function()
 					if v then set({opacity = math.floor(v * 10 + 0.5)}) end
 				end, 120)
 			end
+			local kept = fit.parse(e.strs.samples)
+			if #kept > 0 then
+				panel.label(palette_win, "Fitted to " .. #kept .. " samples")
+			end
+			if not panel.view_only then
+				panel.button(palette_win, "Fit to samples...", function()
+					S.picker = {ent = cur, fit = {samples = kept}}
+					build_picker()
+				end)
+			end
 		end
 		for _, k in ipairs(KNOBS[p.kind]) do
 			if k == "color2" then
@@ -3821,7 +3929,8 @@ build_palette = function()
 		local ph = doc.placeholder()
 		local ints = e and copy_fields(e.ints) or {}
 		send({{op = "create", ent = {id = ph, type = "palette", ints = ints,
-				strs = {name = "material " .. (#entries + 1)}}}}, function(err)
+				strs = {name = "material " .. (#entries + 1),
+				samples = e and e.strs.samples or nil}}}}, function(err)
 			if err == "" then
 				S.material = S.real[ph]
 				refresh_panels()
@@ -5628,6 +5737,9 @@ do
 			S.dirty = true
 		elseif S.paused then
 			close_pause()
+		elseif S.picker and S.picker.fit and S.picker.fit.adding then
+			S.picker.fit.adding = false
+			build_picker()
 		elseif S.picker or S.replace then
 			close_picker()
 		elseif S.type_open then
