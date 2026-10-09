@@ -1583,7 +1583,7 @@ struct CApp: public App, public magic::Application
 				"document.title");
 #endif
 		// The title bar's and the taskbar's ([WIN_RESOURCES]), from client/data
-		engineParameters_["WindowIcon"] = "buildat_logo.png";
+		engineParameters_["WindowIcon"] = "buildat_icon.png";
 		engineParameters_["Headless"] = false;
 		engineParameters_["ResourcePaths"] = resource_paths_s.c_str();
 		engineParameters_["AutoloadPaths"] = "";
