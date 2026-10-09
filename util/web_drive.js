@@ -35,6 +35,15 @@
 //   ["window", n]           the steps after go to the nth top-level window
 //                           (0 the first; one a page opened is 1), Firefox
 //                           only
+//   ["file", path]          the file the browser's picker gives the next
+//                           time the page opens it ([HEARTH_USABILITY]),
+//                           Chrome only
+//   ["fingers", ax0, ay0, bx0, by0, ax1, ay1, bx1, by1]
+//                           two fingers down at a and b, moved together to
+//                           their second places over half a second, and up:
+//                           a pinch, a two-finger scroll (Chrome only)
+//   ["viewport", w, h]      the page that size from here on, as a phone's
+//                           on-screen keyboard makes it (Chrome only)
 // ${NAME} in a string is a --var's value. The page's console goes to the
 // log, a line each. Exits 1 when a step fails.
 "use strict";
@@ -206,9 +215,22 @@ async function chrome() {
 	if (!vp)
 		throw new Error("WEB_DRIVE_VIEWPORT is WxH or WxH@dpr");
 	const touch = process.env.TOUCH === "1";
-	await c.send("Emulation.setDeviceMetricsOverride", {width: +vp[1],
-			height: +vp[2], deviceScaleFactor: +(vp[3] || 1), mobile: touch,
-			screenWidth: +vp[1], screenHeight: +vp[2]});
+	const metrics = (w, h) => c.send("Emulation.setDeviceMetricsOverride", {
+			width: w, height: h, deviceScaleFactor: +(vp[3] || 1),
+			mobile: touch, screenWidth: +vp[1], screenHeight: +vp[2]});
+	await metrics(+vp[1], +vp[2]);
+	// The picker answered here with the "file" step's path, or with nothing
+	let file = null;
+	await c.send("Page.setInterceptFileChooserDialog", {enabled: true});
+	c.on(d => {
+		if (d.method !== "Page.fileChooserOpened")
+			return;
+		logLine("[web_drive] the file picker opened; " + (file || "nothing"));
+		if (file)
+			c.send("DOM.setFileInputFiles", {files: [file],
+					backendNodeId: d.params.backendNodeId});
+		file = null;
+	});
 	if (touch)
 		await c.send("Emulation.setTouchEmulationEnabled", {enabled: true,
 				maxTouchPoints: 5});
@@ -254,6 +276,26 @@ async function chrome() {
 			await c.send("Input.dispatchTouchEvent", {type: "touchEnd",
 					touchPoints: []});
 		},
+		file: p => {
+			if (!fs.existsSync(p))
+				throw new Error("no file " + p);
+			file = p;
+		},
+		fingers: async (ax0, ay0, bx0, by0, ax1, ay1, bx1, by1) => {
+			const at = f => [{x: ax0 + (ax1 - ax0) * f, y: ay0 + (ay1 - ay0) * f,
+					id: 1}, {x: bx0 + (bx1 - bx0) * f, y: by0 + (by1 - by0) * f,
+					id: 2}];
+			await c.send("Input.dispatchTouchEvent", {type: "touchStart",
+					touchPoints: at(0)});
+			for (let i = 1; i <= 10; i++) {
+				await new Promise(r => setTimeout(r, 50));
+				await c.send("Input.dispatchTouchEvent", {type: "touchMove",
+						touchPoints: at(i / 10)});
+			}
+			await c.send("Input.dispatchTouchEvent", {type: "touchEnd",
+					touchPoints: []});
+		},
+		viewport: (w, h) => metrics(w, h),
 		shot: async p => {
 			const r = await c.send("Page.captureScreenshot", {format: "png"});
 			fs.writeFileSync(p, Buffer.from(r.data, "base64"));
