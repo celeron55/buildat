@@ -16,6 +16,9 @@ SetCompressor /SOLID lzma
 Name "Buildat ${VERSION}"
 OutFile "${OUT}"
 RequestExecutionLevel user
+; The logo ([WIN_RESOURCES]); the shortcut and DisplayIcon take the exe's
+Icon "${__FILEDIR__}/../client/data/buildat.ico"
+UninstallIcon "${__FILEDIR__}/../client/data/buildat.ico"
 InstallDir "$LOCALAPPDATA\Programs\Buildat"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Buildat"
 

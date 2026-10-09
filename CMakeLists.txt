@@ -515,6 +515,16 @@ endif()
 # Client
 #
 
+# The Windows executables' icon, manifest and version info ([WIN_RESOURCES])
+if(WIN32)
+	enable_language(RC)
+	file(STRINGS ${CMAKE_SOURCE_DIR}/VERSION BUILDAT_VERSION_TEXT LIMIT_COUNT 1)
+	string(REPLACE "." "," BUILDAT_RC_VERSION ${BUILDAT_VERSION_TEXT})
+	set(BUILDAT_RC_DIR ${CMAKE_SOURCE_DIR})
+	set(BUILDAT_RC ${CMAKE_BINARY_DIR}/buildat.rc)
+	configure_file(util/windows/buildat.rc.in ${BUILDAT_RC} @ONLY)
+endif()
+
 if(BUILD_CLIENT)
 	set(CLIENT_SRCS
 		src/client/main.cpp
@@ -542,6 +552,9 @@ if(BUILD_CLIENT)
 		src/lua_bindings/replicate.cpp
 	)
 
+	if(WIN32)
+		list(APPEND CLIENT_SRCS ${BUILDAT_RC})
+	endif()
 	add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})
 	# A GUI executable on Windows ([WIN8_START] 19): no console window,
 	# whose synchronous writes made the client pay a console write per
@@ -646,7 +659,14 @@ if(BUILD_SERVER)
 		src/server/confine.cpp
 		src/server/confine_windows.cpp
 	)
+	if(WIN32)
+		list(APPEND SERVER_SRCS ${BUILDAT_RC})
+	endif()
 	add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
+	if(WIN32)
+		target_compile_definitions(${SERVER_EXE_NAME} PRIVATE
+			$<$<COMPILE_LANGUAGE:RC>:BUILDAT_SERVER_EXE>)
+	endif()
 
 	target_link_libraries(${SERVER_EXE_NAME}
 		${BUILDAT_CORE_NAME}

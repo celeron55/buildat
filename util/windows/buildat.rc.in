@@ -1,0 +1,41 @@
+// [WIN_RESOURCES]: buildat.exe's and buildat_server.exe's resources, the
+// version written in by CMake at configure (a package build is a fresh
+// configure). BUILDAT_SERVER_EXE tells the two apart.
+// The icon: client/data/buildat.ico, made from buildat_logo.png by
+//   magick buildat_logo.png -define icon:auto-resize=256,128,64,48,32,24,16 buildat.ico
+#include <winver.h>
+
+1 ICON "@BUILDAT_RC_DIR@/client/data/buildat.ico"
+1 24 "@BUILDAT_RC_DIR@/util/windows/buildat.manifest"
+
+#ifdef BUILDAT_SERVER_EXE
+#define BUILDAT_DESC "Buildat server"
+#define BUILDAT_FILE "buildat_server.exe"
+#else
+#define BUILDAT_DESC "Buildat client"
+#define BUILDAT_FILE "buildat.exe"
+#endif
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION @BUILDAT_RC_VERSION@,0
+PRODUCTVERSION @BUILDAT_RC_VERSION@,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+	BLOCK "StringFileInfo"
+	BEGIN
+		BLOCK "040904b0"
+		BEGIN
+			VALUE "ProductName", "Buildat"
+			VALUE "FileDescription", BUILDAT_DESC
+			VALUE "OriginalFilename", BUILDAT_FILE
+			VALUE "ProductVersion", "@BUILDAT_VERSION_TEXT@"
+			VALUE "FileVersion", "@BUILDAT_VERSION_TEXT@"
+			VALUE "LegalCopyright", "Copyright 2014 Perttu Ahola <celeron55@gmail.com>"
+		END
+	END
+	BLOCK "VarFileInfo"
+	BEGIN
+		VALUE "Translation", 0x409, 1200
+	END
+END
