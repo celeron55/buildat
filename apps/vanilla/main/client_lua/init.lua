@@ -4349,9 +4349,16 @@ end)
 -- leaves the screen-sized containers the wrong size, and what is centred or
 -- bottom-aligned inside them lands wherever that size says. Both are put
 -- right here and the hotbar drawn again, rather than at the next slot the
--- player picks ([HOTBAR_LAYERS]).
-magic.SubscribeToEvent("ScreenMode", function()
+-- player picks ([HOTBAR_LAYERS]). A new UI scale is a new root size with
+-- no ScreenMode (a phone's join fitting the scale down: the hotbar halfway
+-- up, [WEB_QUARTER_VIEW]), so the root's size is what is watched.
+local laid_out_w, laid_out_h = nil, nil
+magic.SubscribeToEvent("Update", function()
 	local w, h = magic.ui.root.width, magic.ui.root.height
+	if w == laid_out_w and h == laid_out_h then
+		return
+	end
+	laid_out_w, laid_out_h = w, h
 	if hotbar_ui then
 		hotbar_ui:relayout()
 	end

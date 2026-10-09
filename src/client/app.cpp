@@ -2074,6 +2074,12 @@ struct CApp: public App, public magic::Application
 			return;
 		}
 		ui->SetScale(s);
+		// **The world's image is in UI units** ([WEB_QUARTER_VIEW]): a new
+		// scale is a new root size, and an image left at the old one drew
+		// the world in a corner (a phone's join, the fit going 3.09 ->
+		// 1.55: the top-left quarter until a resize)
+		if(m_preferred_image)
+			m_preferred_image->SetSize(ui->GetRoot()->GetSize());
 		log_i(MODULE, "UI scale %g (%ix%i)", s, g->GetWidth(), g->GetHeight());
 	}
 
