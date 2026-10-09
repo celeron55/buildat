@@ -14,7 +14,7 @@ local log = buildat.Logger("floorplanner")
 local magic = require("buildat/extension/urho3d")
 local function load(name)
 	local ok, err, m = buildat.run_script_file("main/" .. name)
-	if not ok or type(m) ~= "table" then
+	if not ok or (type(m) ~= "table" and type(m) ~= "function") then
 		error("floorplanner: could not load " .. name .. ": " .. tostring(err))
 	end
 	return m
@@ -59,6 +59,12 @@ local HOSTED = {
 }
 -- A door leaf's thickness and the gap round it, and a window's frame
 local LEAF_T, LEAF_GAP, FRAME_W = 40, 4, 50
+
+-- **What the editor's files share besides S** ([FP_EDITOR_MODULES]):
+-- functions, handles and the rebuild's tables, so a part moved to a file
+-- of its own (overlay.lua and on, each `function(E)`) reads them as E.x,
+-- and a diff shows what one part takes from another
+local E = {}
 
 local S = {
 	-- How the 3D view and walking are lit ([FP_DAYLIGHT]): "pbr", the
@@ -910,16 +916,16 @@ end)
 -- The walls with their ends looked up, their outlines, the rooms with
 -- their corners counter-clockwise, and the instances placed; rebuild()
 -- fills them
-local outlines = {}
-local wall_data = {}
-local room_data = {}
-local inst_data = {}
+E.outlines = {}
+E.wall_data = {}
+E.room_data = {}
+E.inst_data = {}
 -- The scene nodes rebuild() made, for the next one to remove
 local built = {}
 -- What a walker bumps into: {pts, y0, y1}, footprints and their heights
 local solids = {}
 -- The pictures, as rebuild() placed them: id -> {foot}
-local image_data = {}
+E.image_data = {}
 -- The material each picture file has: file -> one of IMAGE_MATERIALS
 local image_materials = {}
 local images_used = 0
@@ -939,7 +945,7 @@ end
 
 -- The wall between two nodes, and whether it runs u -> v
 local function wall_between(u, v)
-	for id, w in pairs(wall_data) do
+	for id, w in pairs(E.wall_data) do
 		if w.a_node == u and w.b_node == v then
 			return id, true
 		elseif w.a_node == v and w.b_node == u then
@@ -975,7 +981,7 @@ function M.ceiling_at(x, z)
 end
 
 local function build_room_data()
-	room_data = {}
+	E.room_data = {}
 	for _, e in ipairs(of_type("room")) do
 		local pts, ids = {}, {}
 		for _, n in ipairs(e.lists.nodes) do
@@ -997,14 +1003,14 @@ local function build_room_data()
 			local wid, forward = wall_between(ids[i], ids[i % #ids + 1])
 			offsets[i] = 0
 			if wid then
-				local w = wall_data[wid]
+				local w = E.wall_data[wid]
 				local lo, ro = geom.offsets(w.thickness, w.justify, w.shift)
 				-- The room is left of its counter-clockwise edges
 				offsets[i] = forward and lo or ro
 			end
 		end
 		local inner = geom.inset(pts, offsets)
-		room_data[e.id] = {pts = pts, ids = ids, inner = inner,
+		E.room_data[e.id] = {pts = pts, ids = ids, inner = inner,
 				gross = geom.area(pts), net = geom.area(inner)}
 	end
 end
@@ -1012,7 +1018,7 @@ end
 -- The smallest room the point is in
 local function room_at(x, z)
 	local best, ba = nil, math.huge
-	for id, r in pairs(room_data) do
+	for id, r in pairs(E.room_data) do
 		if r.gross < ba and geom.point_in_polygon(x, z, r.pts) then
 			best, ba = id, r.gross
 		end
@@ -1031,7 +1037,7 @@ end
 -- A wall's frame: its a end, its direction u and left normal n, how far
 -- its faces are from its line, its length and the yaw that turns +X to u
 local function wall_frame(id)
-	local w = wall_data[id]
+	local w = E.wall_data[id]
 	if not w then
 		return nil
 	end
@@ -1079,7 +1085,7 @@ end
 -- ends, and the drag's end sends the result; a node's X or Z typed in its
 -- panel moves the openings with the a end as before
 function M.kept_along(along, host, w)
-	local wd = wall_data[host]
+	local wd = E.wall_data[host]
 	local a, b = wd and doc.ents[wd.a_node], wd and doc.ents[wd.b_node]
 	if not (a and b) then
 		return along
@@ -1109,7 +1115,7 @@ function M.kept_along(along, host, w)
 end
 
 local function build_inst_data()
-	inst_data = {}
+	E.inst_data = {}
 	local d = S.drag
 	for _, e in ipairs(of_type("instance")) do
 		local i = e.ints
@@ -1213,7 +1219,7 @@ local function build_inst_data()
 				foot = {foot[4], foot[3], foot[2], foot[1]}
 			end
 			it.foot = foot
-			inst_data[e.id] = it
+			E.inst_data[e.id] = it
 		end
 	end
 end
@@ -1227,7 +1233,7 @@ function M.sel_pos(id, kind)
 		return nil
 	end
 	if kind == "instance" then
-		local it = inst_data[id]
+		local it = E.inst_data[id]
 		return it and it.x, it and it.z
 	elseif kind == "node" then
 		return node_pos(id)
@@ -1281,7 +1287,7 @@ local function voxel_geometry(node, def, sz, tint, occ)
 end
 
 local function update_voxel_meshes(seen)
-	for id, it in pairs(inst_data) do
+	for id, it in pairs(E.inst_data) do
 		if it.voxel then
 			seen[id] = true
 			local e = doc.ents[id].ints
@@ -1540,7 +1546,7 @@ end
 -- and its top, floors, ceilings, a box's six faces, a door's and a
 -- window's frame
 local function build_decals()
-	for id, o in pairs(outlines) do
+	for id, o in pairs(E.outlines) do
 		local w = doc.ents[id].ints
 		local y0, y1 = wall_span(w)
 		for _, side in ipairs({"left", "right"}) do
@@ -1567,7 +1573,7 @@ local function build_decals()
 			decal({o.pts[1][1], y1, o.pts[1][2]}, {0, 1, 0}, {0, 0, 1}, w.mat_core)
 		end
 	end
-	for id, r in pairs(room_data) do
+	for id, r in pairs(E.room_data) do
 		local e = doc.ents[id].ints
 		local x0, z1 = math.huge, -math.huge
 		for _, p in ipairs(r.inner) do
@@ -1577,7 +1583,7 @@ local function build_decals()
 		decal({x0, room_ceiling(doc.ents[id]), z1 - 2 * DECAL_MARGIN},
 				{0, -1, 0}, {0, 0, -1}, e.mat_ceiling)
 	end
-	for id, it in pairs(inst_data) do
+	for id, it in pairs(E.inst_data) do
 		local def = doc.ents[it.def].ints
 		if not it.hosted and not it.voxel then
 			-- Each face: its normal and its up, in the box's own axes
@@ -1613,7 +1619,7 @@ local function build_decals()
 end
 
 local function build_images()
-	image_data = {}
+	E.image_data = {}
 	local d = S.drag
 	for _, e in ipairs(of_type("image")) do
 		local i = e.ints
@@ -1639,7 +1645,7 @@ local function build_images()
 				local fx, _, fz = geom.rot(c[1] * hw, 0, c[2] * hh, 0, i.yaw / 1000, 0)
 				foot[k] = {x + fx, z + fz}
 			end
-			image_data[e.id] = {foot = foot, locked = i.locked == 1}
+			E.image_data[e.id] = {foot = foot, locked = i.locked == 1}
 			if mat and (S.view == "2d" or i.show3d == 1) then
 				local node = P.images:CreateChild("image")
 				built[#built + 1] = node
@@ -1689,7 +1695,7 @@ build_lamps = function()
 	if not M.pbr_now() then
 		return
 	end
-	for id, it in pairs(inst_data) do
+	for id, it in pairs(E.inst_data) do
 		if lamp_on(id) and not it.hosted then
 			local def = doc.ents[it.def].ints
 			if it.voxel then
@@ -1984,7 +1990,7 @@ end
 function M.room_occlusion()
 	local glass = {}
 	local sunward = {}
-	for iid, it in pairs(inst_data) do
+	for iid, it in pairs(E.inst_data) do
 		local def = it.hosted and it.frame and doc.ents[it.def]
 		local d = def and def.ints
 		local a = 0
@@ -2029,7 +2035,7 @@ function M.room_occlusion()
 		end
 	end
 	M.room_occ = {}
-	for id, rd in pairs(room_data) do
+	for id, rd in pairs(E.room_data) do
 		local occ = 1 - M.daylight.daylight_factor(glass[id] or 0, rd.net)
 		local slot = M.room_slot[id]
 		if not slot then
@@ -2563,12 +2569,12 @@ function M.lap(name)
 end
 local function build_layout(seen_voxels, wells)
 	solids = {}
-	wall_data = {}
+	E.wall_data = {}
 	for _, e in ipairs(of_type("wall")) do
 		local w = e.ints
 		local ax, az = node_pos(w.a)
 		local bx, bz = node_pos(w.b)
-		wall_data[e.id] = {ax = ax, az = az, bx = bx, bz = bz,
+		E.wall_data[e.id] = {ax = ax, az = az, bx = bx, bz = bz,
 				a_node = w.a, b_node = w.b, thickness = w.thickness,
 				justify = w.justify, shift = w.shift,
 				-- Joined with what is at its height: one that hangs clear
@@ -2577,7 +2583,7 @@ local function build_layout(seen_voxels, wells)
 				-- such a corner was open outside)
 				group = (wall_span(w)) > 0 and 1 or 0}
 	end
-	outlines = geom.wall_outlines(wall_data)
+	E.outlines = geom.wall_outlines(E.wall_data)
 	build_room_data()
 	build_inst_data()
 	M.room_occlusion()
@@ -2662,7 +2668,7 @@ local function build_layout(seen_voxels, wells)
 
 	-- The openings in each wall, by where they are along it
 	local holes = {}
-	for id, it in pairs(inst_data) do
+	for id, it in pairs(E.inst_data) do
 		if it.hosted and doc.ents[it.def].ints.kind ~= KIND.switch then
 			local host = doc.ents[id].ints.host
 			local p = doc.ents[it.def].ints
@@ -2675,7 +2681,7 @@ local function build_layout(seen_voxels, wells)
 	-- A wall is cut along its length into slabs: whole ones between the
 	-- openings, and at each opening the part below its sill and the part
 	-- above its head. The faces the cuts make are the reveals.
-	for id, o in pairs(outlines) do
+	for id, o in pairs(E.outlines) do
 		local w = doc.ents[id].ints
 		local y0, y1 = wall_span(w)
 		local cols = {
@@ -2738,7 +2744,7 @@ local function build_layout(seen_voxels, wells)
 	end
 
 	M.lap("walls")
-	for id, r in pairs(room_data) do
+	for id, r in pairs(E.room_data) do
 		local e = doc.ents[id]
 		-- The foundation under the floor too, where a room has no walls
 		if foundation and #r.pts >= 3 then
@@ -2789,7 +2795,7 @@ local function build_layout(seen_voxels, wells)
 	local occ_fn = M.tri_occ_fn
 	M.tri_occ_fn = nil
 	local kind
-	for id, it in pairs(inst_data) do
+	for id, it in pairs(E.inst_data) do
 		if kind then
 			M.lap(kind)
 		end
@@ -2860,7 +2866,7 @@ local function build_layout(seen_voxels, wells)
 	end
 	M.tri_occ, M.tri_occ_fn, M.tri_sides = 0, occ_fn, nil
 	-- A floor is something to stand on, when walking up to another layout
-	for _, r in pairs(room_data) do
+	for _, r in pairs(E.room_data) do
 		for _, pts in ipairs(r.floor or {}) do
 			solids[#solids + 1] = {pts = pts, y0 = 0, y1 = 0, floor = true}
 		end
@@ -2872,7 +2878,7 @@ local function build_layout(seen_voxels, wells)
 	M.lap("lamps")
 	-- The pictures traced over and the material ids are the current
 	-- layout's; seen from above another's are clutter
-	image_data = {}
+	E.image_data = {}
 	if S.view_layout == S.layout then
 		build_images()
 		build_decals()
@@ -2953,8 +2959,8 @@ rebuild = function()
 			all_solids[#all_solids + 1] = {pts = pts, y0 = sd.y0 + r.y,
 					y1 = sd.y1 + r.y, floor = sd.floor}
 		end
-		place.layers[#place.layers + 1] = {id = l.id, insts = inst_data, rel = r,
-				rooms = room_data}
+		place.layers[#place.layers + 1] = {id = l.id, insts = E.inst_data, rel = r,
+				rooms = E.room_data}
 	end
 	solids = all_solids
 	-- The slots of rooms that are gone
@@ -3012,7 +3018,7 @@ function M.drag_is_light(d)
 		return false
 	end
 	for id in pairs(d.inst) do
-		local it = inst_data[id]
+		local it = E.inst_data[id]
 		if not (it and it.hosted) then
 			return false
 		end
@@ -3022,7 +3028,7 @@ end
 function M.rebuild_light()
 	-- The current layout's, which rebuild() made last
 	build_inst_data()
-	place.layers[#place.layers].insts = inst_data
+	place.layers[#place.layers].insts = E.inst_data
 	S.dirty = false
 end
 end
@@ -3277,8 +3283,8 @@ end
 -- nearest corner's; nil if none
 function M.corner_node(x, z, r, except)
 	local best, bd = nil, r
-	for id, o in pairs(outlines) do
-		local w = wall_data[id]
+	for id, o in pairs(E.outlines) do
+		local w = E.wall_data[id]
 		for _, p in ipairs(w and o.pts or {}) do
 			local d = geom.len(p[1] - x, p[2] - z)
 			if d <= bd then
@@ -3307,10 +3313,10 @@ function M.measure_point()
 		return node_pos(n)
 	end
 	local polys = {}
-	for _, o in pairs(outlines) do
+	for _, o in pairs(E.outlines) do
 		polys[#polys + 1] = o.pts
 	end
-	for _, it in pairs(inst_data) do
+	for _, it in pairs(E.inst_data) do
 		polys[#polys + 1] = not it.hosted and it.foot or nil
 	end
 	local bx, bz, bd = nil, nil, r
@@ -3344,10 +3350,10 @@ end
 -- no wall. {u, v, wall = id or nil}
 local function edges()
 	local out = {}
-	for id, w in pairs(wall_data) do
+	for id, w in pairs(E.wall_data) do
 		out[#out + 1] = {u = w.a_node, v = w.b_node, wall = id}
 	end
-	for _, r in pairs(room_data) do
+	for _, r in pairs(E.room_data) do
 		for i = 1, #r.ids do
 			local u, v = r.ids[i], r.ids[i % #r.ids + 1]
 			if not wall_between(u, v) then
@@ -3381,7 +3387,7 @@ end
 -- Whether a point on a wall (mm) is in one of its openings, doors or
 -- windows: the wall is not there, whatever its outline says
 local function in_hole(wall, x, y, z)
-	for id, it in pairs(inst_data) do
+	for id, it in pairs(E.inst_data) do
 		if it.hosted and doc.ents[id].ints.host == wall then
 			local def = doc.ents[it.def].ints
 			if def.kind ~= KIND.switch then
@@ -3507,7 +3513,7 @@ local function pick_surface(whole, accept)
 		local x, z = cursor_floor()
 		-- The topmost instance under the cursor, as seen from above
 		local best, top = nil, -math.huge
-		for id, it in pairs(inst_data) do
+		for id, it in pairs(E.inst_data) do
 			if it.y1 > top and geom.point_in_polygon(x, z, it.foot) and
 					ok("instance", id) then
 				best, top = id, it.y1
@@ -3516,15 +3522,15 @@ local function pick_surface(whole, accept)
 		if best then
 			return {kind = "instance", id = best}
 		end
-		for id, o in pairs(outlines) do
+		for id, o in pairs(E.outlines) do
 			if geom.point_in_polygon(x, z, o.pts) and ok("wall", id) then
-				local w = wall_data[id]
+				local w = E.wall_data[id]
 				local side = (w.bx - w.ax) * (z - w.az) -
 						(w.bz - w.az) * (x - w.ax) > 0 and "left" or "right"
 				return {kind = "wall", id = id, side = side, x = x, z = z}
 			end
 		end
-		for id, im in pairs(image_data) do
+		for id, im in pairs(E.image_data) do
 			if not im.locked and geom.point_in_polygon(x, z, im.foot) and
 					ok("image", id) then
 				return {kind = "image", id = id}
@@ -3537,7 +3543,7 @@ local function pick_surface(whole, accept)
 	local best, best_t = nil, math.huge
 	-- What hangs from the ceiling is drawn from above too, so it is
 	-- picked from above too
-	for id, it in pairs(inst_data) do
+	for id, it in pairs(E.inst_data) do
 		local t, part = ray_instance(it, o, d, not whole and id or nil)
 		if t and t < best_t and ok("instance", id) then
 			-- A leaf is the door's leaf part, which a click selects
@@ -3545,7 +3551,7 @@ local function pick_surface(whole, accept)
 					side = part == "leaf" and "mat_leaf" or nil}, t
 		end
 	end
-	for id, ol in pairs(outlines) do
+	for id, ol in pairs(E.outlines) do
 		-- (an outline outlives its wall for the frame a plan is left in)
 		local we = ok("wall", id) and doc.ents[id]
 		local y0, y1 = 0, 0
@@ -3580,7 +3586,7 @@ local function pick_surface(whole, accept)
 					z = hz}, t
 		end
 	end
-	for id, r in pairs(room_data) do
+	for id, r in pairs(E.room_data) do
 		local surfaces = ok("floor", id) and {{"floor", 2}} or {}
 		-- (the 3D pick: best_t is how far along the ray it is)
 		-- A ceiling faces down and is seen only from under it
@@ -3687,7 +3693,7 @@ end
 -- and the cell it came from, in the volume's own cells. With no voxel on
 -- the way, the cell on the floor where the ray meets it, as the place.
 local function voxel_ray(id)
-	local it = inst_data[id]
+	local it = E.inst_data[id]
 	local o, d = cursor_ray()
 	local sz = it.size
 	local ox, oy, oz = geom.unrot((o.x - W(it.ox)) * 1000, (o.y - W(it.oy)) * 1000,
@@ -3743,7 +3749,7 @@ end
 -- held on past the voxels goes on as a sheet in that plane. nil when the
 -- ray runs along the plane or away from it.
 function M.voxel_plane_cell(id, a)
-	local it = inst_data[id]
+	local it = E.inst_data[id]
 	if not it then
 		return nil
 	end
@@ -3978,10 +3984,10 @@ end
 -- the a way, then the b way}, t along the wall from its a end; nil if
 -- it is not in a wall.
 function M.opening_gaps(id)
-	local it, e = inst_data[id], doc.ents[id]
+	local it, e = E.inst_data[id], doc.ents[id]
 	local def = e and doc.ents[e.ints.def]
 	local f = it and it.frame
-	local wd = e and wall_data[e.ints.host]
+	local wd = e and E.wall_data[e.ints.host]
 	if not (it and it.hosted and f and def and wd) then
 		return nil
 	end
@@ -3998,13 +4004,13 @@ function M.opening_gaps(id)
 		for _ = 1, 50 do
 			local nx, nz = node_pos(n)
 			local others = {}
-			for wid, w in pairs(wall_data) do
+			for wid, w in pairs(E.wall_data) do
 				if wid ~= from and (w.a_node == n or w.b_node == n) then
 					others[#others + 1] = wid
 				end
 			end
 			-- One wall going on along the same line: on to its far end
-			local w1 = #others == 1 and wall_data[others[1]]
+			local w1 = #others == 1 and E.wall_data[others[1]]
 			local o = w1 and (w1.a_node == n and w1.b_node or w1.a_node)
 			local ox, oz = 0, 0
 			if o then
@@ -4020,7 +4026,7 @@ function M.opening_gaps(id)
 				-- this one's line: the nearest to the hole on its side
 				local best
 				for _, wid in ipairs(others) do
-					local w = wall_data[wid]
+					local w = E.wall_data[wid]
 					local l = geom.len(w.bx - w.ax, w.bz - w.az)
 					local vx, vz = (w.bx - w.ax) / l, (w.bz - w.az) / l
 					local den = f.ux * vz - f.uz * vx
@@ -4046,13 +4052,13 @@ function M.opening_gaps(id)
 end
 
 local function wall_gaps(id)
-	local it = inst_data[id]
+	local it = E.inst_data[id]
 	local out = {}
 	for k, a in ipairs({{1, 0, it.ex}, {-1, 0, it.ex}, {0, 1, it.ez},
 			{0, -1, it.ez}}) do
 		local ux, _, uz = geom.rot(a[1], 0, a[2], 0, it.yaw, 0)
 		local best = nil
-		for _, o in pairs(outlines) do
+		for _, o in pairs(E.outlines) do
 			local pts = o.pts
 			for i = 1, #pts do
 				local p, q = pts[i], pts[i % #pts + 1]
@@ -4206,7 +4212,7 @@ do
 			return default_material()
 		end
 		local count, best, bn = {}, nil, 0
-		for id, w in pairs(wall_data) do
+		for id, w in pairs(E.wall_data) do
 			local l = geom.len(w.bx - w.ax, w.bz - w.az)
 			if l > 0 then
 				local mx, mz = (w.ax + w.bx) / 2, (w.az + w.bz) / 2
@@ -4654,7 +4660,7 @@ do
 	-- The voxel volume the voxel tool works on: the one selected
 	voxel_target = function()
 		local id = S.primary
-		if id and S.sel[id] == "instance" and inst_data[id] and inst_data[id].voxel then
+		if id and S.sel[id] == "instance" and E.inst_data[id] and E.inst_data[id].voxel then
 			return id
 		end
 		return nil
@@ -4693,7 +4699,7 @@ do
 	-- From above: the column of a volume's cells under the cursor, and the
 	-- top voxel in it (nil when it is empty)
 	voxel_column = function(id)
-		local it = inst_data[id]
+		local it = E.inst_data[id]
 		local x, z = cursor_floor()
 		if not x then
 			return nil
@@ -4818,7 +4824,7 @@ do
 			local offset = nil
 			if S.view ~= "2d" then
 				local s = pick_surface(true)
-				local it = s and s.kind == "instance" and inst_data[s.id]
+				local it = s and s.kind == "instance" and E.inst_data[s.id]
 				if it and s.t then
 					local o, d = cursor_ray()
 					local y = (o.y + d.y * s.t) * 1000
@@ -5017,7 +5023,7 @@ do
 	merge_ops = function(from, into)
 		local b = new_batch()
 		local ends = {}
-		for id, w in pairs(wall_data) do
+		for id, w in pairs(E.wall_data) do
 			local a, bb = w.a_node, w.b_node
 			if a == from then a = into end
 			if bb == from then bb = into end
@@ -5067,7 +5073,7 @@ do
 		end
 		for n in pairs(candidates) do
 			local used = false
-			for id, w in pairs(wall_data) do
+			for id, w in pairs(E.wall_data) do
 				if not gone_walls[id] and (w.a_node == n or w.b_node == n) then
 					used = true
 				end
@@ -5177,7 +5183,7 @@ do
 		local inst, nodes = moved_by(S.sel)
 		local sx, sz, n = 0, 0, 0
 		for id in pairs(inst) do
-			local c = inst_data[id] or doc.ents[id].ints
+			local c = E.inst_data[id] or doc.ents[id].ints
 			sx, sz, n = sx + c.x, sz + c.z, n + 1
 		end
 		for id in pairs(nodes) do
@@ -6058,7 +6064,7 @@ local function build_props()
 			set(sel.id, {ints = {roll = (i.roll + 1) % 4}})
 		end)
 		-- The gaps to the walls, typed to move the box
-		if inst_data[sel.id] and not inst_data[sel.id].hosted then
+		if E.inst_data[sel.id] and not E.inst_data[sel.id].hosted then
 			for k, g in ipairs(wall_gaps(sel.id)) do
 				if g.gap then
 					panel.field(props, "Gap " .. ({"+X", "-X", "+Z", "-Z"})[k] ..
@@ -6167,7 +6173,7 @@ local function build_props()
 		panel.button(props, "Delete (" .. keys.name("delete") .. ")",
 				delete_selected)
 	elseif sel and sel.type == "room" then
-		local r = room_data[sel.id]
+		local r = E.room_data[sel.id]
 		heading("Room " .. sel.id .. " \"" .. sel.strs.name .. "\", the " ..
 				(S.sel_face[sel.id] == "ceiling" and "ceiling" or "floor"))
 		panel.field(props, "Name", sel.strs.name, function(t)
@@ -7827,7 +7833,7 @@ do
 		for n in pairs(d.nodes) do
 			local ne = doc.ents[n]
 			local u, one_line, moved = nil, true, {}
-			for _, w in pairs(wall_data) do
+			for _, w in pairs(E.wall_data) do
 				local o = w.a_node == n and w.b_node or w.b_node == n and w.a_node
 				local oe = o and doc.ents[o]
 				if oe and ne then
@@ -7884,7 +7890,7 @@ do
 				ents[#ents + 1] = {id = id, ints = {x = x, z = z}}
 			end
 			for id in pairs(d.inst) do
-				local it = inst_data[id]
+				local it = E.inst_data[id]
 				if it and it.hosted then
 					ents[#ents + 1] = {id = id, ints = {along = math.floor(
 							it.along + 0.5)}}
@@ -7946,7 +7952,7 @@ do
 								own = math.atan2(n0.z - oz, n0.x - ox)}
 					end
 				end
-				for _, w in pairs(wall_data) do
+				for _, w in pairs(E.wall_data) do
 					add(w.a_node == d.id and w.b_node or
 							w.b_node == d.id and w.a_node or nil)
 				end
@@ -8022,7 +8028,7 @@ do
 	-- The openings not dragged that keep their place (M.kept_along): their
 	-- `along` as the drag's last build has it, where it changed
 	local function kept_ops(d, ops)
-		for id, it in pairs(inst_data) do
+		for id, it in pairs(E.inst_data) do
 			local e = doc.ents[id]
 			local a = it.hosted and math.floor(it.along + 0.5)
 			if a and e and not (d.inst and d.inst[id]) and a ~= e.ints.along then
@@ -8063,13 +8069,13 @@ do
 				if not S.shift then
 					S.sel = {}
 				end
-				for id, it in pairs(inst_data) do
+				for id, it in pairs(E.inst_data) do
 					if inside(it.x, it.z) and M.sel_accept("instance", id) then
 						S.sel[id] = "instance"
 						S.primary = id
 					end
 				end
-				for id, w in pairs(wall_data) do
+				for id, w in pairs(E.wall_data) do
 					if inside(w.ax, w.az) and inside(w.bx, w.bz) and
 							M.sel_accept("wall", id) then
 						S.sel[id] = "wall"
@@ -8077,7 +8083,7 @@ do
 						S.primary = id
 					end
 				end
-				for id, r in pairs(room_data) do
+				for id, r in pairs(E.room_data) do
 					local all = true
 					for _, p in ipairs(r.pts) do
 						all = all and inside(p[1], p[2])
@@ -8117,7 +8123,7 @@ do
 			kept_ops(d, ops)
 			for id in pairs(d.inst) do
 				local i = doc.ents[id] and doc.ents[id].ints
-				local it = inst_data[id]
+				local it = E.inst_data[id]
 				if i and it and it.hosted and d.rehost then
 					ops[#ops + 1] = {op = "set", ent = {id = id,
 							ints = {host = d.rehost.wall,
@@ -8344,7 +8350,7 @@ do
 		elseif S.tool == "paint" then
 			local s = pick_surface()
 			if s and doc.can("edit") then
-				if s.kind == "instance" and inst_data[s.id].voxel then
+				if s.kind == "instance" and E.inst_data[s.id].voxel then
 					-- One voxel takes the material
 					local hit = voxel_ray(s.id)
 					if hit then
@@ -8391,12 +8397,12 @@ do
 	-- its, being built last), up to half their highest ceiling; nil
 	-- without rooms
 	function M.plan_middle()
-		if not next(room_data) then
+		if not next(E.room_data) then
 			return nil
 		end
 		local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
 		local top = 0
-		for id, r in pairs(room_data) do
+		for id, r in pairs(E.room_data) do
 			for _, p in ipairs(r.pts) do
 				x0, z0 = math.min(x0, p[1]), math.min(z0, p[2])
 				x1, z1 = math.max(x1, p[1]), math.max(z1, p[2])
@@ -8416,7 +8422,7 @@ do
 			end
 			return p
 		end
-		if orbit and next(room_data) then
+		if orbit and next(E.room_data) then
 			return M.plan_middle()
 		end
 		local x, z, t = ray_at_height(0)
@@ -8833,9 +8839,9 @@ do
 			local o, d = cursor_ray()
 			local s = pick_surface()
 			local dist = s and s.t
-			if not dist and next(room_data) then
+			if not dist and next(E.room_data) then
 				local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
-				for _, rd in pairs(room_data) do
+				for _, rd in pairs(E.room_data) do
 					for _, p in ipairs(rd.pts) do
 						x0, z0 = math.min(x0, p[1]), math.min(z0, p[2])
 						x1, z1 = math.max(x1, p[1]), math.max(z1, p[2])
@@ -9736,7 +9742,7 @@ do
 					"turn it north-up to let go into the plan view"
 		elseif not S.captured then
 			local s = pick_surface()
-			g.right = (s or not next(room_data)) and
+			g.right = (s or not next(E.room_data)) and
 					"drag: orbit round what the pointer is on" or
 					"drag: orbit round the middle of the plan"
 			-- A right click uses what it is on (mouse_up)
@@ -9994,7 +10000,7 @@ do
 			local s = pick_surface()
 			if s and edit then
 				local old
-				if s.kind == "instance" and inst_data[s.id].voxel then
+				if s.kind == "instance" and E.inst_data[s.id].voxel then
 					local hit = voxel_ray(s.id)
 					if hit then
 						hl({kind = "cell", id = s.id, c = hit})
@@ -10057,7 +10063,7 @@ do
 
 	-- A cell of a volume as its 12 edges
 	local function cell_box(id, c, col, c2)
-		local it = inst_data[id]
+		local it = E.inst_data[id]
 		if not it then
 			return
 		end
@@ -10084,7 +10090,7 @@ do
 
 	-- An instance's box as its 12 edges
 	local function inst_box(id, col)
-		local it = inst_data[id]
+		local it = E.inst_data[id]
 		local function corner(sx, sy, sz)
 			local x, y, z = geom.rot(sx * it.hx, sy * it.hy, sz * it.hz, it.pitch,
 					it.yaw, it.roll)
@@ -10118,12 +10124,12 @@ do
 				local ux, uz = node_pos(h.u)
 				local vx, vz = node_pos(h.v)
 				line(ux, uz, vx, vz, col)
-			elseif h.kind == "wall" and outlines[h.id] then
+			elseif h.kind == "wall" and E.outlines[h.id] then
 				local y0, y1 = wall_span(doc.ents[h.id].ints)
-				outline(outlines[h.id].pts, col, not plan and
+				outline(E.outlines[h.id].pts, col, not plan and
 						{W(y0) + 0.004, W(y1) + 0.004} or nil)
-			elseif h.kind == "face" and outlines[h.id] then
-				local o = outlines[h.id]
+			elseif h.kind == "face" and E.outlines[h.id] then
+				local o = E.outlines[h.id]
 				local y0, y1 = wall_span(doc.ents[h.id].ints)
 				for i = 1, #o.pts do
 					if o.sides[i] == h.side then
@@ -10145,21 +10151,21 @@ do
 				if h.side == "core" then
 					outline(o.pts, col, not plan and {W(y1) + 0.004} or nil)
 				end
-			elseif (h.kind == "floor" or h.kind == "room") and room_data[h.id] then
-				outline(room_data[h.id].pts, col, not plan and {0.006} or nil)
-			elseif h.kind == "ceiling" and room_data[h.id] then
-				outline(room_data[h.id].pts, col,
+			elseif (h.kind == "floor" or h.kind == "room") and E.room_data[h.id] then
+				outline(E.room_data[h.id].pts, col, not plan and {0.006} or nil)
+			elseif h.kind == "ceiling" and E.room_data[h.id] then
+				outline(E.room_data[h.id].pts, col,
 						{W(room_ceiling(doc.ents[h.id])) - 0.004})
-			elseif h.kind == "instance" and inst_data[h.id] then
+			elseif h.kind == "instance" and E.inst_data[h.id] then
 				if plan then
-					outline(inst_data[h.id].foot, col)
+					outline(E.inst_data[h.id].foot, col)
 				else
 					inst_box(h.id, col)
 				end
-			elseif h.kind == "leaves" and inst_data[h.id] then
+			elseif h.kind == "leaves" and E.inst_data[h.id] then
 				-- Each leaf's box, where it has swung to; a door with none
 				-- (an opening) has its own box
-				local leaves = inst_data[h.id].leaves or {}
+				local leaves = E.inst_data[h.id].leaves or {}
 				if #leaves == 0 then
 					inst_box(h.id, col)
 				end
@@ -10177,8 +10183,8 @@ do
 						debug:AddLine(V(e[1]), V(e[2]), col, false)
 					end
 				end
-			elseif h.kind == "image" and image_data[h.id] then
-				outline(image_data[h.id].foot, col)
+			elseif h.kind == "image" and E.image_data[h.id] then
+				outline(E.image_data[h.id].foot, col)
 			elseif h.kind == "cell" then
 				cell_box(h.id, h.c, col, h.c2)
 			elseif h.kind == "opening" then
@@ -10208,519 +10214,16 @@ do
 	end
 end
 
--- **What the plan view draws that changes only with the plan or the zoom**
--- (user, 2026-10-01: panning a big plan in Firefox was slow; the dashes
--- over what is above the cut alone were some 2000 debug lines a frame,
--- each two sandboxed vectors): the walls and objects above the cut, the
--- objects' outlines and the doors' and windows' symbols, as a line list on
--- a node, made again when the plan, the zoom, the cut or the floor edited
--- change. Drawn a frame at a time as before during a drag that moves
--- things without a rebuild (not a box selection's), and on a client without
--- set_line_geometry.
-local plan_lines_node = scene:CreateChild("PlanLines")
--- And the grid, over three times the view each way, made again when the
--- view leaves that or the step changes
-local grid_node = scene:CreateChild("PlanGrid")
--- And the selection's outlines (draw_overlay)
-M.sel_lines_node = scene:CreateChild("SelLines")
-M.build_gen = 0
-M.sel_gen = 0
-
-local function draw_overlay()
-	local y = S.view == "2d" and W(settings().cut) - 0.001 or 0.004
-	plan_lines_node.enabled = false
-	grid_node.enabled = false
-	M.sel_lines_node.enabled = false
-	local function P(x, z, yy)
-		return magic.Vector3(W(x), yy or y, W(z))
-	end
-	-- Where the lines go instead of the debug renderer, while one is set
-	local sink
-	local function line(ax, az, bx, bz, col)
-		if sink then
-			return sink(ax, az, bx, bz, col)
-		end
-		debug:AddLine(P(ax, az), P(bx, bz), col, false)
-	end
-	local function dashed(pts, col, ln)
-		ln = ln or line
-		for i = 1, #pts do
-			local p, q = pts[i], pts[i % #pts + 1]
-			local l = geom.len(q[1] - p[1], q[2] - p[2])
-			local n = math.max(1, math.floor(l / (6 * mm_per_px())))
-			for j = 0, n - 1, 2 do
-				ln(p[1] + (q[1] - p[1]) * j / n, p[2] + (q[2] - p[2]) * j / n,
-						p[1] + (q[1] - p[1]) * (j + 1) / n,
-						p[2] + (q[2] - p[2]) * (j + 1) / n, col)
-			end
-		end
-	end
-	local function outline(pts, col, ys)
-		for _, yy in ipairs(ys or {y}) do
-			for i = 1, #pts do
-				local p, q = pts[i], pts[i % #pts + 1]
-				if sink and yy == y then
-					sink(p[1], p[2], q[1], q[2], col)
-				else
-					debug:AddLine(P(p[1], p[2], yy), P(q[1], q[2], yy), col, false)
-				end
-			end
-		end
-	end
-	-- **A selection's lines thicker** in the plan view (a playtest,
-	-- 2026-10-06): each three times, a pixel apart across it
-	local function thick(pts, col, ys)
-		if S.view ~= "2d" then
-			return outline(pts, col, ys)
-		end
-		local k = mm_per_px()
-		for i = 1, #pts do
-			local p, q = pts[i], pts[i % #pts + 1]
-			local l = geom.len(q[1] - p[1], q[2] - p[2])
-			if l > 0 then
-				local nx, nz = -(q[2] - p[2]) / l * k, (q[1] - p[1]) / l * k
-				for o = -1, 1 do
-					line(p[1] + nx * o, p[2] + nz * o, q[1] + nx * o, q[2] + nz * o,
-							col)
-				end
-			end
-		end
-	end
-	local dark = magic.Color(0.2, 0.2, 0.25)
-	-- The grid, in the plan view: the snap step where it is at least 8
-	-- pixels, coarser where it is not, and every metre darker
-	if S.view == "2d" then
-		local k = mm_per_px()
-		local step = grid_step()
-		while step / k < 8 do
-			step = step * 10
-		end
-		local w, h = screen_size()
-		local x0, x1 = S.cx - S.span * w / h / 2, S.cx + S.span * w / h / 2
-		local z0, z1 = S.cz - S.span / 2, S.cz + S.span / 2
-		local fine = magic.Color(0.62, 0.62, 0.62)
-		local major = magic.Color(0.45, 0.45, 0.48)
-		-- 30 mm up, over the floors (2 mm) by enough for a 16 bit depth
-		-- buffer over the plan camera's 100 m (a browser's may be; user:
-		-- the grid went under the floors in Firefox when it became
-		-- geometry, where the debug lines drawn last had won the tie); the
-		-- camera looks straight down, so the height shows nowhere else
-		local gy = 0.03
-		local g = M.grid_cache
-		if buildat.set_line_geometry then
-			if not (g and g.step == step and x0 >= g.x0 and x1 <= g.x1 and
-					z0 >= g.z0 and z1 <= g.z1) then
-				local dx, dz = x1 - x0, z1 - z0
-				g = {step = step, x0 = x0 - dx, x1 = x1 + dx, z0 = z0 - dz,
-						z1 = z1 + dz}
-				M.grid_cache = g
-				local out = {}
-				local function add(ax, az, bx, bz, c)
-					local k = #out
-					out[k + 1], out[k + 2], out[k + 3] = W(ax), gy, W(az)
-					out[k + 4], out[k + 5], out[k + 6], out[k + 7] = c.r, c.g, c.b, 1
-					out[k + 8], out[k + 9], out[k + 10] = W(bx), gy, W(bz)
-					out[k + 11], out[k + 12], out[k + 13], out[k + 14] = c.r, c.g, c.b, 1
-				end
-				for gx = math.floor(g.x0 / step) * step, g.x1, step do
-					add(gx, g.z0, gx, g.z1, gx % 1000 == 0 and major or fine)
-				end
-				for gz = math.floor(g.z0 / step) * step, g.z1, step do
-					add(g.x0, gz, g.x1, gz, gz % 1000 == 0 and major or fine)
-				end
-				buildat.set_line_geometry(grid_node, out)
-				grid_node:GetComponent("CustomGeometry"):SetMaterial(0,
-						flat_material)
-			end
-			grid_node.enabled = true
-		else
-			for gx = math.floor(x0 / step) * step, x1, step do
-				debug:AddLine(P(gx, z0, gy), P(gx, z1, gy),
-						gx % 1000 == 0 and major or fine, true)
-			end
-			for gz = math.floor(z0 / step) * step, z1, step do
-				debug:AddLine(P(x0, gz, gy), P(x1, gz, gy),
-						gz % 1000 == 0 and major or fine, true)
-			end
-		end
-		-- The rooms' names and areas
-		for id, r in pairs(room_data) do
-			local cx, cz = geom.centroid(r.pts)
-			world_label(cx, 0, cz, doc.ents[id].strs.name .. "\n" .. m2(r.net))
-		end
-		-- What is above the cut, dashed; the objects below it outlined
-		local cut = settings().cut
-		local function plan_lines(ln)
-			for id, o in pairs(outlines) do
-				if wall_span(doc.ents[id].ints) >= cut then
-					dashed(o.pts, dark, ln)
-				end
-			end
-			for id, it in pairs(inst_data) do
-				if it.hosted then
-					plan_symbol(id, it, ln)
-				elseif it.y0 >= cut then
-					dashed(it.foot, dark, ln)
-				else
-					for i = 1, #it.foot do
-						local p, q = it.foot[i], it.foot[i % #it.foot + 1]
-						ln(p[1], p[2], q[1], q[2], dark)
-					end
-				end
-			end
-		end
-		if buildat.set_line_geometry and not (S.drag and S.drag.kind ~= "box") then
-			local key = M.build_gen .. ":" .. mm_per_px() .. ":" .. cut ..
-					":" .. tostring(S.layout) .. ":" .. S.plan_look
-			if key ~= M.plan_lines_key then
-				M.plan_lines_key = key
-				local out = {}
-				plan_lines(function(ax, az, bx, bz, c)
-					local k = #out
-					out[k + 1], out[k + 2], out[k + 3] = W(ax), y, W(az)
-					out[k + 4], out[k + 5], out[k + 6], out[k + 7] = c.r, c.g, c.b, c.a
-					out[k + 8], out[k + 9], out[k + 10] = W(bx), y, W(bz)
-					out[k + 11], out[k + 12], out[k + 13], out[k + 14] =
-							c.r, c.g, c.b, c.a
-				end)
-				buildat.set_line_geometry(plan_lines_node, out)
-				plan_lines_node:GetComponent("CustomGeometry"):SetMaterial(0,
-						flat_material)
-			end
-			plan_lines_node.enabled = true
-		else
-			plan_lines(line)
-		end
-	end
-	local accent = magic.Color(1.0, 0.6, 0.1)
-	-- **The selection's outlines, kept on a node** in the plan view while
-	-- nothing is dragged ([FRAME_WORK]): a wall's outline three times over
-	-- was some 60 sandboxed lines, over a millisecond a frame
-	local sel_out, sel_kept
-	if buildat.set_line_geometry and S.view == "2d" and not S.drag then
-		local ks = {}
-		for id, kind in pairs(S.sel) do
-			ks[#ks + 1] = id .. kind
-		end
-		table.sort(ks)
-		local key = M.build_gen .. ":" .. mm_per_px() .. ":" .. y .. ":" ..
-				tostring(S.layout) .. ":" .. table.concat(ks, " ")
-		sel_kept = key == M.sel_lines_key
-		if not sel_kept then
-			M.sel_lines_key, sel_out = key, {}
-		end
-		M.sel_lines_node.enabled = true
-	else
-		M.sel_lines_key = nil
-	end
-	local function sel(fn, ...)
-		if sel_kept then
-			return
-		end
-		sink = sel_out and function(ax, az, bx, bz, c)
-			local k = #sel_out
-			sel_out[k + 1], sel_out[k + 2], sel_out[k + 3] = W(ax), y, W(az)
-			sel_out[k + 4], sel_out[k + 5], sel_out[k + 6], sel_out[k + 7] =
-					c.r, c.g, c.b, 1
-			sel_out[k + 8], sel_out[k + 9], sel_out[k + 10] = W(bx), y, W(bz)
-			sel_out[k + 11], sel_out[k + 12], sel_out[k + 13], sel_out[k + 14] =
-					c.r, c.g, c.b, 1
-		end
-		fn(...)
-		sink = nil
-	end
-	for id, kind in pairs(S.sel) do
-		if kind == "wall" and outlines[id] then
-			local y0, y1 = wall_span(doc.ents[id].ints)
-			sel(thick, outlines[id].pts, accent, S.view ~= "2d" and
-					{W(y0) + 0.004, W(y1) + 0.004} or nil)
-			-- The face it was selected by, brighter
-			if S.sel_face[id] then
-				draw_guide({hl = {{kind = "face", id = id, side = S.sel_face[id],
-						col = magic.Color(1.0, 0.95, 0.4)}}}, P, line, outline)
-			end
-			local w = wall_data[id]
-			world_label((w.ax + w.bx) / 2, 0, (w.az + w.bz) / 2,
-					mm_text(geom.len(w.bx - w.ax, w.bz - w.az)))
-		elseif kind == "room" and room_data[id] then
-			sel(thick, room_data[id].pts, accent, S.sel_face[id] == "ceiling" and
-					S.view ~= "2d" and {W(room_ceiling(doc.ents[id])) - 0.004} or nil)
-			sel(outline, room_data[id].inner, magic.Color(0.2, 0.6, 1.0))
-		elseif kind == "image" and image_data[id] then
-			sel(thick, image_data[id].foot, accent)
-		elseif kind == "instance" and inst_data[id] then
-			local it = inst_data[id]
-			sel(thick, it.foot, accent, S.view ~= "2d" and
-					{W(it.y0) + 0.004, W(it.y1) + 0.004} or nil)
-		end
-	end
-	if sel_out then
-		buildat.set_line_geometry(M.sel_lines_node, sel_out)
-		M.sel_lines_node:GetComponent("CustomGeometry"):SetMaterial(0,
-				flat_material)
-	end
-	-- **The rooms on a dragged node, outlined** (a playtest, 2026-10-06)
-	local dg = S.drag
-	if dg and (dg.kind == "node" or dg.kind == "move" and next(dg.nodes)) then
-		for id, r in pairs(room_data) do
-			local e = doc.ents[id]
-			for _, n in ipairs(e and e.lists.nodes or {}) do
-				if (dg.kind == "node" and n == dg.id) or
-						(dg.kind == "move" and dg.nodes[n]) then
-					outline(r.pts, magic.Color(1.0, 0.8, 0.3))
-					break
-				end
-			end
-		end
-	end
-	-- The calibration's two points
-	if S.calib then
-		local c = S.calib
-		for i, p in ipairs(c.pts) do
-			debug:AddCross(P(p[1], p[2]), W(10 * mm_per_px()), accent, false)
-			if i == 2 then
-				line(c.pts[1][1], c.pts[1][2], p[1], p[2], accent)
-			end
-		end
-	end
-	-- A switch's lamps, joined to it by dashed lines
-	local sw = S.primary and doc.ents[S.primary]
-	if sw and sw.type == "instance" and #sw.lists.lamps > 0 and inst_data[sw.id] then
-		local a = inst_data[sw.id]
-		for _, l in ipairs(sw.lists.lamps) do
-			local b = inst_data[l]
-			if b then
-				dashed({{a.x, a.z}, {b.x, b.z}}, magic.Color(0.9, 0.7, 0.1))
-			end
-		end
-	end
-	-- The primary object's gaps to the walls
-	if S.primary and S.sel[S.primary] == "instance" and inst_data[S.primary] and
-			not inst_data[S.primary].hosted and not S.drag then
-		local it = inst_data[S.primary]
-		for _, g in ipairs(wall_gaps(S.primary)) do
-			if g.gap and g.gap > 0 then
-				local ax, az = it.x + g.dir[1] * g.half, it.z + g.dir[2] * g.half
-				local bx, bz = ax + g.dir[1] * g.gap, az + g.dir[2] * g.gap
-				line(ax, az, bx, bz, magic.Color(0.2, 0.6, 1.0))
-				world_label((ax + bx) / 2, 0, (az + bz) / 2, mm_text(g.gap))
-			end
-		end
-	end
-	-- The lines a dragged node was straightened onto (M.angle_snap), each
-	-- wall's angle and length on it
-	if S.drag and S.drag.kind == "node" and S.drag.angle_lines and S.drag.x then
-		local d = S.drag
-		for _, c in ipairs(d.angle_lines) do
-			dashed({{c.p[1], c.p[2]}, {d.x, d.z}}, magic.Color(1.0, 0.55, 0.1))
-			local a = math.deg(math.atan2(d.z - c.p[2], d.x - c.p[1]))
-			world_label((c.p[1] + d.x) / 2, 0, (c.p[2] + d.z) / 2,
-					string.format("%d deg, ", math.floor((a % 360) + 0.5) % 360) ..
-					mm_text(geom.len(d.x - c.p[1], d.z - c.p[2])))
-		end
-	end
-	-- **A door, window or opening moved along its wall, or selected**
-	-- (user; a playtest, 2026-10-06): what is left of the wall each way,
-	-- from the hole's edge to the nearest wall meeting this one
-	-- (M.opening_gaps), numbered as the panel's Gap fields are
-	local dr = S.drag
-	local shown = {}
-	if dr and dr.kind == "move" and dr.moved and dr.inst then
-		shown = dr.inst
-	elseif not dr and S.primary and S.sel[S.primary] == "instance" then
-		shown = {[S.primary] = true}
-	end
-	for id in pairs(shown) do
-		local g = M.opening_gaps(id)
-		local f = g and inst_data[id].frame
-		for k = 1, g and 2 or 0 do
-			local a, b = g[k].face, g[k].edge
-			if (b - a) * (k == 1 and 1 or -1) > 0 then
-				local t = (a + b) / 2
-				local blue = magic.Color(0.2, 0.6, 1.0)
-				line(f.ax + f.ux * a, f.az + f.uz * a, f.ax + f.ux * b,
-						f.az + f.uz * b, blue)
-				world_label(f.ax + f.ux * t, 0, f.az + f.uz * t,
-						k .. ": " .. mm_text(math.abs(b - a)))
-			end
-		end
-	end
-	-- A new selection, by what is in it, for doc.merge_tag
-	local ids = {}
-	for id in pairs(S.tool == "node" and S.nodes or S.sel) do
-		ids[#ids + 1] = id
-	end
-	table.sort(ids)
-	local key = table.concat(ids, " ")
-	if key ~= M.sel_key then
-		M.sel_key, M.sel_gen = key, M.sel_gen + 1
-	end
-	-- **How far the selected thing has moved since it was selected** (user,
-	-- 2026-10-06), by drags and the movement keys alike, in X and Z
-	local pk = S.primary and S.sel[S.primary]
-	local px, pz
-	if pk then
-		px, pz = M.sel_pos(S.primary, pk)
-	end
-	local so = M.sel_origin
-	if not px then
-		M.sel_origin = nil
-	elseif not so or so.id ~= S.primary then
-		M.sel_origin = {id = S.primary, x = px, z = pz}
-	else
-		local dx, dz = px - so.x, pz - so.z
-		if math.abs(dx) >= 0.5 or math.abs(dz) >= 0.5 then
-			-- Off the middle, where a wall's length and a door's gap are
-			world_label(px, 0, pz + M.px(40), string.format("X %+d mm\nZ %+d mm",
-					math.floor(dx + 0.5), math.floor(dz + 0.5)))
-		end
-	end
-	-- The Measure tool's points: each segment's length on it, the total at
-	-- the last point, the area inside when closed; to the pointer while open
-	local m = S.tool == "measure" and S.measure
-	if m then
-		local pts = {}
-		for i, p in ipairs(m.pts) do
-			pts[i] = p
-		end
-		local px, pz = M.measure_point()
-		if not m.closed and px then
-			pts[#pts + 1] = {px, pz}
-		end
-		local green, total = magic.Color(0.0, 0.65, 0.25), 0
-		for i = 1, m.closed and #pts or #pts - 1 do
-			local p, q = pts[i], pts[i % #pts + 1]
-			local l = geom.len(q[1] - p[1], q[2] - p[2])
-			total = total + l
-			thick({p, q}, green)
-			world_label((p[1] + q[1]) / 2, 0, (p[2] + q[2]) / 2, mm_text(l))
-		end
-		local last = pts[#pts]
-		if m.closed then
-			-- At the first point, off a room's label at its middle
-			world_label(pts[1][1], 0, pts[1][2], "total " .. mm_text(total) ..
-					", " .. m2(geom.area(pts)))
-		elseif #pts > 2 then
-			world_label(last[1], 0, last[2], "total " .. mm_text(total))
-		end
-	end
-	-- The voxel tool's and walking's crosshair, and what the pointer is on
-	crosshair.visible = S.captured or false
-	draw_guide(S.guide, P, line, outline)
-	-- The others: their cursors, their cameras, what they have selected
-	for _, o in pairs(doc.others) do
-		local p = o.p and place.presence(o.p, true)
-		if p and o.name then
-			local col = user_color(o.name)
-			local size = S.view == "2d" and W(10 * mm_per_px()) or 0.15
-			if p.view == 1 then
-				-- Their camera, as a small frustum where it is
-				local ex = magic.Vector3(W(p.px), W(p.py), W(p.pz))
-				local function at(fx, fy)
-					local x, y, z = geom.rot(fx * 0.3, fy * 0.2, 0.5, p.pitch / 1000,
-							p.yaw / 1000, 0)
-					return magic.Vector3(ex.x + x, ex.y + y, ex.z + z)
-				end
-				local c = {at(-1, -1), at(1, -1), at(1, 1), at(-1, 1)}
-				for i = 1, 4 do
-					debug:AddLine(ex, c[i], col, false)
-					debug:AddLine(c[i], c[i % 4 + 1], col, false)
-				end
-				world_label(p.px, S.view ~= "2d" and p.py or 0, p.pz, o.name)
-				if p.view == 2 then
-					-- Walking: a body under the eyes
-					local feet = p.py - S.eye
-					local ring = {}
-					for k = 0, 11 do
-						local a = k / 12 * math.pi * 2
-						ring[k + 1] = {p.px + math.cos(a) * BODY_R,
-								p.pz + math.sin(a) * BODY_R}
-					end
-					outline(ring, col, S.view == "2d" and {y} or
-							{W(feet) + 0.004, W(feet + HEAD) + 0.004})
-					debug:AddLine(magic.Vector3(W(p.px), W(feet), W(p.pz)), ex,
-							col, false)
-				end
-			else
-				debug:AddCross(P(p.cx, p.cz), size, col, false)
-				world_label(p.cx, 0, p.cz, o.name)
-			end
-			for _, id in ipairs(p.sel) do
-				if outlines[id] then
-					outline(outlines[id].pts, col)
-				elseif inst_data[id] then
-					outline(inst_data[id].foot, col)
-				elseif room_data[id] then
-					outline(room_data[id].pts, col)
-				end
-			end
-		end
-	end
-	-- Nodes, for the tools that pick them or snap to them. The Nodes, Wall
-	-- and Room tools draw them 10x the Select tool's size with 3x its
-	-- stroke ([FP_NODES]; user, 2026-10-07): three crosses a pixel apart
-	-- along x = z, which puts each arm's lines side by side.
-	-- simplified: in 3D "a pixel" is 1 cm whatever the distance
-	local big = S.tool == "node" or S.tool == "wall" or S.tool == "room"
-	if S.tool == "select" or big then
-		local size = S.view == "2d" and W(6 * mm_per_px()) or 0.08
-		local px = S.view == "2d" and mm_per_px() or 10
-		local strokes = big and {-px, 0, px} or {0}
-		if big then
-			size = size * 10
-		end
-		for _, n in ipairs(of_type("node")) do
-			local x, z = node_pos(n.id)
-			local on = S.sel[n.id] or S.nodes[n.id]
-			for _, d in ipairs(strokes) do
-				debug:AddCross(P(x + d, z + d), size, on and accent or
-						magic.Color(0.1, 0.3, 0.8), S.view ~= "2d")
-			end
-		end
-	end
-	-- The box being dragged out, and a box's footprint being drawn
-	local d = S.drag
-	if d and d.kind == "box" and S.view == "2d" then
-		local w, h = screen_size()
-		local function pz(px, py)
-			return S.cx + (px / w - 0.5) * S.span * w / h,
-					S.cz - (py / h - 0.5) * S.span
-		end
-		local ax, az = pz(S.press.mx, S.press.my)
-		local bx, bz = pz(S.mx, S.my)
-		outline({{ax, az}, {bx, az}, {bx, bz}, {ax, bz}}, accent)
-	elseif d and d.kind == "footprint" then
-		outline({{d.x0, d.z0}, {d.x1, d.z0}, {d.x1, d.z1}, {d.x0, d.z1}},
-				accent)
-		world_label(d.x1, 0, d.z1, mm_text(math.abs(d.x1 - d.x0)) .. " x " ..
-				mm_text(math.abs(d.z1 - d.z0)))
-	end
-	-- What the wall and room tools would do on a click
-	if (S.tool == "wall" or S.tool == "room") and not over_ui() then
-		local from = S.draw or (S.corners and S.corners[#S.corners])
-		local x, z, ref = snapped_point(from)
-		if x then
-			local col = ref.node and magic.Color(0.1, 0.8, 0.2) or ref.edge and
-					magic.Color(0.9, 0.3, 0.9) or accent
-			local size = S.view == "2d" and W(8 * mm_per_px()) or 0.12
-			debug:AddCross(P(x, z), size, col, false)
-			if S.corners then
-				for i = 2, #S.corners do
-					line(S.corners[i - 1].x, S.corners[i - 1].z,
-							S.corners[i].x, S.corners[i].z, accent)
-				end
-				line(S.corners[1].x, S.corners[1].z, x, z,
-						magic.Color(0.9, 0.6, 0.3, 0.5))
-			end
-			if from then
-				line(from.x, from.z, x, z, accent)
-				local l = geom.len(x - from.x, z - from.z)
-				world_label(x, 0, z, S.typed ~= "" and S.typed .. "_ mm" or
-						mm_text(l))
-			end
-		end
-	end
-end
+-- The overlay ([FP_EDITOR_MODULES]): what it reads of this file
+E.S, E.M, E.magic, E.geom = S, M, magic, geom
+E.scene, E.debug, E.place, E.BODY_R = scene, debug, place, BODY_R
+E.HEAD, E.W, E.settings, E.mm_per_px = HEAD, W, settings, mm_per_px
+E.grid_step, E.screen_size, E.flat_material, E.world_label = grid_step, screen_size, flat_material, world_label
+E.m2, E.wall_span, E.plan_symbol, E.draw_guide = m2, wall_span, plan_symbol, draw_guide
+E.mm_text, E.room_ceiling, E.wall_gaps, E.crosshair = mm_text, room_ceiling, wall_gaps, crosshair
+E.user_color, E.of_type, E.node_pos, E.over_ui = user_color, of_type, node_pos, over_ui
+E.snapped_point = snapped_point
+local draw_overlay = load("overlay.lua")(E)
 
 -- This user's presence, for the others, every PRESENCE_SECONDS
 local PRESENCE_SECONDS = 0.1
@@ -10779,7 +10282,7 @@ function M.suspend()
 	-- and what they were built from: fp:closed empties the entities, and a
 	-- ray against an instance whose door was gone was an error (user,
 	-- 2026-10-02)
-	outlines, wall_data, room_data, inst_data, solids = {}, {}, {}, {}, {}
+	E.outlines, E.wall_data, E.room_data, E.inst_data, solids = {}, {}, {}, {}, {}
 	place.layers = {}
 	S.layout, S.layouts_open = nil, false
 	place.build_window()
@@ -11291,6 +10794,7 @@ end
 
 function M.start(d)
 	doc = d
+	E.doc = d
 	-- The editor's state, for what reads it from outside (tutorial.lua)
 	M.S = S
 	M.folded = panel.folded
