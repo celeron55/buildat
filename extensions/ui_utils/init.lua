@@ -1390,9 +1390,16 @@ function M.safe.dropdown(parent, choices, current, on_choose, options)
 		if closed_now == drop then
 			return
 		end
+		-- Removed with its window: a window rebuilt by the pick and taken
+		-- down a frame later (floorplanner's panel.discard) loses the
+		-- focus then, which closes it again; nothing to put back
+		local ok, focused = pcall(function() return drop:HasFocus() end)
+		if not ok then
+			return
+		end
 		closed_now = drop
 		refocus = nil
-		if not drop:HasFocus() then
+		if not focused then
 			if index then
 				drop:SetSelection(index - 1)
 			else
