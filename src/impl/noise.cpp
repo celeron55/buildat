@@ -119,59 +119,6 @@ float triLinearInterpolation(
 }
 
 
-#if 0
-float triLinearInterpolation(
-		float v000, float v100, float v010, float v110,
-		float v001, float v101, float v011, float v111,
-		float x, float y, float z)
-{
-	/*float tx = easeCurve(x);
-	float ty = easeCurve(y);
-	float tz = easeCurve(z);*/
-	float tx = x;
-	float ty = y;
-	float tz = z;
-	return(
-		v000 * (1 - tx) * (1 - ty) * (1 - tz) +
-		v100 * tx * (1 - ty) * (1 - tz) +
-		v010 * (1 - tx) * ty * (1 - tz) +
-		v110 * tx * ty * (1 - tz) +
-		v001 * (1 - tx) * (1 - ty) * tz +
-		v101 * tx * (1 - ty) * tz +
-		v011 * (1 - tx) * ty * tz +
-		v111 * tx * ty * tz
-	);
-}
-#endif
-
-
-#if 0
-// Actual gradient (Perlin) noise, unlike the value noise used below
-float noise2d_gradient(float x, float y, int seed)
-{
-	// Calculate the integer coordinates
-	int x0 = (x > 0.0 ? (int)x : (int)x - 1);
-	int y0 = (y > 0.0 ? (int)y : (int)y - 1);
-	// Calculate the remaining part of the coordinates
-	float xl = x - (float)x0;
-	float yl = y - (float)y0;
-	// Calculate random cosine lookup table indices for the integer corners.
-	// They are looked up as unit vector gradients from the lookup table.
-	int n00 = (int)((noise2d(x0, y0, seed)+1)*8);
-	int n10 = (int)((noise2d(x0+1, y0, seed)+1)*8);
-	int n01 = (int)((noise2d(x0, y0+1, seed)+1)*8);
-	int n11 = (int)((noise2d(x0+1, y0+1, seed)+1)*8);
-	// Make a dot product for the gradients and the positions, to get the values
-	float s = dotProduct(cos_lookup[n00], cos_lookup[(n00+12)%16], xl, yl);
-	float u = dotProduct(-cos_lookup[n10], cos_lookup[(n10+12)%16], 1.-xl, yl);
-	float v = dotProduct(cos_lookup[n01], -cos_lookup[(n01+12)%16], xl, 1.-yl);
-	float w = dotProduct(-cos_lookup[n11], -cos_lookup[(n11+12)%16], 1.-xl, 1.-yl);
-	// Interpolate between the values
-	return biLinearInterpolation(s,u,v,w,xl,yl);
-}
-#endif
-
-
 float noise2d_value(float x, float y, int seed)
 {
 	// Calculate the integer coordinates

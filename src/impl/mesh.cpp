@@ -1725,52 +1725,6 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		if(aseg == nullptr)
 			throw Exception("No atlas segment cache for voxel "+itos(voxel_id0)+
 					" face "+itos(face_id));
-#if 0
-		// TODO: Create a custom Drawable that can use an index buffer
-		// Get or create the appropriate temporary geometry for this atlas
-		TemporaryGeometry &tg = result[seg_ref.atlas_id];
-		if(tg.vertex_data.empty()){
-			tg.atlas_id = seg_ref.atlas_id;
-			// It can't get larger than these and will only exist temporarily in
-			// memory, so let's do only one big memory allocation
-			tg.vertex_data.reserve(pv_vertices.size());
-			tg.index_data.reserve(pv_indices.size());
-		}
-		// Mangle vertices into temporary geometry
-		size_t dst_vertex_i = tg.vertex_data.size() / 8;
-		for(size_t vertex_i1 = 0; vertex_i1 < 4; vertex_i1++){
-			size_t vertex_i = pv_vertex_i0 + vertex_i1;
-			// Each vertex of the face must be of the same voxel; otherwise the
-			// face makes no sense at all
-			VoxelTypeId voxel_id = (VoxelTypeId)pv_vertices[pv_vertex_i0].material;
-			if(voxel_id != voxel_id0)
-				throw Exception("voxel_id != voxel_id0");
-			// Add new values to temporary geometry
-			const auto &pv_vert = pv_vertices[vertex_i];
-			tg.vertex_data.push_back(pv_vert.position.getX() - w/2.0f - 0.5f);
-			tg.vertex_data.push_back(pv_vert.position.getY() - h/2.0f - 0.5f);
-			tg.vertex_data.push_back(pv_vert.position.getZ() - d/2.0f - 0.5f);
-			tg.vertex_data.push_back(pv_vert.normal.getX());
-			tg.vertex_data.push_back(pv_vert.normal.getY());
-			tg.vertex_data.push_back(pv_vert.normal.getZ());
-			tg.vertex_data.push_back(0);
-			tg.vertex_data.push_back(0);
-		}
-		// Mangle indices into temporary geometry
-		size_t index_i0 = pv_face_i * 6;
-		// First index value from polyvox
-		unsigned src_index0_value = pv_indices[index_i0];
-		// First index value to be created (NOTE: This relies on the fact that
-		// pv::CubicSurfaceExtractorWithNormals always references the first
-		// vertex with the first index)
-		unsigned dst_index0_value = dst_vertex_i / 4;
-		pv_indices[index_i0];
-		for(size_t index_i1 = 0; index_i1 < 6; index_i1++){
-			size_t index_i = index_i0 + index_i1;
-			tg.index_data[dst_vertex_i * 6 + index_i1] =
-					pv_indices[index_i] - src_index0_value + dst_index0_value;
-		}
-#else
 		// Get or create the appropriate temporary geometry for this atlas
 		sm_<uint, TemporaryGeometry> &into = geometry_for(
 				result, translucent_result, masked_result, voxel_def0);
@@ -1921,7 +1875,6 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 						mods[3]);
 			}
 		}
-#endif
 	}
 
 	generate_voxel_shapes(result, volume, voxel_reg, fmt, atlas_reg,

@@ -53,15 +53,6 @@ namespace interface
 
 		// Voxel geometry generation
 
-#if 0
-		// TODO: Create a custom Drawable that can use an index buffer
-		struct TemporaryGeometry
-		{
-			uint atlas_id = 0;
-			sv_<float> vertex_data; // vertex(3) + normal(3) + texcoord(2)
-			sv_<unsigned> index_data; // Urho3D eats unsigned as large indices
-		};
-#else
 		struct TemporaryGeometry
 		{
 			uint atlas_id = 0;
@@ -74,7 +65,6 @@ namespace interface
 			// CustomGeometry can't handle an index buffer
 			PODVector<CustomGeometryVertex> vertex_data;
 		};
-#endif
 
 		// with_lod also builds the atlas segments a LOD mesh samples; see
 		// VoxelRegistry::get_cached()
