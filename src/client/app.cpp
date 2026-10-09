@@ -2219,6 +2219,63 @@ struct CApp: public App, public magic::Application
 			m_restore_maximized = false;
 		}
 
+		start_lua();
+
+		// Create a scene that will be synchronized from the server
+		m_scene = new magic::Scene(context_);
+		m_scene->CreateComponent<magic::Octree>(magic::LOCAL);
+		m_scene->CreateComponent<magic::PhysicsWorld>(magic::LOCAL);
+		m_scene->CreateComponent<magic::DebugRenderer>(magic::LOCAL);
+
+		// Push the scene to the Lua environment
+		lua_bindings::replicate::set_scene(L, m_scene);
+
+		// Run initial client Lua scripts
+		ss_ init_lua_path = g_client_config.get<ss_>("share_path")+
+				"/client/init.lua";
+		int error = luaL_dofile(L, init_lua_path.c_str());
+		if(error){
+			log_w(MODULE, "luaL_dofile: An error occurred: %s\n",
+					lua_tostring(L, -1));
+			lua_pop(L, 1);
+			throw AppStartupError("Could not initialize Lua environment");
+		}
+
+		// **Which extension is the launcher**, for the places that have to
+		// go back to it: leaving a game, a server that exited, and
+		// whether a game is running under it. They named launch_menu,
+		// which is wrong the moment the client is booted with another one
+		// (-m launch_world). client/api.lua reads this.
+		{
+			const ss_ name = launch_ui_name();
+			lua_pushstring(L, name.c_str());
+			lua_setglobal(L, "__buildat_menu_extension_name");
+		}
+
+		// **A run is scripted from before the launcher boots**, not from
+		// when the sequence starts stepping. It was set below, after the
+		// menu extension had already loaded and taken the cursor --
+		// which is what [SCRIPTED_CURSOR] exists to stop, and both its
+		// guards read this flag (user, 2026-09-23: "I can't use my
+		// mouse during your tests").
+		m_command_seq_active = g_client_config.get<bool>("command_seq_enabled");
+
+		boot_launcher();
+
+		// Create debug HUD
+		magic::ResourceCache *magic_cache = GetSubsystem<magic::ResourceCache>();
+		magic::DebugHud *dhud = GetSubsystem<magic::Engine>()->CreateDebugHud();
+		dhud->SetDefaultStyle(magic_cache->GetResource<magic::XMLFile>(
+				"UI/DefaultStyle.xml"));
+
+		start_command_seq();
+	}
+
+	// Start()'s phases ([SPLITS]: moved out as they were)
+
+	// The Lua state, its watchdog and the client's __buildat_ functions
+	void start_lua()
+	{
 		// Instantiate and register the Lua script subsystem so that we can use the LuaScriptInstance component
 		context_->RegisterSubsystem(new magic::LuaScript(context_));
 
@@ -2303,46 +2360,11 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(http_get)
 		DEF_BUILDAT_FUNC(http_poll)
 		DEF_BUILDAT_FUNC(parse_json)
+	}
 
-		// Create a scene that will be synchronized from the server
-		m_scene = new magic::Scene(context_);
-		m_scene->CreateComponent<magic::Octree>(magic::LOCAL);
-		m_scene->CreateComponent<magic::PhysicsWorld>(magic::LOCAL);
-		m_scene->CreateComponent<magic::DebugRenderer>(magic::LOCAL);
-
-		// Push the scene to the Lua environment
-		lua_bindings::replicate::set_scene(L, m_scene);
-
-		// Run initial client Lua scripts
-		ss_ init_lua_path = g_client_config.get<ss_>("share_path")+
-				"/client/init.lua";
-		int error = luaL_dofile(L, init_lua_path.c_str());
-		if(error){
-			log_w(MODULE, "luaL_dofile: An error occurred: %s\n",
-					lua_tostring(L, -1));
-			lua_pop(L, 1);
-			throw AppStartupError("Could not initialize Lua environment");
-		}
-
-		// **Which extension is the launcher**, for the places that have to
-		// go back to it: leaving a game, a server that exited, and
-		// whether a game is running under it. They named launch_menu,
-		// which is wrong the moment the client is booted with another one
-		// (-m launch_world). client/api.lua reads this.
-		{
-			const ss_ name = launch_ui_name();
-			lua_pushstring(L, name.c_str());
-			lua_setglobal(L, "__buildat_menu_extension_name");
-		}
-
-		// **A run is scripted from before the launcher boots**, not from
-		// when the sequence starts stepping. It was set below, after the
-		// menu extension had already loaded and taken the cursor --
-		// which is what [SCRIPTED_CURSOR] exists to stop, and both its
-		// guards read this flag (user, 2026-09-23: "I can't use my
-		// mouse during your tests").
-		m_command_seq_active = g_client_config.get<bool>("command_seq_enabled");
-
+	// The launcher booted, and what the environment asks of it at boot
+	void boot_launcher()
+	{
 		// Launch menu if requested
 		if(g_client_config.get<bool>("boot_to_menu")){
 			ss_ extname = launch_ui_name();
@@ -2516,13 +2538,11 @@ struct CApp: public App, public magic::Application
 					log_w(MODULE, "BUILDAT_JOIN is not host:port; not joined");
 			}
 		}
+	}
 
-		// Create debug HUD
-		magic::ResourceCache *magic_cache = GetSubsystem<magic::ResourceCache>();
-		magic::DebugHud *dhud = GetSubsystem<magic::Engine>()->CreateDebugHud();
-		dhud->SetDefaultStyle(magic_cache->GetResource<magic::XMLFile>(
-				"UI/DefaultStyle.xml"));
-
+	// A scripted run's command sequence parsed
+	void start_command_seq()
+	{
 		if(g_client_config.get<bool>("command_seq_enabled")){
 			ss_ text = g_client_config.get<ss_>("command_seq");
 			ss_ err;
