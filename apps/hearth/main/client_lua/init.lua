@@ -183,20 +183,37 @@ assert(html_text('<p><strong>b</strong> <a href="https://x/?a=1&amp;b">x</a> ' .
 		'<a class="ref" href="/t/1">#1</a></p>\n<ul>\n<li>i</li>\n</ul>\n') ==
 		"b x (https://x/?a=1&b) #1\n\n  - i")
 
--- The markup's buttons and Preview in a row under the field `e`; `show`
--- gets the preview's text. `extra` adds the row's first buttons (Send):
--- first, as a phone's page cuts the row's end ([PLAYTEST_1008])
+-- The page area's size
+local W, H = 100, 100
+
+-- The markup's buttons and Preview in rows under the field `e`; `show`
+-- gets the preview's text. `extra` adds the first buttons (Send). A button
+-- past the page's width starts another row: a phone's page cut the row's
+-- end, File... with it ([HEARTH_USABILITY])
 local function markup_buttons(parent, e, show, extra)
 	local r = row(parent)
 	if extra then
 		extra(r)
 	end
+	local used = 0
+	for i = 0, r:GetNumChildren() - 1 do
+		used = used + r:GetChild(i).minWidth + 4
+	end
+	local function add(label, fn)
+		local b = button(r, label, fn)
+		if used > 0 and used + b.minWidth > W then
+			b:Remove()
+			r, used = row(parent), 0
+			b = button(r, label, fn)
+		end
+		used = used + b.minWidth + 4
+	end
 	for _, b in ipairs(MARKUP) do
-		button(r, b[1], function()
+		add(b[1], function()
 			insert_at_cursor(e, b[2])
 		end)
 	end
-	button(r, "File...", function()
+	add("File...", function()
 		picking_into = e
 		buildat.pick_file("")
 	end)
@@ -204,7 +221,7 @@ local function markup_buttons(parent, e, show, extra)
 	-- own markup
 	-- simplified: on the button (and on a pause in the compose page), not
 	-- per key; a request is a parse of the whole message on the server
-	button(r, "Preview", function()
+	add("Preview", function()
 		req("preview", {body = e:GetText()}, function(h)
 			local t = html_text(tostring(h))
 			show(t ~= "" and t or "(nothing)")
@@ -318,8 +335,6 @@ end
 --
 local frame, sidebar, area = nil, nil, nil
 local narrow = magic.ui.root.width < 560
--- The page area's size
-local W, H = 100, 100
 
 -- The stack's top under the frame: another on it is a dialog over Hearth
 -- (the file picker, the menu), whose Escape is its own
@@ -1527,6 +1542,18 @@ show_compose = function(o)
 		button(r, o.edit and "Save" or o.feedback and "Send" or
 				"Start the thread", submit, true)
 	end)
+	-- A short page (a phone turned, [HEARTH_USABILITY]) keeps the buttons
+	-- in it: the field gives up what the page lacks, down to 60
+	local used = 0
+	for i = 0, area:GetNumChildren() - 1 do
+		local c = area:GetChild(i)
+		if c and c.visible then
+			used = used + c.height + 6
+		end
+	end
+	if used > H then
+		body:SetFixedHeight(math.max(60, body.height - (used - H)))
+	end
 	local sub
 	sub = magic.SubscribeToEvent("Update", function()
 		if not pcall(function() return body.visible end) then
