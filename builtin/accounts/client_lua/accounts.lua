@@ -176,6 +176,10 @@ local function send_login(name, password, code, token, keep, totp, starport,
 end
 M.send_login = send_login
 
+-- simplified: never emptied (the sandbox has no weak tables); a handle
+-- or two per page opened
+local page_windows = {}
+
 -- A window of the join: `width` wide, or the screen's width less a margin
 -- on a narrow one ([FP_TOUCH] 2), and its texts wrap to it
 local function page_window(width)
@@ -192,6 +196,7 @@ local function page_window(width)
 	w:SetFixedWidth(math.min(width, magic.ui.root.width - 16))
 	-- By the keyboard, every page of it ([MENU_KEYS])
 	ui_utils.keyboard_page(w)
+	page_windows[w] = true
 	return w
 end
 M.page_window = page_window
@@ -200,6 +205,12 @@ local function page_text(w, t, color)
 	local l = w:CreateChild("Text")
 	l:SetStyleAuto()
 	l:SetWordwrap(true)
+	if page_windows[w] then
+		-- At a fractional UI scale (a phone's) a line draws a little wider
+		-- than it was wrapped at: 2% to spare, so that it stays in the
+		-- window
+		l:SetFixedWidth(math.floor((w.width - 32) * 0.98))
+	end
 	l:SetText(t)
 	if color then
 		l:SetColor(color)
