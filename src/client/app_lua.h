@@ -2196,37 +2196,55 @@
 #endif
 	}
 
-	// exported_files() -> the names of the files in <user>/exports; none on
-	// the web, which has pick_file()
+	// exported_files([dir]) -> the names of the files in <user>/exports;
+	// none on the web, which has pick_file(). With dir, any folder's
+	// entries but the hidden ones, a folder's name ending in "/": the
+	// picker's browsing ([HEARTH_USABILITY]: a screenshot is not in the
+	// exports). Trusted only, as read_exported is.
 	static int l_exported_files(lua_State *L)
 	{
+		const ss_ dir = luaL_optstring(L, 1, "");
 		lua_newtable(L);
 #ifndef __EMSCRIPTEN__
 		int i = 1;
-		for(const auto &n : interface::fs::list_directory(exports_dir())){
-			if(n.is_directory || n.name != user_file_name(n.name))
+		for(const auto &n : interface::fs::list_directory(
+				dir.empty() ? exports_dir() : dir)){
+			if(dir.empty() ? n.is_directory || n.name != user_file_name(n.name)
+					: n.name.empty() || n.name[0] == '.')
 				continue;
-			lua_pushlstring(L, n.name.c_str(), n.name.size());
+			const ss_ name = n.is_directory ? n.name+"/" : n.name;
+			lua_pushlstring(L, name.c_str(), name.size());
 			lua_rawseti(L, -2, i++);
 		}
 #endif
 		return 1;
 	}
 
-	// read_exported(name) -> the bytes of that file in <user>/exports, or
-	// nil and why not
+	// read_exported(name, [dir]) -> the bytes of that file in
+	// <user>/exports, or in dir; or nil and why not
 	static int l_read_exported(lua_State *L)
 	{
 		const ss_ name = luaL_checkstring(L, 1);
-		const ss_ path = exports_dir()+"/"+name;
-		if(name != user_file_name(name) || !interface::fs::path_exists(path)){
+		const ss_ dir = luaL_optstring(L, 2, "");
+		const ss_ path = (dir.empty() ? exports_dir() : dir)+"/"+name;
+		if((dir.empty() ? name != user_file_name(name) : name.empty() ||
+				name.find_first_of("/\\") != ss_::npos || name == "..") ||
+				!interface::fs::path_exists(path)){
 			lua_pushnil(L);
 			lua_pushstring(L, "no such file");
 			return 2;
 		}
-		if(interface::fs::file_size(path) > MAX_USER_FILE_BYTES){
+		const uint64_t size = interface::fs::file_size(path);
+		if(size > MAX_USER_FILE_BYTES){
 			lua_pushnil(L);
 			lua_pushstring(L, "the file is over 64 MiB");
+			return 2;
+		}
+		// 0 is also what a folder or a device gives: /dev/zero read on
+		// for ever. An empty file is no use to pick either.
+		if(size == 0){
+			lua_pushnil(L);
+			lua_pushstring(L, "not a file, or an empty one");
 			return 2;
 		}
 		std::ifstream is(path, std::ios::binary);

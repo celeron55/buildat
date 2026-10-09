@@ -181,6 +181,9 @@ end
 -- change. Read fresh from the root each time, so an element a script
 -- removed is never touched; a field's own text is the user's and not
 -- read. -> {intact(), stop()}
+-- An element named PICKER_LIST is a list_view's list, which its scrolling
+-- moves: its position is not compared, what it holds is.
+local PICKER_LIST = "buildat_picker_list"
 local function guard_dialog(root, on_changed)
 	local function picture()
 		local m = getmetatable(root)
@@ -193,7 +196,7 @@ local function guard_dialog(root, on_changed)
 			local rec = {t, tostring(e:IsVisible()),
 					string.format("%.3f", e:GetOpacity()), e:GetPriority(),
 					e:GetNumChildren(false)}
-			if depth >= 2 then
+			if depth >= 2 and e:GetName() ~= PICKER_LIST then
 				-- The root fills the screen and the window is centred on
 				-- it: those two move with a resize, what is in them does not
 				local p = e:GetPosition()
@@ -355,64 +358,144 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 	end)
 end
 
--- **A file of <user>/exports, picked by the user** ([SECURITY_RUN_1]):
--- the folder holds what every server's game exported and whatever the
--- user put there, and a game listing and reading it all read another
--- server's exports. A game gets the one file the user picks here, the
--- web's file picker on native (buildat.safe.pick_file, client/api.lua).
--- Beside the network dialog for its guard. cb(name, data), or cb(nil,
--- why); accept is the end of a file's name (".fpplan"), "" for any.
--- simplified: every file is a row; a folder of hundreds wants a scroll
-function M.pick_export(accept, cb)
+-- **A file picked by the user** ([SECURITY_RUN_1]): <user>/exports holds
+-- what every server's game exported and whatever the user put there, and
+-- a game listing and reading it all read another server's exports. A
+-- game gets the one file the user picks here, the web's file picker on
+-- native (buildat.safe.pick_file, client/api.lua). It starts in the
+-- exports and browses the disk from there ([HEARTH_USABILITY]: a
+-- screenshot to post was in <user>/screenshots or the user's pictures),
+-- in the client's own window rather than the system's dialog, which is a
+-- window of its own. Beside the network dialog for its guard. cb(name,
+-- data), or cb(nil, why); accept is the end of a file's name (".fpplan"),
+-- "" for any.
+-- simplified: at most MAX_ROWS rows a folder, in name order; a folder of
+-- more wants a search field
+local MAX_ROWS = 300
+function M.pick_export(accept, cb, dir)
+	local exports = __buildat_get_path("user") .. "/exports"
+	dir = dir or exports
 	local root = uistack.main:push({desc="file picker"})
 	root.defaultStyle = magic.cache:GetResource(
 			"XMLFile", "launch_menu/res/main_style.xml")
 	root.priority = 1000
-	local menu = ui_utils.vertical_menu(root, {min_width = 400})
+	local width = math.min(560, magic.ui.root.width - 40)
+	local menu = ui_utils.vertical_menu(root, {min_width = width})
 	local function add_text(text)
 		local t = menu.window:CreateChild("Text")
 		t:SetStyleAuto()
+		t:SetWordwrap(true)
+		t:SetFixedWidth(width)
 		t.text = text
 		t:SetTextAlignment(HA_LEFT)
 	end
 	local guard
 	local finished = false
-	local function finish(name)
+	-- name: a file in dir; to: a folder to go to instead
+	local function finish(name, to)
 		if finished then
 			return
 		end
 		finished = true
-		if name and not guard.intact() then
+		if (name or to) and not guard.intact() then
 			log:warning("The file picker was changed while it was up; "..
 					"nothing picked")
-			name = nil
+			name, to = nil, nil
 		end
 		guard.stop()
 		close_dialog(root)
+		if to then
+			return M.pick_export(accept, cb, to)
+		end
 		if not name then
 			return cb(nil, "no file picked")
 		end
-		log:info("The user picked "..name.." from the exports")
-		local data, why = __buildat_read_exported(name)
+		local data, why
+		if dir == exports then
+			log:info("The user picked "..name.." from the exports")
+			data, why = __buildat_read_exported(name)
+		else
+			log:info("The user picked "..dir.."/"..name)
+			data, why = __buildat_read_exported(name, dir)
+		end
 		cb(data and name or nil, data or why)
 	end
-	add_text("A game asks for a file. Pick one from <user>/exports:")
-	local files = __buildat_exported_files()
-	table.sort(files)
-	local any = false
-	for _, f in ipairs(files) do
-		if accept == "" or f:sub(-#accept) == accept then
-			any = true
-			menu:add(f, function() finish(f) end)
+	add_text("A game asks for a file. Pick one from " .. (dir == exports and
+			"<user>/exports" or dir) .. ":")
+	-- The places a file to hand over is likely in, and the folder above
+	local home = os.getenv("HOME") or os.getenv("USERPROFILE")
+	local places = {{"Exports", exports}, {"Screenshots",
+			__buildat_get_path("user") .. "/screenshots"}}
+	if home then
+		places[#places + 1] = {"Home folder", home}
+		if __buildat_count_files(home .. "/Pictures") > 0 then
+			places[#places + 1] = {"Pictures", home .. "/Pictures"}
 		end
 	end
-	if not any then
+	local up = dir:match("^(.*)[/\\][^/\\]+$")
+	if up then
+		-- "C:" is the drive's working folder; "C:/" its root
+		places[#places + 1] = {"Up", (up == "" or up:match("^%a:$")) and
+				up .. "/" or up}
+	end
+	local bar = menu.window:CreateChild("UIElement")
+	bar:SetLayout(LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
+	for _, pl in ipairs(places) do
+		if pl[2] ~= dir then
+			local b = bar:CreateChild("Button")
+			b:SetStyleAuto()
+			b:SetLayout(LM_HORIZONTAL, 0, magic.IntRect(6, 2, 6, 2))
+			local t = b:CreateChild("Text")
+			t:SetStyleAuto()
+			t.text = pl[1]
+			menu:add(b, function() finish(nil, pl[2]) end)
+		end
+	end
+	local entries = __buildat_exported_files(dir ~= exports and dir or nil)
+	table.sort(entries, function(x, y)
+		local dx, dy = x:sub(-1) == "/", y:sub(-1) == "/"
+		if dx ~= dy then
+			return dx
+		end
+		return x:lower() < y:lower()
+	end)
+	local rows = {}
+	for _, f in ipairs(entries) do
+		if f:sub(-1) == "/" or accept == "" or f:sub(-#accept) == accept then
+			rows[#rows + 1] = f
+		end
+	end
+	if #rows == 0 then
 		add_text("(none" .. (accept ~= "" and " ending in " .. accept or "") ..
 				")")
+	else
+		local view = ui_utils.list_view(menu.window, width, math.min(
+				#rows * 30, math.floor(magic.ui.root.height * 0.6)),
+				{wheel = 40, follow_focus = true})
+		view.list:SetName(PICKER_LIST)
+		for i = 1, math.min(#rows, MAX_ROWS) do
+			local f = rows[i]
+			local folder = f:sub(-1) == "/"
+			menu:add(view:row({label = f, glyph = folder and "📁" or nil}),
+					function()
+				if folder then
+					finish(nil, (dir:sub(-1) == "/" and dir or dir .. "/") ..
+							f:sub(1, -2))
+				else
+					finish(f)
+				end
+			end)
+		end
+		view:fit()
+		if #rows > MAX_ROWS then
+			add_text("(" .. (#rows - MAX_ROWS) .. " more not shown)")
+		end
 	end
 	menu:add("Cancel", function() finish(nil) end)
 	menu:on_key(function(key)
 		if key == KEY_ESCAPE then
+			-- Not the screen's under it as well (Hearth's Back, the menu)
+			uistack.safe.take_key(KEY_ESCAPE)
 			finish(nil)
 			return true
 		end
