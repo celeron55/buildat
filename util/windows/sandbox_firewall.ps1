@@ -1,20 +1,20 @@
-# Buildat: util/windows/box_firewall.ps1
+# Buildat: util/windows/sandbox_firewall.ps1
 # http://www.apache.org/licenses/LICENSE-2.0
 # Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 #
-# [SEC_WIN_NET] A boxed server on Windows connects by TCP only to the ports
-# Linux's box allows: 80, 443, 465, 587, 29500, 29595 and the ones given in
+# [SEC_WIN_NET] A sandboxed server on Windows connects by TCP only to the ports
+# Linux's sandbox allows: 80, 443, 465, 587, 29500, 29595 and the ones given in
 # -ConnectPorts (as <user>\connect_ports or --connect-ports give them on
 # Linux). An AppContainer has no port rules of its own; this adds a Windows
-# Firewall rule per box (its package SID) that blocks outbound TCP to every
+# Firewall rule per app's sandbox (its package SID) that blocks outbound TCP to every
 # other port. A block rule wins over any allow rule.
 #
 # Run as an administrator, from the account that runs buildat (or with
-# -Sid), and again after an app has run boxed for the first time: its box
-# is made then. Run it again to change the ports; -Remove takes the rules
+# -Sid), and again after an app has run sandboxed for the first time: its
+# sandbox is made then. Run it again to change the ports; -Remove takes the rules
 # away.
 #
-#   powershell -ExecutionPolicy Bypass -File box_firewall.ps1 [-ConnectPorts 8080,2525] [-Remove]
+#   powershell -ExecutionPolicy Bypass -File sandbox_firewall.ps1 [-ConnectPorts 8080,2525] [-Remove]
 param(
 	[int[]]$ConnectPorts = @(),
 	[string[]]$Sid = @(),
@@ -35,7 +35,7 @@ foreach ($hive in Get-ChildItem Registry::HKEY_USERS -ErrorAction SilentlyContin
 }
 foreach ($s in $Sid) { $boxes[$s] = $s }
 if ($boxes.Count -eq 0) {
-	Write-Output "No buildat box found: run a boxed server once first, from the account that will run it"
+	Write-Output "No buildat sandbox found: run a sandboxed server once first, from the account that will run it"
 	exit 1
 }
 
@@ -51,6 +51,8 @@ foreach ($p in $allowed) {
 if ($from -le 65535) { $ranges += "$from-65535" }
 
 foreach ($s in $boxes.Keys) {
+	# simplified: the rule keeps its first name, so a rule made before
+	# [SANDBOX_WORDING] is replaced, not doubled
 	$name = "buildat box $($boxes[$s])"
 	Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue |
 		Remove-NetFirewallRule

@@ -2036,10 +2036,10 @@ health_page = function(back)
 			"tester: find one, send its address a test mail from here, and "..
 			"read its report.", DIM)
 
-	head("The box")
+	head("The server's sandbox")
 	page_text(w, "Layers: " .. tostring(h.box ~= nil and h.box ~= "" and
 			h.box or "?"))
-	button(w, "Check the box", function() M.admin("health", "", "", true) end)
+	button(w, "Check the sandbox", function() M.admin("health", "", "", true) end)
 	local bc = h.box_check
 	if type(bc) == "table" then
 		page_text(w, (bc.inside_ok and "OK: " or "FAIL: ") ..

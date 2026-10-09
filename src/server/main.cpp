@@ -168,13 +168,14 @@ int main(int argc, char *argv[])
 			"  -u [key=value lines] What an untrusted launcher asked for\n"
 			"                       (the launch grid; a module reads it as it\n"
 			"                       would a packet)\n"
-			"  --connect-ports P,Q  Ports the boxed server may connect to\n"
+			"  --connect-ports P,Q  Ports the sandboxed server may\n"
+			"                       connect to\n"
 			"                       beyond 80, 443, 465, 587, 29500 and\n"
 			"                       29595, or \"any\" (also\n"
 			"                       BUILDAT_CONNECT_PORTS)\n"
 			"  --lan-announce NAME  Announce this server to the LAN under\n"
 			"                       NAME (also BUILDAT_LAN_ANNOUNCE)\n"
-			"  --unconfined         Run without the box (also\n"
+			"  --unconfined         Run without the sandbox (also\n"
 			"                       BUILDAT_UNCONFINED=1): the app reaches\n"
 			"                       all of your files\n"
 			"  --compile-only       Compile and load the modules, then exit\n"
@@ -390,8 +391,8 @@ int main(int argc, char *argv[])
 		if(child_exit != -1)
 			return child_exit;
 		if(!why.empty()){
-			log_e(MODULE, "The server's box could not be made: %s. Starting "
-					"an app unboxed lets it reach every file you can; to do "
+			log_e(MODULE, "The server's sandbox could not be made: %s. Starting "
+					"an app unsandboxed lets it reach every file you can; to do "
 					"that anyway, give --unconfined or set "
 					"BUILDAT_UNCONFINED=1.", cs(why));
 			return 1;
@@ -400,7 +401,7 @@ int main(int argc, char *argv[])
 		if(config.get<ss_>("box").empty())
 			config.set("box", config.get<bool>("boxed") ?
 					"an AppContainer and a job object" :
-					"off (BUILDAT_WINDOWS_BOX=0)");
+					"off (BUILDAT_WINDOWS_SANDBOX=0)");
 #endif
 	}
 

@@ -7,7 +7,7 @@ used.
 
 What counts most here:
 
-- an app escaping the server's box (Landlock and seccomp on Linux, the
+- an app escaping the server's sandbox (Landlock and seccomp on Linux, the
   AppContainer on Windows);
 - a server's Lua escaping the client's sandbox, or imitating the client's
   own Starport and consent dialogs;

@@ -396,8 +396,8 @@ older setting, taken only when none is set.
 
 The Server window (builtin/accounts' client Lua, [SERVER_ADMIN_PAGE]):
 a sidebar of pages, Account; for an admin Accounts, the Starport pages
-(when starport_announce is loaded) and Health (disk, the box and a check
-of it, the last 100 warnings and errors, mail, the listings). The
+(when starport_announce is loaded) and Health (disk, the server's sandbox and a
+check of it, the last 100 warnings and errors, mail, the listings). The
 "Server" corner button and a game's My account open it as a window of
 its own, closed by Close or a click outside it. An app adds its
 own pages with accounts.server_menu = function(add) add(header, label,

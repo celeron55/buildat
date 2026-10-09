@@ -2251,7 +2251,7 @@ struct Module: public interface::Module, public Interface
 			FILE *f = fopen(path.c_str(), "wb");
 			if(!f)
 				return strerror(errno);
-			const bool ok = fputs("box check\n", f) >= 0;
+			const bool ok = fputs("sandbox check\n", f) >= 0;
 			fclose(f);
 			remove(path.c_str());
 			return ok ? "" : "the write failed";
@@ -2264,7 +2264,7 @@ struct Module: public interface::Module, public Interface
 				"no file written in the app's cache: "+in_err);
 		v.set("outside_refused", json::Value(!out_err.empty()));
 		v.set("outside", out_err.empty() ? "a file written at the top of the "
-				"user path: the box is off" : "a file at the top of the user "
+				"user path: the sandbox is off" : "a file at the top of the user "
 				"path refused ("+out_err+")");
 		return v;
 	}

@@ -109,7 +109,7 @@ local CHECKLIST = {
 	"The licences fit the files.",
 	"The audience is honest.",
 	"The description says what it does.",
-	"Nothing does harm beyond what the box lets it: phoning home, " ..
+	"Nothing does harm beyond what the server's sandbox lets it: phoning home, " ..
 			"mining, fetching code.",
 	"No assets taken without a licence.",
 }

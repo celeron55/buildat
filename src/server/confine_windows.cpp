@@ -197,7 +197,7 @@ static ss_ confine_child(core::Config &config, const ss_ &module_path)
 			const DWORD el = h == INVALID_HANDLE_VALUE ? GetLastError() : 0;
 			if(h != INVALID_HANDLE_VALUE)
 				FindClose(h);
-			const ss_ line = "seen from the box: "+p+": attributes "+
+			const ss_ line = "seen from the sandbox: "+p+": attributes "+
 					(ea ? "error "+itos((int)ea) : ss_("ok"))+", listing "+
 					(el ? "error "+itos((int)el) : ss_("ok"));
 			boxed_step(line.c_str());
@@ -210,7 +210,7 @@ static ss_ confine_child(core::Config &config, const ss_ &module_path)
 	config.set("cache_path", app_cache);
 	config.set("rccpp_build_path", app_cache+"/rccpp_build");
 	config.set("rccpp_prebuilt_path", prebuilt);
-	log_i(MODULE, "The server is boxed: AppContainer buildat.%s and a job "
+	log_i(MODULE, "The server is sandboxed: AppContainer buildat.%s and a job "
 			"object; %s/apps/%s and its shared directory writable",
 			cs(app), cs(config.get<ss_>("user_path")), cs(app));
 	return "";
@@ -222,7 +222,10 @@ static ss_ confine_child(core::Config &config, const ss_ &module_path)
 // (client/pipe_stream.cpp), and the server runs as before and says so.
 bool windows_box_wanted()
 {
-	const char *on = getenv("BUILDAT_WINDOWS_BOX");
+	// BUILDAT_WINDOWS_BOX is the name it had before [SANDBOX_WORDING]
+	const char *on = getenv("BUILDAT_WINDOWS_SANDBOX");
+	if(!on)
+		on = getenv("BUILDAT_WINDOWS_BOX");
 	return !(on && ss_(on) == "0");
 }
 
@@ -231,7 +234,7 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	if(config.get<bool>("boxed"))
 		return confine_child(config, module_path);
 	if(!windows_box_wanted()){
-		log_w(MODULE, "Not boxed (BUILDAT_WINDOWS_BOX=0): the app can "
+		log_w(MODULE, "Not sandboxed (BUILDAT_WINDOWS_SANDBOX=0): the app can "
 				"reach every file you can");
 		return "";
 	}
@@ -252,7 +255,7 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	const std::wstring name = wide("buildat."+app);
 	Grants g;
 	HRESULT hr = CreateAppContainerProfile(name.c_str(), name.c_str(),
-			L"A buildat server's box", nullptr, 0, &g.sid);
+			L"A buildat server's sandbox", nullptr, 0, &g.sid);
 	const bool new_box = hr != HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS);
 	if(!new_box)
 		hr = DeriveAppContainerSidFromAppContainerName(name.c_str(), &g.sid);
@@ -262,8 +265,8 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	// [SEC_WIN_NET] A container has no port rules; the firewall's, per box,
 	// are an administrator's to add, and a box exists only from here on
 	if(new_box)
-		log_w(MODULE, "A new box, buildat.%s: it connects to any host and "
-				"port until an administrator runs bin\\box_firewall.ps1 "
+		log_w(MODULE, "A new sandbox, buildat.%s: it connects to any host "
+				"and port until an administrator runs bin\\sandbox_firewall.ps1 "
 				"again", cs(app));
 
 	// The grants: the install, the compiler and the shared build read;
@@ -286,7 +289,7 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	for(const ss_ &r : g.refused)
 		log_w(MODULE, "No grant on %s", cs(r));
 	if(g.made)
-		log_i(MODULE, "Granted the box %i director%s", g.made,
+		log_i(MODULE, "Granted the sandbox %i director%s", g.made,
 				g.made == 1 ? "y" : "ies");
 
 	// **The job**: the child dies with its parent, and has no clipboard,
@@ -376,7 +379,7 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	CloseHandle(nul);
 	if(!ok){
 		CloseHandle(rd);
-		return "starting the boxed server: "+error_text(GetLastError());
+		return "starting the sandboxed server: "+error_text(GetLastError());
 	}
 	if(!AssignProcessToJobObject(job, pi.hProcess)){
 		const ss_ why = error_text(GetLastError());
@@ -404,14 +407,14 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	// negative as an int) had the parent go on and run the app itself,
 	// unboxed (2026-10-03, on the Windows box over SSH)
 	if(code != 0)
-		log_w(MODULE, "The boxed server exited with 0x%08lx", (unsigned long)code);
+		log_w(MODULE, "The sandboxed server exited with 0x%08lx", (unsigned long)code);
 	// STATUS_DLL_INIT_FAILED: what the box dies with in session 0, where
 	// an SSH login or a service runs and there is no desktop (2026-10-03)
 	if(code == 0xC0000142)
-		log_e(MODULE, "The box could not start here: a server started with "
+		log_e(MODULE, "The sandbox could not start here: a server started with "
 				"no desktop -- from a service or an SSH login -- cannot be "
-				"boxed yet. Start it from a desktop session, or give "
-				"--unconfined to run the app unboxed.");
+				"sandboxed yet. Start it from a desktop session, or give "
+				"--unconfined to run the app unsandboxed.");
 	*exit_code = code == 0 ? 0 : (code < 256 ? (int)code : 1);
 	return "";
 }

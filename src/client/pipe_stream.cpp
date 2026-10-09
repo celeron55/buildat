@@ -103,7 +103,9 @@ ss_ local_server_pipe(const ss_ &app, const ss_ &port)
 	// --unconfined, or with the Windows box off
 	// (src/server/confine_windows.cpp)
 	const char *unconfined = getenv("BUILDAT_UNCONFINED");
-	const char *box = getenv("BUILDAT_WINDOWS_BOX");
+	const char *box = getenv("BUILDAT_WINDOWS_SANDBOX");
+	if(!box)
+		box = getenv("BUILDAT_WINDOWS_BOX");
 	if((unconfined && ss_(unconfined) == "1") || (box && ss_(box) == "0"))
 		return "";
 	const ss_ name_a = "buildat."+app;

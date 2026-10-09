@@ -25,9 +25,9 @@ echo "secret" > "$secret_dir/secret"
 cd "$here/Build"
 BUILDAT_BOX_TEST_SECRET="$secret_dir/secret" timeout 300 bin/buildat_server \
 	-m ../apps/box_test -D "$out/user" -P 29871 -l 3 > "$out/srv.log" 2>&1
-if ! grep -aq "The server is boxed" "$out/srv.log"; then
+if ! grep -aq "The server is sandboxed" "$out/srv.log"; then
 	echo "FAIL: the server was not boxed --" \
-			"$(grep -a "box could not\|confine" "$out/srv.log" | head -1)"
+			"$(grep -a "sandbox could not\|confine" "$out/srv.log" | head -1)"
 	exit 1
 fi
 line=$(grep -a "box_test: .* reaches tried" "$out/srv.log" | tail -1 |
@@ -40,13 +40,13 @@ if [ "${tried:-0}" -lt 22 ]; then
 	exit 1
 fi
 if ! echo "$line" | grep -q " 0 got through"; then
-	echo "FAIL: the hostile app reached past the box"
+	echo "FAIL: the hostile app reached past the sandbox"
 	exit 1
 fi
 if ! echo "$line" | grep -q "its own files work"; then
-	echo "FAIL: the box keeps the app from its own files"
+	echo "FAIL: the sandbox keeps the app from its own files"
 	exit 1
 fi
-echo "PASS: a hostile app reaches nothing past the box, and its own files work"
+echo "PASS: a hostile app reaches nothing past the sandbox, and its own files work"
 exit 0
 # vim: set noet ts=4 sw=4:

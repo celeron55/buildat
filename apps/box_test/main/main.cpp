@@ -330,7 +330,7 @@ struct Module: public interface::Module
 			{"list $HOME", can_list(home)},
 			{"read ~/.bashrc", can_read(home+"/.bashrc")},
 			{"read ~/.ssh", can_list(home+"/.ssh")},
-			{"read a file outside the box", secret && can_read(secret)},
+			{"read a file outside the sandbox", secret && can_read(secret)},
 			{"write ~/.buildat_box_test", can_write(home+"/.buildat_box_test")},
 			{"write another app's directory",
 				can_write(user+"/apps/vanilla/box_test_was_here")},

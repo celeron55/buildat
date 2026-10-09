@@ -20,7 +20,7 @@ void boxed_step(const char *what)
 	const char *path = getenv("BUILDAT_BOXED_STEPS");
 	if(!path || !*path)
 		return;
-	log_i(MODULE, "boxed step: %s (pid %i)", what, (int)getpid());
+	log_i(MODULE, "sandboxed step: %s (pid %i)", what, (int)getpid());
 	FILE *f = fopen(path, "ab");
 	if(!f)
 		return;
@@ -322,7 +322,7 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	// already running would stay outside
 	const int threads = count_threads();
 	if(threads != 1)
-		return "the box is made before any thread starts, and "+
+		return "the sandbox is made before any thread starts, and "+
 				itos(threads)+" are running";
 
 	const int abi = syscall(SYS_landlock_create_ruleset, nullptr, 0,
@@ -490,7 +490,7 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	config.set("box", "Landlock ABI "+itos(abi)+(abi >= 6 ?
 			" (files, abstract sockets, signals)" : " (files)")+
 			", seccomp; "+tcp);
-	log_i(MODULE, "The server is boxed: Landlock ABI %i (the filesystem%s), "
+	log_i(MODULE, "The server is sandboxed: Landlock ABI %i (the filesystem%s), "
 			"seccomp (no unix sockets, no io_uring); %s. "
 			"%s and %s writable, %s/shared readable",
 			abi, abi >= 6 ? ", abstract sockets and signals scoped" :

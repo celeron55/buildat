@@ -168,7 +168,7 @@ shows only its newest reviewed release, and one with none is not shown.
 Running an installed app
 ------------------------
 Every installed version is a tile on the launch grid, "<label> <version>",
-and starts a boxed server from its directory. To the client it is
+and starts a sandboxed server from its directory. To the client it is
 "<author>.<name>@<version>"; to its server, and to its save, shared and
 cache directories, "<author>.<name>": every version is one app. `buildat -a
 installed/<author>.<name>@<version>/<id>` runs its tile on boot.

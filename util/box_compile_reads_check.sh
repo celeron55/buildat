@@ -46,7 +46,7 @@ log=$(cat "$t/log")
 
 # The outside file must be denied by Landlock, not opened
 echo "$log" | grep -qF "$secret: Permission denied" ||
-	fail "the box did not deny the compiler reading $secret
+	fail "the sandbox did not deny the compiler reading $secret
 $(echo "$log" | grep -aF "$secret")"
 # And it must not have been opened and parsed (no diagnostic quoting its
 # content or pointing a caret inside it)
@@ -55,6 +55,6 @@ echo "$log" | grep -qF 'user secret the box must not' &&
 # The system path is allowed: no denial for it (a broken allow-list that
 # dropped /etc would show it here)
 echo "$log" | grep -qE '/etc/hostname: (Permission denied|No such file)' &&
-	fail "the box denied a system path the compiler needs (/etc/hostname)"
+	fail "the sandbox denied a system path the compiler needs (/etc/hostname)"
 
-echo "PASS: the box denies the compiler the user's files, allows the system"
+echo "PASS: the sandbox denies the compiler the user's files, allows the system"

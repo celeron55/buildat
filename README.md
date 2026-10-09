@@ -48,8 +48,8 @@ Starport listing takes it as its kind unless `starport.json` names one.
 * Experiments, not developed now: `undermine` (digger's world, which
   collapses), `aggregate` (undermine's world made of mixtures) and
   `aggregate_look`.
-* Checks and test scenes: `box_test` (a hostile app the server's box
-  must contain), `voxel_lighting`, `multisection_lighting`,
+* Checks and test scenes: `box_test` (a hostile app the server's
+  sandbox must contain), `voxel_lighting`, `multisection_lighting`,
   `voxel_physics`, `geometry`, `geometry2`, `entitytest`, `featuretest`,
   `uitest`, `test`.
 
@@ -231,7 +231,7 @@ own port and connects only to ports 80, 443, 465, 587, 29500 and 29595,
 plus what `--connect-ports`, `BUILDAT_CONNECT_PORTS` or a line in
 `<user>/connect_ports` adds ("any", or "8080,30000"): the
 services on 127.0.0.1 are other programs of yours. Where the kernel cannot
-make the box the server refuses to start; `--unconfined` (or
+make the sandbox the server refuses to start; `--unconfined` (or
 `BUILDAT_UNCONFINED=1`) runs it without one. `apps/box_test/check.sh` is
 the check.
 
@@ -239,12 +239,13 @@ On Windows (8 or newer) the server restarts itself inside a per-app
 AppContainer with a job object, with the same directories. A local
 client joins it by a named pipe, since an AppContainer cannot reach
 loopback; other players connect over the network as before. A server
-started with no desktop, from a service or an SSH login, cannot be boxed
-yet and says so. `BUILDAT_WINDOWS_BOX=0` turns the box off. A container
-has no port rules: a boxed server connects to any host and port until an
-administrator runs `bin\box_firewall.ps1` (`-ConnectPorts 8080,30000`
-for more), which gives each box the Linux ports by a firewall rule. A box
-is made at its app's first boxed start; the script is run again after it.
+started with no desktop, from a service or an SSH login, cannot be
+sandboxed yet and says so. `BUILDAT_WINDOWS_SANDBOX=0` turns the sandbox
+off. A container has no port rules: a sandboxed server connects to any
+host and port until an administrator runs `bin\sandbox_firewall.ps1`
+(`-ConnectPorts 8080,30000` for more), which gives each app's sandbox the
+Linux ports by a firewall rule. An app's sandbox is made at its first
+sandboxed start; the script is run again after it.
 
 Client command sequence (CI / visual checks)
 --------------------------------------------

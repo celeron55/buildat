@@ -202,7 +202,7 @@ struct CTCPSocket: public TCPSocket
 					const int p = ntohs(addr->sa_family == AF_INET6 ?
 							((const sockaddr_in6*)addr)->sin6_port :
 							((const sockaddr_in*)addr)->sin_port);
-					std::cerr<<"connect: the server's box refused port "<<p<<
+					std::cerr<<"connect: the server's sandbox refused port "<<p<<
 							"; its admin allows it with --connect-ports"<<std::endl;
 				} else
 #endif

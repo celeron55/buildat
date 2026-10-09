@@ -691,7 +691,7 @@ struct Module: public interface::Module, public moderation::Host
 				"extensions: their authors sign each release with their own "
 				"key, and Aitta lists it. A release is unreviewed until this "
 				"server's reviewers mark it reviewed. An app "
-				"runs in the server's box, where it reaches only its own "
+				"runs in the server's sandbox, where it reaches only its own "
 				"saves.</p><p>To install one, open the Buildat client and "
 				"pick <b>Apps from Aitta</b>; it checks the signature before "
 				"it installs. A dedicated server's admin finds the commands "

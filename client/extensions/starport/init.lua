@@ -985,7 +985,7 @@ function M.offer_aittas()
 	offer_root = root
 	log:info("Offering " .. #new .. " Aitta(s)")
 	add_text(w, "Aittas are where people share apps: unreviewed, each " ..
-			"run in the server's box. Not added, an Aitta is not offered " ..
+			"run in the server's sandbox. Not added, an Aitta is not offered " ..
 			"again; the Starport settings can add it later.", DIM)
 	local last = nil
 	for i, x in ipairs(new) do
@@ -2720,7 +2720,7 @@ function M.playtest(offer, start)
 	end
 	ui.show_confirm_dialog("Playtest " .. id .. " from " .. offer.aitta ..
 			"? Not reviewed. It is installed apart, under your user " ..
-			"folder's review/, and runs in the server's box.", function()
+			"folder's review/, and runs in the server's sandbox.", function()
 		log:info("playtest: yes, " .. id)
 		local base = offer.aitta .. "/api/aitta/archive/" .. offer.sha256
 		local function failed(why)

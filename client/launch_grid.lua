@@ -81,7 +81,7 @@ local function menu_actions()
 			icon = "launch_menu/res/icon_network.png", resolved_icon = true,
 			description = "Install apps others made: " ..
 					(starport.safe.aitta_shown() and "reviewed or not" or
-					"reviewed ones") .. ", each in the server's box",
+					"reviewed ones") .. ", each in the server's sandbox",
 			-- "Discuss" on a release: its home Hearth, at the package's place
 			run = function() starport.safe.open_aitta(function(rel)
 				local home = hearth_target(rel.home_hearth,

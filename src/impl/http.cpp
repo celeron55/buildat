@@ -135,7 +135,7 @@ static void perform(CURL *c, const ss_ &url, const char *errbuf,
 		// The URL's own: curl's primary port is -1 with no connection made
 		interface::Url u;
 		port = interface::parse_url(url, &u) ? atol(u.port.c_str()) : 0;
-		log_w(MODULE, "%s: the server's box refused port %li; its admin "
+		log_w(MODULE, "%s: the server's sandbox refused port %li; its admin "
 				"allows it with --connect-ports or BUILDAT_CONNECT_PORTS",
 				cs(url), port);
 	}
