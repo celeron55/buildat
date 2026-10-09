@@ -442,7 +442,10 @@ static void self_check()
 			name.compare(name.size() - 4, 4, ".png") != 0 ||
 			name.find('/') != ss_::npos)
 		throw Exception("command_seq self_check screenshot_name "+name);
-	if(screenshot_name("/nonexistent") != name)
+	// A second can turn between the two calls (this runs at every parse; a
+	// driven playtest aborted on it): then a third agrees with the second
+	const ss_ again = screenshot_name("/nonexistent");
+	if(again != name && screenshot_name("/nonexistent") != again)
 		throw Exception("command_seq self_check screenshot_name twice");
 	if(cs[12].type != Type::Look || cs[12].yaw != 10.0 || cs[12].pitch != -20.0)
 		throw Exception("command_seq self_check look");
