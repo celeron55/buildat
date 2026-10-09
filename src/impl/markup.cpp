@@ -38,7 +38,19 @@ struct Out {
 	// Per open link or image: whether its <a> was written, so its close is
 	// written or not
 	sv_<bool> links;
+	// [HEARTH_ATTACHMENTS] Inside a drawn image: how deep, its source and
+	// the alt text gathered; spans in the alt text are left out
+	int img = 0;
+	ss_ img_src, alt;
 };
+
+// The Hearth's own file, "/f/<id>...": drawn, as loading it tells only
+// the Hearth who reads the page
+static bool own_image(const ss_ &src)
+{
+	return src.size() > 3 && src.compare(0, 3, "/f/") == 0 &&
+			isdigit((unsigned char)src[3]);
+}
 
 static void open_link(Out *o, const MD_ATTRIBUTE &href,
 		const MD_ATTRIBUTE &title)
@@ -135,6 +147,10 @@ static int leave_block(MD_BLOCKTYPE t, void *d, void *u)
 static int enter_span(MD_SPANTYPE t, void *d, void *u)
 {
 	Out *o = (Out*)u;
+	if(o->img > 0){
+		o->img += t == MD_SPAN_IMG;
+		return 0;
+	}
 	switch(t){
 	case MD_SPAN_EM: o->r += "<em>"; break;
 	case MD_SPAN_STRONG: o->r += "<strong>"; break;
@@ -143,11 +159,17 @@ static int enter_span(MD_SPANTYPE t, void *d, void *u)
 		open_link(o, a->href, a->title);
 		break;
 	}
-	// simplified: an image is a link to it, never loaded -- an image from
-	// anywhere tells its host who reads the page. The forum's own images
-	// are step 5 of the forum plan.
+	// An image from anywhere else is a link to it, never loaded: it would
+	// tell its host who reads the page
 	case MD_SPAN_IMG: {
 		MD_SPAN_IMG_DETAIL *i = (MD_SPAN_IMG_DETAIL*)d;
+		const ss_ src(i->src.text, i->src.size);
+		if(own_image(src)){
+			o->img = 1;
+			o->img_src = src;
+			o->alt.clear();
+			break;
+		}
 		open_link(o, i->src, i->title);
 		o->r += "[image: ";
 		break;
@@ -163,6 +185,16 @@ static int enter_span(MD_SPANTYPE t, void *d, void *u)
 static int leave_span(MD_SPANTYPE t, void *d, void *u)
 {
 	Out *o = (Out*)u;
+	if(o->img > 0){
+		if(t == MD_SPAN_IMG && --o->img == 0){
+			o->r += "<img src=\"";
+			escape(o->r, o->img_src.c_str(), o->img_src.size());
+			o->r += "\" alt=\"";
+			escape(o->r, o->alt.c_str(), o->alt.size());
+			o->r += "\" loading=\"lazy\">";
+		}
+		return 0;
+	}
 	switch(t){
 	case MD_SPAN_EM: o->r += "</em>"; break;
 	case MD_SPAN_STRONG: o->r += "</strong>"; break;
@@ -228,6 +260,10 @@ static void refs(Out *o, const char *s, size_t n)
 static int text(MD_TEXTTYPE t, const MD_CHAR *s, MD_SIZE n, void *u)
 {
 	Out *o = (Out*)u;
+	if(o->img > 0){
+		o->alt.append(s, n);
+		return 0;
+	}
 	switch(t){
 	case MD_TEXT_NULLCHAR: o->r += "\xEF\xBF\xBD"; break;
 	case MD_TEXT_BR: o->r += "<br>\n"; break;

@@ -3,7 +3,8 @@
 // any account's message is turned into for the HTML face. Beside the
 // sanitizers, an oracle of its own: the page gets only the tags and
 // attributes the renderer writes, and no href with a scheme past http,
-// https and mailto -- read here independently of markup.cpp's own check.
+// https and mailto, and no image but the Hearth's own /f/<id> -- read here
+// independently of markup.cpp's own check.
 #include "interface/markup.h"
 #include <cstring>
 #include <cctype>
@@ -13,9 +14,10 @@
 static const std::set<ss_> TAGS = {"p", "em", "strong", "a", "code", "del",
 	"span", "pre", "blockquote", "ul", "ol", "li", "hr", "h1", "h2", "h3",
 	"h4", "h5", "h6", "table", "thead", "tbody", "tr", "th", "td", "br",
-	"input"};
+	"input", "img"};
 static const std::set<ss_> ATTRS = {"href", "title", "rel", "class",
-	"tabindex", "start", "style", "type", "disabled", "checked"};
+	"tabindex", "start", "style", "type", "disabled", "checked", "src",
+	"alt", "loading"};
 
 // One pass, as a browser decodes an attribute: the five the renderer
 // writes, numeric references, and any other named one taken as ':' --
@@ -95,6 +97,12 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 				if(ve == ss_::npos || ve > close)
 					__builtin_trap();
 				if(name == "href" && !scheme_ok(out.substr(k + 2, ve - k - 2)))
+					__builtin_trap();
+				// An image is the Hearth's own file and nothing else
+				// ([HEARTH_ATTACHMENTS])
+				const ss_ v = unescape(out.substr(k + 2, ve - k - 2));
+				if(name == "src" && !(v.size() > 3 && v.compare(0, 3, "/f/") == 0 &&
+						isdigit((unsigned char)v[3])))
 					__builtin_trap();
 				k = ve + 1;
 			}
