@@ -898,6 +898,7 @@
 #ifdef __EMSCRIPTEN__
 				// Only where it does something
 				"web_idle_fps",
+				"web_address_bar",
 #endif
 				nullptr};
 		return names;
@@ -938,6 +939,14 @@
 			lua_pushinteger(L, o.graphics.max_fps);
 		else if(name == "web_idle_fps")
 			lua_pushinteger(L, o.graphics.web_idle_fps);
+#ifdef __EMSCRIPTEN__
+		// Unset is what the page makes of it: the bar hidden or shown
+		else if(name == "web_address_bar")
+			lua_pushstring(L, !o.graphics.web_address_bar.empty() ?
+					o.graphics.web_address_bar.c_str() :
+					EM_ASM_INT({ return Module['buildatHideBarByDefault'](); }) ?
+					"hide" : "show");
+#endif
 		else if(name == "multisampling")
 			lua_pushinteger(L, o.graphics.multisampling);
 		else if(name == "sound_volume_db")
@@ -1904,6 +1913,10 @@
 	static int l_set_web_fullscreen(lua_State *L)
 	{
 #ifdef __EMSCRIPTEN__
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		self->push_web_address_bar();
 		EM_ASM({
 			Module['buildatFullscreen'] = !!$0;
 			Module['buildatSyncFullscreen']();

@@ -119,6 +119,14 @@ buildat.set_ui_size(scale or "auto") -> ok, err
   (the short side over 1080); a scale is 0.5 to 3. It takes at once, and a
   set_ui_scale() of the app's own wins over it.
 
+buildat.get_web_address_bar() -> "hide" or "show", nil natively
+buildat.set_web_address_bar("hide" or "show") -> ok, err
+- A fourth, the web page's address bar while the app asks for fullscreen
+  (set_web_fullscreen(true)): from a pause menu. Unset, the page's default:
+  hidden on a small touchscreen (a coarse pointer, a screen's short side
+  under 600 CSS pixels), shown elsewhere. Entering fullscreen waits for a
+  tap or a click.
+
 buildat.take_screenshot() -> file name, or nil and why not
 - Into <user>/screenshots, named by the date and time. The caller says when
   and nothing else: no path, no reading back, no overwrite. The file lands at

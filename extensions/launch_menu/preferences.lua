@@ -118,6 +118,15 @@ local PREFERENCES = {
 			return percent(v)
 		end,
 	},
+	-- The web page's address bar while playing ([WEB_ADDRESS_BAR]); the
+	-- web client's only, and no row natively
+	{
+		name = "web_address_bar",
+		label = "Address bar while playing",
+		web = true,
+		values = {"hide", "show"},
+		show = function(v) return v == "hide" and "hidden" or "shown" end,
+	},
 	-- The two logs' levels ([LOG_LEVEL_PREF]): a box report without a
 	-- shell. The client's takes at once, the server's on its next start;
 	-- -l on the command line wins for that run. The logs are
@@ -271,7 +280,9 @@ function M.show()
 
 	for _, pref in ipairs(PREFERENCES) do
 		local value = api.get_preference(pref.name)
-		if value == nil then
+		if value == nil and pref.web then
+			-- Natively: not a preference here
+		elseif value == nil then
 			-- A build whose preferences this one does not have: leave the
 			-- row out rather than showing a control that does nothing
 			log:warning("No preference by the name "..pref.name)

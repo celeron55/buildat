@@ -63,6 +63,10 @@ namespace app
 		// The web client's frame rate while the page is unfocused, hidden or
 		// left without input ([WEB_IDLE_FPS]): 1, 5, 10, 30 or 60
 		int web_idle_fps = 5;
+		// The web page's address bar while a game asks for fullscreen
+		// ([WEB_ADDRESS_BAR]): "hide" or "show"; empty is the device's
+		// default, hidden on a small touchscreen, which the page decides
+		ss_ web_address_bar;
 		// Set by -w: the size came from the command line, so it is not
 		// remembered across runs and the saved size is left alone
 		bool size_forced = false;

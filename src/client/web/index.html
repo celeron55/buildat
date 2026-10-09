@@ -120,18 +120,33 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	// buildat.set_web_fullscreen() (the floorplanner: whenever its menu is
 	// not up, which then brings the bar back). Entering takes a tap, so
 	// each tap asks; leaving is at once.
+	// **The address bar is a preference** ([WEB_ADDRESS_BAR]):
+	// buildatAddressBar is "hide", "show", or empty for the default --
+	// hidden on a small touchscreen (a coarse pointer, a short side under
+	// 600 CSS pixels), shown on a desktop
 	var coarse = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+	function hide_by_default(){
+		return coarse && Math.min(screen.width, screen.height) < 600;
+	}
 	function sync_fullscreen(){
-		var want = coarse && Module.buildatFullscreen;
+		var pref = Module.buildatAddressBar;
+		var want = Module.buildatFullscreen &&
+				(pref ? pref === 'hide' : hide_by_default());
 		var el = document.documentElement;
 		try {
 			if(want && !document.fullscreenElement && el.requestFullscreen)
 				el.requestFullscreen().catch(function(){});
-			else if(!want && document.fullscreenElement && document.exitFullscreen)
+			// Only the page's own: the client's fullscreen setting is the
+			// same API, on the canvas
+			else if(!want && document.fullscreenElement === el &&
+					document.exitFullscreen)
 				document.exitFullscreen().catch(function(){});
 		} catch(e){}
 	}
+	// Entering takes a gesture: a tap, or a click where "hide" was chosen
+	// on a desktop
 	document.addEventListener('touchend', sync_fullscreen, true);
+	document.addEventListener('mouseup', sync_fullscreen, true);
 	// **The browser's Back is the client's** ([TAP_BACK]): one entry of
 	// this page's own sits on the history, and Back onto the page's first
 	// one is Escape on the client's top screen (app.cpp reads buildatBack)
@@ -202,6 +217,7 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 						'ws://') + location.host + '/luanti';
 		}],
 		buildatSyncFullscreen: sync_fullscreen,
+		buildatHideBarByDefault: function(){ return hide_by_default() ? 1 : 0; },
 		buildatInputAt: Date.now(),
 		print: function(t){ console.log(t); },
 		printErr: function(t){ console.warn(t); },

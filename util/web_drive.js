@@ -199,8 +199,19 @@ async function chrome() {
 	await c.send("Runtime.enable");
 	await c.send("Log.enable");
 	await c.send("Page.enable");
-	await c.send("Emulation.setDeviceMetricsOverride", {width: 1200,
-			height: 800, deviceScaleFactor: 1, mobile: false});
+	// WEB_DRIVE_VIEWPORT as for Firefox, the screen that size too; TOUCH=1
+	// a phone's: touch events and (pointer: coarse)
+	const vp = (process.env.WEB_DRIVE_VIEWPORT || "1200x800")
+			.match(/^(\d+)x(\d+)(?:@([\d.]+))?$/);
+	if (!vp)
+		throw new Error("WEB_DRIVE_VIEWPORT is WxH or WxH@dpr");
+	const touch = process.env.TOUCH === "1";
+	await c.send("Emulation.setDeviceMetricsOverride", {width: +vp[1],
+			height: +vp[2], deviceScaleFactor: +(vp[3] || 1), mobile: touch,
+			screenWidth: +vp[1], screenHeight: +vp[2]});
+	if (touch)
+		await c.send("Emulation.setTouchEmulationEnabled", {enabled: true,
+				maxTouchPoints: 5});
 	const key = async (k, mods = 0) => {
 		const [, code, vk] = KEYS[k] || [k, "Key" + k.toUpperCase(),
 				k.toUpperCase().charCodeAt(0)];

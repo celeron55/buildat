@@ -1728,6 +1728,20 @@ buildat.safe.set_sound = function(mute, db)
 	end
 	return __buildat_set_preference("sound_volume_db", tostring(db))
 end
+-- **The web page's address bar, a third** ([WEB_ADDRESS_BAR]): a game's
+-- pause menu switches it. get_web_address_bar() -> "hide" or "show", nil
+-- natively; set_web_address_bar("hide" or "show") -> true, or false and
+-- why. It shows while the game does not ask for fullscreen
+-- (set_web_fullscreen) whatever it is.
+buildat.safe.get_web_address_bar = function()
+	return __buildat_get_preference("web_address_bar")
+end
+buildat.safe.set_web_address_bar = function(v)
+	if v ~= "hide" and v ~= "show" then
+		return false, "set_web_address_bar: hide or show"
+	end
+	return __buildat_set_preference("web_address_bar", v)
+end
 -- **The render scale, the other preference a game may set** (user,
 -- 2026-09-30): the web client has no launcher to reach Engine settings
 -- through, so a game's own settings carry it. What the game gets to set

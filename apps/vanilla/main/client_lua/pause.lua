@@ -123,11 +123,23 @@ local pending = nil
 local function later(fn)
 	pending = fn
 end
+-- **The address bar away while playing** ([WEB_ADDRESS_BAR]): on the web,
+-- fullscreen asked for whenever nothing of this menu holds the world, and
+-- the bar back while it does; the page does it only where the
+-- preference says hide (by default on a phone), and entering waits for
+-- a tap
+local WEB = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
+local fullscreen = nil
 magic.SubscribeToEvent("Update", function()
 	if pending then
 		local fn = pending
 		pending = nil
 		fn()
+	end
+	local want = not luanti.held()
+	if WEB and want ~= fullscreen then
+		fullscreen = want
+		buildat.set_web_fullscreen(want)
 	end
 end)
 
@@ -204,6 +216,15 @@ open = function()
 	ui_utils.dropdown(w, scales, scale, function(v)
 		buildat.set_render_scale(v)
 	end, {label = "Render scale", fill = true})
+	-- The preference, which takes effect as the menu closes
+	if WEB and buildat.get_web_address_bar then
+		local hide = buildat.get_web_address_bar() == "hide"
+		accounts.page_button(w, hide and "Show the address bar" or
+				"Hide the address bar", function()
+			buildat.set_web_address_bar(hide and "show" or "hide")
+			open()
+		end)
+	end
 	-- **The viewing range, the player's own** (user, 2026-09-30), kept on
 	-- this client for this server, never over what the server allows
 	-- (keys.view in init.lua). A web client starts lower, and a fast one

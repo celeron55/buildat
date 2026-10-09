@@ -3371,6 +3371,10 @@ local held, held_window, held_keep = nil, nil, false
 function M.hold(close, window, keep_on_escape)
 	held, held_window, held_keep = close, window, keep_on_escape or false
 end
+-- held() -> whether a game's window holds the world now
+function M.held()
+	return held ~= nil
+end
 
 -- form_open() -> whether a form is on the screen, so that whoever else is
 -- reading the mouse leaves it alone while one is
