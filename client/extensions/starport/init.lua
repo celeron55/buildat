@@ -1152,6 +1152,33 @@ function M.safe.has_id()
 	return next(load_state().ids or {}) ~= nil
 end
 
+-- **Where the ID signed in last** ([ID_AUTO_JOIN]): a server's canonical
+-- address, marked when id_token_here gave a token for it, so the next join
+-- there signs in with the ID again (builtin/accounts asks). Here on the
+-- trusted side and not in the server's own storage, which its code writes:
+-- a server cannot mark itself. id_used_here() is one bit for the server the
+-- client is on; forget_id_here() drops the mark (a password login there,
+-- Log out). A token is asked for each time, never kept for this.
+-- simplified: not on the web, where the Starport's window is a popup a
+-- browser lets open only from a press; the dialog's button stays the way
+local function here_address()
+	local a = __buildat_server_address()
+	return a and canonical(a)
+end
+function M.safe.id_used_here()
+	local a = here_address()
+	return a ~= nil and __buildat_get_env("BUILDAT_PAGE_HTTPS") == nil and
+			(load_state().id_used or {})[a] == true
+end
+function M.safe.forget_id_here()
+	local a, s = here_address(), load_state()
+	if a and s.id_used and s.id_used[a] then
+		s.id_used[a] = nil
+		save_state()
+		log:info("starport: the ID is not used on " .. a .. " any more")
+	end
+end
+
 -- A package's home Hearth when its manifest names none: the Hearth of the
 -- Starport recommending the Aitta it is from, or with no Aitta given,
 -- the first Starport in the settings that recommends one.
@@ -2090,12 +2117,22 @@ end
 -- rename_reason, a new one is asked first, the reason shown (the server
 -- has an account of its own by the name the ID had there)
 function M.safe.id_token_here(cb, rename_reason)
-	local address = __buildat_server_address()
-	if address then
-		address = canonical(address)
-	end
+	local address = here_address()
 	if not address then
 		return cb(nil, "not connected")
+	end
+	-- A token given marks the server ([ID_AUTO_JOIN])
+	local given = cb
+	cb = function(token, why)
+		if token then
+			local s = load_state()
+			s.id_used = type(s.id_used) == "table" and s.id_used or {}
+			if not s.id_used[address] then
+				s.id_used[address] = true
+				save_state()
+			end
+		end
+		return given(token, why)
 	end
 	local function with_row(row)
 		local s = load_state()

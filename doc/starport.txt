@@ -15,7 +15,10 @@ run their own. The official one is https://starport.buildat.org.
   listed again under a new id and claim code.
 - A server accepts Starport IDs only if its admin turns them on; local
   accounts work without one. A player uses an ID only by choosing "Sign in
-  with your Starport ID".
+  with your Starport ID". After that the client signs in with the ID by
+  itself on the next joins to that server, a new token each time, until the
+  player logs out there or logs in with a password. The client keeps that
+  mark itself, out of the server's reach (not on the web client).
 - Each community sees a different identifier for the same ID, and a
   display name the player picks for that community.
 - The client asks before it contacts a host, a Starport included. Its

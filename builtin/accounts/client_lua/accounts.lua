@@ -166,6 +166,14 @@ local token_tried = false
 -- The last login sent, for the TOTP code it may turn out to need
 local last_login = nil
 
+-- [ID_AUTO_JOIN]: the next join here asks, not the Starport ID
+local function forget_id_here()
+	local ok, starport = pcall(require, "buildat/extension/starport")
+	if ok and starport.forget_id_here then
+		starport.forget_id_here()
+	end
+end
+
 local function send_login(name, password, code, token, keep, totp, starport,
 		create)
 	last_login = {name, password, code, token, keep, starport, create}
@@ -554,11 +562,14 @@ buildat.sub_packet("accounts:hello", function(data)
 		send_login(M.name, "", "", token)
 	elseif M.hello.starport == 1 and M.hello["local"] ~= 1 and
 			not M.id_join_tried then
-		-- Joined by the client's own "Discuss": the Starport ID first,
-		-- the dialog only when that does not give a token
+		-- Joined by the client's own "Discuss", or the ID signed in here
+		-- last time ([ID_AUTO_JOIN]): the Starport ID first, the dialog
+		-- only when that does not give a token
 		M.id_join_tried = true
 		local ok, starport = pcall(require, "buildat/extension/starport")
-		if not (ok and starport.take_id_join and starport.take_id_join()) then
+		local discuss = ok and starport.take_id_join and starport.take_id_join()
+		local used = ok and starport.id_used_here and starport.id_used_here()
+		if not (discuss or used) then
 			return show_login(nil)
 		end
 		log:info("Signing in with the Starport ID")
@@ -624,6 +635,11 @@ buildat.sub_packet("accounts:login_result", function(data)
 	M.close()
 	magic.ui:SetFocusElement(nil)
 	log:info("Joined as " .. tostring(M.name))
+	-- A login that was not an ID's: the next join asks, not the ID
+	-- ([ID_AUTO_JOIN])
+	if last_login and (last_login[6] or "") == "" then
+		forget_id_here()
+	end
 	-- A scripted admin's requests, a line each, "cmd name [arg]" -- what a
 	-- check does as an admin (<env>_ADMIN; the server checks the admin);
 	-- "setting open_registration on" turns a setting on
@@ -737,6 +753,7 @@ end
 -- server, back to the launcher if it came from one: the next join asks
 -- again
 function M.logout()
+	forget_id_here()
 	local token = buildat.storage_read("token") or ""
 	if token ~= "" then
 		buildat.send_packet("accounts:logout",

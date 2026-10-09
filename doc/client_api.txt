@@ -1076,7 +1076,13 @@ direct_connect_allowed() -> bool, whether a typed address may be joined
 id_token_here(cb [, rename_reason]) -> cb(token) or cb(nil, why)
 - A token for the server this client is on, from the Starport ID of a
   Starport that lists it; the name used there is asked in the client's own
-  dialog.
+  dialog. A token given marks the server ([ID_AUTO_JOIN]).
+id_used_here() -> bool
+- Whether this client got an ID's token for the server it is on, and the
+  mark is still there: accounts then signs in with the ID by itself.
+  Always false on the web client.
+forget_id_here()
+- Drops that mark: a logout, or a login that was not an ID's.
 open_settings([on_closed]), open_report(address), open_report_here()
 open_aitta(), aitta_shown() -> bool
 - The Aitta browser ([AITTA_MVP], doc/aitta.txt), and whether the filters
