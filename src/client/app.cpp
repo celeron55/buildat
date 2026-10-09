@@ -2436,6 +2436,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(set_preference)
 		DEF_BUILDAT_FUNC(list_preferences)
 		DEF_BUILDAT_FUNC(launch_ui_fell_back)
+		DEF_BUILDAT_FUNC(crash_dump_untold)
 		DEF_BUILDAT_FUNC(get_env)
 		DEF_BUILDAT_FUNC(is_scripted)
 		DEF_BUILDAT_FUNC(press_back)

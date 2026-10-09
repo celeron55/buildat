@@ -941,6 +941,28 @@
 		return 1;
 	}
 
+	// crash_dump_untold() -> the path of a crash's minidump in the cache
+	// that no start has told about yet, or nil ([WIN_MINIDUMP]; Windows
+	// writes them, the local server's too). Told once: the first call
+	// marks it.
+	static int l_crash_dump_untold(lua_State *L)
+	{
+		static bool asked = false;
+		static ss_ path;
+		if(!asked){
+			asked = true;
+			path = interface::debug::crash_dump_untold(
+					g_client_config.get<ss_>("cache_path"));
+			if(!path.empty())
+				log_w(MODULE, "A crash left a minidump: %s", cs(path));
+		}
+		if(path.empty())
+			lua_pushnil(L);
+		else
+			lua_pushstring(L, path.c_str());
+		return 1;
+	}
+
 	// get_preference(name) -> number, boolean or string, or nil for a name there is
 	// no preference by
 	static int l_get_preference(lua_State *L)

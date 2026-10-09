@@ -6,6 +6,9 @@
 #include <dbghelp.h>
 #include <cstring>
 #include <cstdint>
+#include <cstdio>
+#include <algorithm>
+#include <vector>
 #define MODULE "debug"
 
 namespace interface {
@@ -200,6 +203,114 @@ static DWORD WINAPI watchdog_main(LPVOID)
 	return 0;
 }
 
+// [WIN_MINIDUMP]: where a crash writes its dump, set once the cache is
+// known; static so that the handler allocates nothing to find it
+static char g_dump_dir[MAX_PATH * 3] = "";
+static char g_dump_exe[64] = "";
+static const int KEPT_DUMPS = 5;
+
+typedef BOOL (WINAPI *MiniDumpWriteDump_t)(HANDLE, DWORD, HANDLE,
+		MINIDUMP_TYPE, PMINIDUMP_EXCEPTION_INFORMATION,
+		PMINIDUMP_USER_STREAM_INFORMATION, PMINIDUMP_CALLBACK_INFORMATION);
+
+// The crash-*.dmp in dir, oldest first
+static std::vector<ss_> dumps_in(const ss_ &dir)
+{
+	std::vector<std::pair<uint64_t, ss_>> found;
+	WIN32_FIND_DATAA fd;
+	HANDLE h = FindFirstFileA((dir+"/crash-*.dmp").c_str(), &fd);
+	if(h != INVALID_HANDLE_VALUE){
+		do {
+			found.push_back({((uint64_t)fd.ftLastWriteTime.dwHighDateTime << 32) |
+					fd.ftLastWriteTime.dwLowDateTime, fd.cFileName});
+		} while(FindNextFileA(h, &fd));
+		FindClose(h);
+	}
+	std::sort(found.begin(), found.end());
+	std::vector<ss_> names;
+	for(auto &f : found)
+		names.push_back(f.second);
+	return names;
+}
+
+static void write_dump(EXCEPTION_POINTERS *e)
+{
+	if(!g_dump_dir[0])
+		return;
+	HMODULE dbghelp = LoadLibraryA("dbghelp.dll");
+	MiniDumpWriteDump_t dump_fn = dbghelp ? (MiniDumpWriteDump_t)
+			GetProcAddress(dbghelp, "MiniDumpWriteDump") : NULL;
+	if(!dump_fn){
+		log_e(MODULE, "  (no MiniDumpWriteDump; no dump)");
+		return;
+	}
+	SYSTEMTIME t;
+	GetLocalTime(&t);
+	char path[sizeof g_dump_dir + 128];
+	snprintf(path, sizeof path, "%s/crash-%s-%04d%02d%02d-%02d%02d%02d.dmp",
+			g_dump_dir, g_dump_exe, t.wYear, t.wMonth, t.wDay, t.wHour,
+			t.wMinute, t.wSecond);
+	HANDLE f = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+			FILE_ATTRIBUTE_NORMAL, NULL);
+	if(f == INVALID_HANDLE_VALUE){
+		log_e(MODULE, "  cannot write a dump at %s (error %lu)", path,
+				(unsigned long)GetLastError());
+		return;
+	}
+	MINIDUMP_EXCEPTION_INFORMATION info;
+	info.ThreadId = GetCurrentThreadId();
+	info.ExceptionPointers = e;
+	info.ClientPointers = FALSE;
+	// The threads' stacks and the modules: what a backtrace is read from
+	const BOOL ok = dump_fn(GetCurrentProcess(), GetCurrentProcessId(), f,
+			(MINIDUMP_TYPE)(MiniDumpNormal | MiniDumpWithThreadInfo), &info,
+			NULL, NULL);
+	const DWORD err = GetLastError();
+	CloseHandle(f);
+	if(!ok){
+		DeleteFileA(path);
+		log_e(MODULE, "  writing the dump failed (error %lu)",
+				(unsigned long)err);
+		return;
+	}
+	log_e(MODULE, "  a minidump to attach to a report: %s", path);
+	std::vector<ss_> dumps = dumps_in(g_dump_dir);
+	for(size_t i = 0; i + KEPT_DUMPS < dumps.size(); i++)
+		DeleteFileA((ss_(g_dump_dir)+"/"+dumps[i]).c_str());
+}
+
+void set_crash_dump_dir(const ss_ &dir, const ss_ &exe)
+{
+	snprintf(g_dump_dir, sizeof g_dump_dir, "%s", dir.c_str());
+	snprintf(g_dump_exe, sizeof g_dump_exe, "%s", exe.c_str());
+	const char *crash = getenv("BUILDAT_DEBUG_CRASH");
+	if(crash && exe == crash){
+		log_w(MODULE, "BUILDAT_DEBUG_CRASH=%s: crashing on purpose", crash);
+		*(volatile int*)nullptr = 0;
+	}
+}
+
+ss_ crash_dump_untold(const ss_ &dir)
+{
+	std::vector<ss_> dumps = dumps_in(dir);
+	if(dumps.empty())
+		return "";
+	const ss_ told_path = dir+"/crash_told.txt";
+	char told[MAX_PATH] = "";
+	if(FILE *f = fopen(told_path.c_str(), "r")){
+		if(!fgets(told, sizeof told, f))
+			told[0] = 0;
+		fclose(f);
+	}
+	if(dumps.back() == told)
+		return "";
+	if(FILE *f = fopen(told_path.c_str(), "w")){
+		fputs(dumps.back().c_str(), f);
+		fclose(f);
+	}
+	return dir+"/"+dumps.back();
+}
+
 static LONG WINAPI unhandled_exception(EXCEPTION_POINTERS *e)
 {
 	static volatile LONG active = 0;
@@ -217,6 +328,7 @@ static LONG WINAPI unhandled_exception(EXCEPTION_POINTERS *e)
 				r->ExceptionInformation[0] == 0 ? "reading" :
 				r->ExceptionInformation[0] == 1 ? "writing" : "executing",
 				(void*)(uintptr_t)r->ExceptionInformation[1]);
+	write_dump(e);
 	log_stack(e->ContextRecord);
 	log_close();
 	ExitProcess(1);

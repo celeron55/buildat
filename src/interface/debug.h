@@ -44,6 +44,15 @@ namespace interface
 		// handler, so it may do only what a handler may
 		void watchdog_on_freeze(void (*f)());
 
+		// **A crash's minidump** ([WIN_MINIDUMP], Windows; nothing
+		// elsewhere): from this call on, a crash also writes
+		// <dir>/crash-<exe>-<time>.dmp and keeps the newest five there.
+		// A forced crash, for the test, is BUILDAT_DEBUG_CRASH=<exe>.
+		void set_crash_dump_dir(const ss_ &dir, const ss_ &exe);
+		// The newest dump in dir not told about yet, which is then told
+		// about (a file beside them remembers it); "" if none
+		ss_ crash_dump_untold(const ss_ &dir);
+
 		struct SigConfig {
 			bool catch_segfault = true;
 			bool catch_abort = true;

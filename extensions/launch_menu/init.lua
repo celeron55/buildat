@@ -1104,6 +1104,13 @@ function M.boot(launch_action)
 				"\" did not load, so this is the menu.\n\n" ..
 				"The log has the error.")
 	end
+	-- [WIN_MINIDUMP]: the last crash's dump, once
+	local dump = api.crash_dump_untold and api.crash_dump_untold()
+	if dump then
+		ui_utils.show_message_dialog("Buildat crashed last time and left " ..
+				"a crash dump:\n\n" .. dump .. "\n\nTo report it, attach " ..
+				"that file and the log beside it.")
+	end
 	if launch_action then
 		launch_action = launch_action:gsub("^game/", "app/")
 		for _, e in ipairs(entries) do

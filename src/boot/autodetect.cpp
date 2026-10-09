@@ -8,6 +8,7 @@
 #include "interface/fs.h"
 #include "interface/process.h"
 #include "interface/mutex.h"
+#include "interface/debug.h"
 #include <fstream>
 #include <cstdlib> // getenv(), setenv()
 #define MODULE "boot"
@@ -644,6 +645,8 @@ ss_ open_log(core::Config &config, const ss_ &name, const ss_ &exe)
 	// server then defaults on its own
 	config.set("log_file", given ? path : ss_());
 	config.set("log_path", path);
+	// A crash's minidump into the cache ([WIN_MINIDUMP])
+	interface::debug::set_crash_dump_dir(config.get<ss_>("cache_path"), name);
 	log_i(MODULE, "%s: exe %s, root %s, cwd %s, log %s", cs(name), cs(exe),
 			cs(config.get<ss_>("root_path")), cs(cwd),
 			path.empty() ? "none" : cs(path));

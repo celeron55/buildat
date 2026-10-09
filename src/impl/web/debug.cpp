@@ -25,6 +25,9 @@ void watchdog_alive(int stall_seconds){}
 void watchdog_on_freeze(void (*f)()){}
 void init_signal_handlers(const SigConfig &config){}
 
+void set_crash_dump_dir(const ss_ &dir, const ss_ &exe){}
+ss_ crash_dump_untold(const ss_ &dir){ return ""; }
+
 }
 }
 // vim: set noet ts=4 sw=4:

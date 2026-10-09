@@ -530,6 +530,9 @@ void init_signal_handlers(const SigConfig &config)
 		sigaction(SIGABRT, &sa, NULL);
 }
 
+void set_crash_dump_dir(const ss_ &dir, const ss_ &exe){}
+ss_ crash_dump_untold(const ss_ &dir){ return ""; }
+
 }
 }
 // vim: set noet ts=4 sw=4:

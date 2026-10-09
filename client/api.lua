@@ -1137,6 +1137,15 @@ buildat.safe.quit = function()
 	__buildat_disconnect()
 end
 buildat.safe.launch_ui_fell_back = __buildat_launch_ui_fell_back
+-- The path names the user's own directories: the launcher's to show,
+-- not a server's chunk's to read ([WIN_MINIDUMP])
+buildat.safe.crash_dump_untold = function()
+	local info = debug.getinfo(2, "S")
+	if info and __buildat_served_chunks[info.source] then
+		return nil
+	end
+	return __buildat_crash_dump_untold()
+end
 
 -- **Whose screen it is now**: the launch UI the client last booted or
 -- was set to. A launch UI that is still running under another one --

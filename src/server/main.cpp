@@ -320,6 +320,9 @@ int main(int argc, char *argv[])
 			at = nl + 1;
 		}
 		server::boxed_step("main: the parent's paths taken");
+		// Its own name, so that a forced crash can pick the box
+		interface::debug::set_crash_dump_dir(config.get<ss_>("cache_path"),
+				"buildat_server_boxed");
 	} else {
 		if(!boot::autodetect::detect_server_paths(config))
 			return 1;
