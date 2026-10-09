@@ -1010,6 +1010,16 @@ struct Module: public interface::Module
 				log_i(MODULE, "Hearth: deleted message %lld purged",
 						(long long)p.i(0));
 			}
+			// [SECURITY_RUN_4] An upload no message names a day on goes,
+			// under the budget too: a new account's never-posted uploads
+			// filled the disk at 170 MB an hour. simplified: a draft's
+			// image is lost after a day; keep drafts' files to lift that
+			Q n(m_db, "DELETE FROM files WHERE created < ? AND NOT EXISTS "
+					"(SELECT 1 FROM file_links WHERE file = files.id)");
+			n.b(now_s() - 86400).step();
+			if(sqlite3_changes(m_db) > 0)
+				log_i(MODULE, "Hearth: %d files no message names deleted",
+						sqlite3_changes(m_db));
 			const json::Value s = file_settings();
 			const int64_t now = now_s(), budget = jint(s, "budget");
 			const int64_t gone = now - jint(s, "delete_after");
@@ -1938,19 +1948,23 @@ struct Module: public interface::Module
 	// round one stays, opening it being the reader's own choice
 	static ss_ unshown_images(ss_ h, const json::Value &files)
 	{
-		for(unsigned i = 0; i < files.size(); i++){
-			const json::Value &f = files.at(i);
-			if(f.get("shown").is_true())
+		// Every <img> of /f/, its id read as file_ids() reads it, so that
+		// "/f/0<id>", "/f/<id>?" and "/f/<id>#" are the same file
+		std::set<int64_t> unshown;
+		for(unsigned i = 0; i < files.size(); i++)
+			if(!files.at(i).get("shown").is_true())
+				unshown.insert(jint(files.at(i), "id"));
+		static const ss_ start = "<img src=\"/f/";
+		for(size_t at = 0; (at = h.find(start, at)) != ss_::npos;){
+			const std::vector<int64_t> ids = file_ids(h.substr(at + 9, 24));
+			const size_t e = h.find('>', at);
+			if(ids.empty() || !unshown.count(ids[0]) || e == ss_::npos){
+				at += start.size();
 				continue;
-			const ss_ id = itos(jint(f, "id"));
-			for(const ss_ &start : {"<img src=\"/f/"+id+"/",
-					"<img src=\"/f/"+id+"\""}){
-				for(size_t at; (at = h.find(start)) != ss_::npos;){
-					const size_t e = h.find('>', at);
-					h.replace(at, e - at + 1, "<span class=\"meta\">("+
-							ss_(NOT_SHOWN)+")</span>");
-				}
 			}
+			const ss_ note = "<span class=\"meta\">("+ss_(NOT_SHOWN)+")</span>";
+			h.replace(at, e - at + 1, note);
+			at += note.size();
 		}
 		return h;
 	}
@@ -2714,6 +2728,8 @@ struct Module: public interface::Module
 	// and the search index
 	void set_hidden(int64_t message_id, int hidden, const ss_ &reason)
 	{
+		// /api/discussed's pick may be this message ([SECURITY_RUN_4])
+		m_discussed_at = -1;
 		Q m(m_db, "SELECT m.thread, m.body, t.title, (SELECT min(id) FROM "
 				"messages WHERE thread = m.thread) FROM messages m JOIN threads t "
 				"ON t.id = m.thread WHERE m.id = ?");
@@ -2752,7 +2768,7 @@ struct Module: public interface::Module
 		set_hidden(message_id, DELETED, statement);
 		Q u(m_db, "UPDATE reports SET state = 'upheld', handled_by = ?, "
 				"handled_time = ?, statement = ?, bin = '' WHERE state = 'open' "
-				"AND kind = 'report' AND message = ?");
+				"AND kind IN ('report', 'held') AND message = ?");
 		u.b(by).b(now_s()).b(statement).b(message_id).step();
 		Q i(m_db, "INSERT INTO reports(kind, message, by, reason, time, state, "
 				"handled_by, handled_time, statement) VALUES('delete', ?, ?, ?, "
@@ -3203,6 +3219,15 @@ struct Module: public interface::Module
 			c.b(name).b(now_s() - 3600).step();
 			if(lv < LV_MODERATOR && c.i(0) >= UPLOADS_AN_HOUR)
 				throw Exception(itos(UPLOADS_AN_HOUR)+" files an hour at most");
+			// [SECURITY_RUN_4] What an account has uploaded and no message
+			// names, held a day by sweep_files(): 64 MiB of it at most
+			Q u(m_db, "SELECT coalesce(sum(length(data)), 0) FROM files f "
+					"WHERE uploader = ? AND NOT EXISTS (SELECT 1 FROM "
+					"file_links WHERE file = f.id)");
+			u.b(name).step();
+			if(lv < LV_MODERATOR && u.i(0) >= (64 << 20))
+				throw Exception("64 MiB of files not in a message yet at most; "
+						"post them or wait a day");
 			need(text_ok(file_name, NAME_MAX, false, "the file's name"));
 			if(data.empty())
 				throw Exception("the file is empty");
