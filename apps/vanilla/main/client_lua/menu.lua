@@ -41,8 +41,12 @@ local page = 1
 -- not have to ask the server again
 local last_saves, last_save_games = {}, {}
 -- What is out there to import, as main:imports last said: each entry is
--- {id or name, title or gameid, "installed" or ""}
+-- {id or name, title or gameid, "installed" or "", size, the root it is in}
 local import_games, import_worlds = {}, {}
+-- The import screens' own ([LUANTI_IMPORT_FOLDER]): the worlds left out
+-- for having no gameid, the row selected, and whether the folder was
+-- opened (Look again shows then)
+local imp = {skipped = 0, selected = nil, opened = false}
 -- Which of the two import lists the next main:imports is for, and which page
 -- of it is on the screen
 local want_imports = nil
@@ -75,7 +79,6 @@ buildat.sub_packet("main:menu", function(data)
 		launched_for = data
 	end
 end)
-local import_page = 1
 
 -- **A width that fits the screen** (user, 2026-09-30: a phone): what the
 -- menu asks for, or the screen's width less a margin; a narrow screen
@@ -420,13 +423,13 @@ function draw(saves, save_games)
 		draw_new_game()
 	end)
 
-	-- What a real Luanti installation has, which is where a game and a world
-	-- come from until somebody has put one here by hand
+	-- What the import folder has ([LUANTI_IMPORT_FOLDER]), which is where a
+	-- game and a world come from until somebody has put one here by hand
 	local function ask_for_imports(which)
 		want_imports = which
-		import_page = 1
+		imp.selected = nil
 		import_filter = ""
-		waiting("Looking in your Luanti installation...")
+		waiting("Looking in the import folder...")
 		buildat.send_packet("main:get_imports", "")
 	end
 	if public then
@@ -616,10 +619,10 @@ local function back_to_saves(menu, screen)
 	magic.input:SetMouseVisible(true, "a menu screen")
 end
 
--- The launcher's settings ([LAUNCH_GRID]): the import search paths, a list
--- to add to and remove from, kept by the server in user/shared/vanilla/settings.json
--- and sent whole each way. The defaults (~/.luanti, ~/.minetest and the
--- variable) are the server's and not in the list.
+-- The launcher's settings ([LAUNCH_GRID]), kept by the server in
+-- user/shared/vanilla/settings.json and sent whole each way as a list of
+-- "key=value" rows. The import search paths that were here went with the
+-- import folder ([LUANTI_IMPORT_FOLDER]).
 function draw_settings(paths)
 	local menu = import_menu("Luanti settings")
 	-- The render mode rides in the list as "render_mode=<mode>", and goes
@@ -726,41 +729,6 @@ function draw_settings(paths)
 		for _, p in ipairs(paths) do
 			list[#list + 1] = p
 		end
-		send(list)
-	end)
-	local text = menu.window:CreateChild("Text")
-	text:SetStyleAuto()
-	text:SetText("Import search paths, besides ~/.luanti and ~/.minetest:")
-	for i, path in ipairs(paths) do
-		menu:add("remove  " .. path, function()
-			local list = {}
-			for j, p in ipairs(paths) do
-				if j ~= i then
-					list[#list + 1] = p
-				end
-			end
-			send(list)
-		end)
-	end
-	local edit = menu.window:CreateChild("LineEdit")
-	edit:SetStyleAuto()
-	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
-	edit.textCopyable = true
-	edit.textSelectable = true
-	edit.minHeight = 26
-	edit.enabled = true
-	edit:SetText("")
-	menu:add("Add the path above", function()
-		local path = edit:GetText()
-		path = path:gsub("^%s+", ""):gsub("%s+$", "")
-		if path == "" then
-			return
-		end
-		local list = {}
-		for _, p in ipairs(paths) do
-			list[#list + 1] = p
-		end
-		list[#list + 1] = path
 		send(list)
 	end)
 	back_to_saves(menu, "settings")
@@ -1055,124 +1023,215 @@ function draw_new_game()
 	back_to_saves(menu)
 end
 
-function draw_import_games()
-	local menu = import_menu("Which game? (copied into buildat's own games)")
+-- **The two import screens** ([LUANTI_IMPORT_FOLDER]), as Browse: the
+-- import folder's line and buttons, the list with its filter on the left,
+-- the selected one's panel on the right (under it on a narrow screen). A
+-- row's click selects it, a second imports. The server reads only the
+-- import folder, <user>/shared/vanilla/import, which the box grants.
+local function draw_imports(which)
+	local worlds = which == "worlds"
+	close()
+	root = uistack.main:push({desc = "vanilla menu: import " .. which})
+	root.priority = 100
+	local menu = ui_utils.vertical_menu(root, {min_width = fit(420)})
+	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	local function back()
+		if launched_for == (worlds and "import_world" or "import_game") then
+			buildat.leave()
+		else
+			draw(last_saves, last_save_games)
+		end
+	end
+	menu:on_key(function(key)
+		if key == magic.KEY_ESCAPE and magic.input:GetKeyPress(key) then
+			back()
+			return true
+		end
+	end)
+	ui_utils.close_glyph(root, menu.window, back)
+	local function text(parent, t, dim, width)
+		local l = parent:CreateChild("Text")
+		l:SetStyleAuto()
+		l:SetText(t)
+		if dim then l.color = magic.Color(rgb("dim")) end
+		if width then
+			l:SetWordwrap(true)
+			l:SetFixedWidth(width)
+		end
+		return l
+	end
+	local title = text(menu.window, worlds and "Import a Luanti world" or
+			"Import a Luanti game")
+	title:SetFontSize(20)
+	local wide = narrow() and fit(520) or fit(520) + 16 + fit(420)
+	text(menu.window, "Copy a game's or a world's folder (or your whole " ..
+			".minetest / .luanti folder) into the import folder.", true, wide)
+	if buildat.open_import_folder then
+		local row = menu.window:CreateChild("UIElement")
+		row:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(0, 0, 0, 0))
+		button_on(menu, row, "Open the import folder", function()
+			local ok, why = buildat.open_import_folder()
+			if ok then
+				imp.opened = true
+				draw_imports(which)
+			else
+				ui_utils.show_message_dialog("The folder did not open: " ..
+						tostring(why))
+			end
+		end, 220)
+		if imp.opened then
+			button_on(menu, row, "Look again", function()
+				want_imports = which
+				waiting("Looking in the import folder...")
+				buildat.send_packet("main:get_imports", "")
+			end, 140)
+		end
+	end
+
+	local columns = menu.window:CreateChild("UIElement")
+	columns:SetLayout(narrow() and magic.LM_VERTICAL or magic.LM_HORIZONTAL,
+			16, magic.IntRect(0, 0, 0, 0))
+	local left = columns:CreateChild("UIElement")
+	left:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(0, 0, 0, 0))
+	left:SetFixedWidth(fit(520))
+	local right = columns:CreateChild("UIElement")
+	right:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(0, 0, 0, 0))
+	right:SetFixedWidth(fit(420))
+
+	local list_of = worlds and import_worlds or import_games
 	local items = {}
-	for _, g in ipairs(import_games) do
-		local label = g[1]
-		if g[2] ~= "" and g[2] ~= g[1] then
-			label = label .. "   (" .. g[2] .. ")"
-		end
-		label = label .. "   " .. format_bytes(g[4])
-		if g[3] == "installed" then
-			-- Listed and said so rather than hidden: the same rule the save
-			-- list follows about a save whose game is missing
-			label = label .. "  -- already installed"
-		end
-		items[#items + 1] = {label = label, action = function()
-			if g[3] == "installed" then
-				ui_utils.show_message_dialog(g[1] .. " is already installed." ..
+	for _, e in ipairs(list_of) do
+		local needs = worlds and e[3] ~= "installed"
+		items[#items + 1] = {label = e[1] .. (worlds and "   " .. e[2] or
+				(e[2] ~= "" and e[2] ~= e[1] and "   " .. e[2] or "")),
+				entry = e, needs = needs}
+	end
+	local shown = filtered(items, import_filter)
+	add_filter({window = left}, import_filter, #items, #shown, function(t)
+		import_filter = t
+		draw_imports(which)
+	end)
+	local list = left:CreateChild("ListView")
+	list:SetStyleAuto()
+	list:SetFixedSize(fit(520), narrow() and
+			math.max(100, math.floor(magic.ui.root.height * 0.22)) or 400)
+
+	-- The panel, filled by select()
+	local head = text(right, narrow() and "Pick one above" or
+			"Pick one on the left")
+	local lines = {}
+	for k = 1, 4 do lines[k] = text(right, "", true, fit(420)) end
+	local name_label, name_edit
+	if worlds then
+		name_label = text(right, "As a save named:")
+		name_edit = right:CreateChild("LineEdit")
+		name_edit:SetStyleAuto()
+		name_edit.textCopyable = true
+		name_edit.textSelectable = true
+		name_edit.minHeight = 26
+		name_edit.enabled = true
+		name_edit:SetFixedWidth(fit(420))
+		name_edit:SetText("")
+	end
+	local selected = nil
+	local function import()
+		local e = selected and selected.entry
+		if not e then return end
+		if not worlds then
+			if e[3] == "installed" then
+				ui_utils.show_message_dialog(e[1] .. " is already installed." ..
 						" Remove it yourself if you mean to replace it.")
 				return
 			end
-			waiting("Copying " .. g[1] .. "...")
+			waiting("Copying " .. e[1] .. "...")
 			buildat.send_packet("main:import_game",
-					cereal.binary_output({g[1]}, {"array", "string"}))
-		end}
+					cereal.binary_output({e[1]}, {"array", "string"}))
+			return
+		end
+		if e[3] ~= "installed" then
+			-- The game screen with that game selected, if it is there
+			for _, g in ipairs(import_games) do
+				if g[1] == e[2] then
+					imp.selected = g[1]
+					import_filter = ""
+					draw_imports("games")
+					return
+				end
+			end
+			ui_utils.show_message_dialog(e[1] .. " wants the game " .. e[2] ..
+					", which is neither installed nor in the import folder.")
+			return
+		end
+		local name = name_edit:GetText()
+		waiting("Importing " .. e[1] .. " into " .. name .. "...")
+		buildat.send_packet("main:import_world",
+				cereal.binary_output({e[1], name}, {"array", "string"}))
+	end
+	local action
+	local rows = {}
+	local function select(item)
+		selected = item
+		imp.selected = item.entry[1]
+		for it, b in pairs(rows) do b.selected = (it == item) end
+		local e = item.entry
+		head:SetText(e[1])
+		if worlds then
+			lines[1]:SetText("Game: " .. e[2] .. (e[3] == "installed" and
+					"" or " (not installed)"))
+		else
+			lines[1]:SetText("Title: " .. (e[2] ~= "" and e[2] or e[1]))
+		end
+		lines[2]:SetText((worlds and "Name: " or "Id: ") .. e[1])
+		lines[3]:SetText("Size: " .. format_bytes(e[4]))
+		lines[4]:SetText("Found in: " .. (e[5] or ""))
+		if name_edit then name_edit:SetText(e[1]) end
+		action:GetChild("ButtonText"):SetText(item.needs and
+				"Import " .. e[2] .. " first" or (not worlds and
+				e[3] == "installed" and "Installed already" or "Import"))
+		log:info("menu: import panel " .. e[1])
+	end
+	for _, item in ipairs(shown) do
+		local row = list.contentElement:CreateChild("Button")
+		row:SetStyleAuto()
+		row:SetName("Button")
+		row:SetLayout(magic.LM_HORIZONTAL, 10, magic.IntRect(8, 0, 8, 0))
+		row:SetFixedWidth(fit(520) - 24)
+		row.minHeight = 28
+		local t = row:CreateChild("Text")
+		t:SetName("ButtonText")
+		t:SetStyleAuto()
+		t:SetText(item.label)
+		if item.needs then t.color = magic.Color(rgb("dim")) end
+		local badge = row:CreateChild("Text")
+		badge:SetStyleAuto()
+		badge:SetText((item.needs and "needs " .. item.entry[2] .. "  " or "") ..
+				format_bytes(item.entry[4]))
+		badge.color = magic.Color(rgb("dim"))
+		badge:SetTextAlignment(magic.HA_RIGHT)
+		rows[item] = row
+		menu:add(row, function()
+			if selected == item then import() else select(item) end
+		end)
+		list:AddItem(row)
 	end
 	if #items == 0 then
-		local none = menu.window:CreateChild("Text")
-		none:SetStyleAuto()
-		none:SetText("Nothing found. Looked in $LUANTI_EXTRA_IMPORT_PATH," ..
-				" ~/.luanti and ~/.minetest.")
+		text(left, "Nothing in the import folder yet.")
+	elseif #shown == 0 then
+		text(left, "Nothing matches")
 	end
-	local shown = filtered(items, import_filter)
-	add_filter(menu, import_filter, #items, #shown, function(text)
-		import_filter = text
-		import_page = 1
-		draw_import_games()
-	end)
-	ui_utils.add_paged(menu, shown, {
-		page = import_page,
-		per_page = 12,
-		redraw = function(new_page)
-			import_page = new_page
-			draw_import_games()
-		end,
-	})
-	back_to_saves(menu, "import_game")
-end
-
--- A world becomes a save rather than being copied, so what this asks for on
--- the way is the save's name -- prefilled with the world's own, which is
--- what the user meant nine times in ten
-local function draw_import_world_name(world)
-	local menu = import_menu("Import the world " .. world[1] ..
-			" (game: " .. world[2] .. ", " .. format_bytes(world[4]) .. ")")
-	local text = menu.window:CreateChild("Text")
-	text:SetStyleAuto()
-	text:SetText("as a save named:")
-	local edit = menu.window:CreateChild("LineEdit")
-	edit:SetStyleAuto()
-	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
-	edit.textCopyable = true
-	edit.textSelectable = true
-	edit.minHeight = 26
-	edit.enabled = true
-	edit:SetText(world[1])
-	menu:add("Import and play", function()
-		local name = edit:GetText()
-		waiting("Importing " .. world[1] .. " into " .. name .. "...")
-		buildat.send_packet("main:import_world",
-				cereal.binary_output({world[1], name}, {"array", "string"}))
-	end)
-	menu:add("< back", function()
-		draw_import_worlds()
-	end)
+	if worlds and imp.skipped > 0 then
+		text(left, "Not listed: " .. imp.skipped .. " world" ..
+				(imp.skipped == 1 and "" or "s") ..
+				" with no gameid in world.mt", true, fit(520))
+	end
+	action = button_on(menu, right, "Import", import, fit(420), true)
+	for _, item in ipairs(shown) do
+		if item.entry[1] == imp.selected then select(item) end
+	end
 	magic.input:SetMouseVisible(true, "a menu screen")
 end
-
-function draw_import_worlds()
-	local menu = import_menu("Which world? (read into a new save)")
-	local items = {}
-	for _, w in ipairs(import_worlds) do
-		local label = w[1] .. "   (" .. w[2] .. ")   " .. format_bytes(w[4])
-		if w[3] ~= "installed" then
-			label = label .. "  -- import " .. w[2] .. " first"
-		end
-		items[#items + 1] = {label = label, action = function()
-			if w[3] ~= "installed" then
-				ui_utils.show_message_dialog(w[1] .. " wants the game " ..
-						w[2] .. ", which is not installed. Import that" ..
-						" first.")
-				return
-			end
-			draw_import_world_name(w)
-		end}
-	end
-	if #items == 0 then
-		local none = menu.window:CreateChild("Text")
-		none:SetStyleAuto()
-		none:SetText("Nothing found. Looked in $LUANTI_EXTRA_IMPORT_PATH," ..
-				" ~/.luanti and ~/.minetest.")
-	end
-	local shown = filtered(items, import_filter)
-	add_filter(menu, import_filter, #items, #shown, function(text)
-		import_filter = text
-		import_page = 1
-		draw_import_worlds()
-	end)
-	ui_utils.add_paged(menu, shown, {
-		page = import_page,
-		per_page = 12,
-		redraw = function(new_page)
-			import_page = new_page
-			draw_import_worlds()
-		end,
-	})
-	back_to_saves(menu, "import_world")
-end
-
+function draw_import_games() draw_imports("games") end
+function draw_import_worlds() draw_imports("worlds") end
 
 -- The selected save's glance, into the panel; the flags' buttons say
 -- their state
@@ -1382,22 +1441,24 @@ buildat.sub_packet("main:imports", function(data)
 		return
 	end
 	local values = cereal.binary_input(data, {"array", "string"})
+	-- The two counts, then five strings an entry (main.cpp's on_get_imports)
 	local n = tonumber(values[1]) or 0
+	imp.skipped = tonumber(values[2]) or 0
 	import_games = {}
 	import_worlds = {}
+	local at = 3
 	for i = 1, n do
-		local at = 1 + (i - 1) * 4
-		import_games[i] = {values[at + 1] or "", values[at + 2] or "",
-				values[at + 3] or "", values[at + 4] or "0"}
+		import_games[i] = {values[at] or "", values[at + 1] or "",
+				values[at + 2] or "", values[at + 3] or "0", values[at + 4] or ""}
+		at = at + 5
 	end
-	local at = 1 + n * 4 + 1
-	while at + 3 <= #values do
+	while at + 4 <= #values do
 		import_worlds[#import_worlds + 1] = {values[at], values[at + 1],
-				values[at + 2], values[at + 3]}
-		at = at + 4
+				values[at + 2], values[at + 3], values[at + 4]}
+		at = at + 5
 	end
 	log:info("menu: " .. #import_games .. " games and " .. #import_worlds ..
-			" worlds to import")
+			" worlds to import, " .. imp.skipped .. " without a gameid")
 	if want_imports == "worlds" then
 		draw_import_worlds()
 	else

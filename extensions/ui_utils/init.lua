@@ -468,7 +468,9 @@ local function button_menu_nav(root, options)
 			known[id(item.button)] = true
 		end
 		for _, e in ipairs(page_items(root, {})) do
-			if e:GetTypeName() == "Button" and not known[id(e)] then
+			-- The × is out of the walk on purpose: the keyboard has Escape
+			if e:GetTypeName() == "Button" and not known[id(e)] and
+					e:GetName() ~= "close_glyph" then
 				local t = button_text(e)
 				log:warning("menu: a button outside its menu's keys: " ..
 						(t and dump(t.text) or "(no label)"))

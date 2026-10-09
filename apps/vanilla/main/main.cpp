@@ -25,6 +25,9 @@
 #include "starport_announce/api.h"
 #include <cstdlib>
 #include <sys/stat.h>
+#ifndef _WIN32
+#include <dirent.h>
+#endif
 #include <ctime>
 #include <map>
 #include <fstream>
@@ -1720,17 +1723,13 @@ struct Module: public interface::Module
 	// doc/plan/master_plan.md.
 	//
 
-	// Where a Luanti installation might be, most deliberate first. Each is a
-	// directory laid out the way a Luanti user directory is -- games/ and
-	// worlds/ inside it -- which is also the shape of an in-tree development
-	// build, so that needs no special case.
 	// The launcher's settings, in the user path beside luanti/games and
-	// luanti/worlds ([LAUNCH_GRID]): {"import_paths": ["..."],
-	// "render_mode": "pbr"}, the search paths the import screens add to
-	// the defaults and the mode a session draws in when BUILDAT_LUANTI_PBR
-	// says nothing (read by builtin/luanti where the variable is). Written
-	// by hand and read with sajson. On the wire the two are one list of
-	// strings, the mode as a "render_mode=<mode>" entry after the paths.
+	// luanti/worlds ([LAUNCH_GRID]): {"render_mode": "pbr", ...}, the mode
+	// a session draws in when BUILDAT_LUANTI_PBR says nothing (read by
+	// builtin/luanti where the variable is), the view and the keys. Written
+	// by hand and read with sajson. On the wire one list of "key=value"
+	// strings. An old file's "import_paths" is ignored
+	// ([LUANTI_IMPORT_FOLDER]).
 	ss_ settings_path()
 	{
 		return luanti_path()+"/settings.json";
@@ -1843,40 +1842,6 @@ struct Module: public interface::Module
 		}
 		return out;
 	}
-	sv_<ss_> read_import_paths()
-	{
-		sv_<ss_> out;
-		std::ifstream f(settings_path());
-		if(!f.good())
-			return out;
-		std::stringstream ss;
-		ss << f.rdbuf();
-		const ss_ text = ss.str();
-		const sajson::document doc =
-				sajson::parse(sajson::dynamic_allocation(),
-					sajson::string(text.c_str(), text.size()));
-		if(!doc.is_valid()){
-			log_w(MODULE, "%s: %s", cs(settings_path()),
-					doc.get_error_message_as_cstring());
-			return out;
-		}
-		sajson::value root = doc.get_root();
-		if(root.get_type() != sajson::TYPE_OBJECT)
-			return out;
-		for(size_t i = 0; i < root.get_length(); i++){
-			if(root.get_object_key(i).as_string() != "import_paths")
-				continue;
-			sajson::value list = root.get_object_value(i);
-			if(list.get_type() != sajson::TYPE_ARRAY)
-				continue;
-			for(size_t j = 0; j < list.get_length(); j++){
-				sajson::value v = list.get_array_element(j);
-				if(v.get_type() == sajson::TYPE_STRING && !v.as_string().empty())
-					out.push_back(v.as_string());
-			}
-		}
-		return out;
-	}
 	static void write_json_string(std::ofstream &f, const ss_ &s)
 	{
 		f << '"';
@@ -1890,7 +1855,7 @@ struct Module: public interface::Module
 		}
 		f << '"';
 	}
-	void write_settings(const sv_<ss_> &paths, const ss_ &mode,
+	void write_settings(const ss_ &mode,
 			const sv_<std::pair<ss_, ss_>> &keys, const ss_ &view_range,
 			const ss_ &view_bobbing, const ss_ &shoulder,
 			const ss_ &lod_detail)
@@ -1906,12 +1871,7 @@ struct Module: public interface::Module
 		f << "\"distant_detail\": \""
 				<< lod_detail << "\", \"view_bobbing_amount\": \""
 				<< view_bobbing << "\", \"third_person_shoulder\": \""
-				<< shoulder << "\", \"import_paths\": [";
-		for(size_t i = 0; i < paths.size(); i++){
-			f << (i ? ", " : "");
-			write_json_string(f, paths[i]);
-		}
-		f << "], \"keys\": {";
+				<< shoulder << "\", \"keys\": {";
 		for(size_t i = 0; i < keys.size(); i++){
 			f << (i ? ", " : "");
 			write_json_string(f, keys[i].first);
@@ -1927,8 +1887,7 @@ struct Module: public interface::Module
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
-			// A public server's import paths are nobody's business
-			sv_<ss_> list = m_public ? sv_<ss_>() : read_import_paths();
+			sv_<ss_> list;
 			ss_ mode = read_render_mode();
 			list.push_back("render_mode="+(mode.empty() ? ss_("pbr") : mode));
 			list.push_back("view_range="+read_view_range());
@@ -2306,7 +2265,6 @@ struct Module: public interface::Module
 			log_w(MODULE, "main:set_settings: %s", e.what());
 			return;
 		}
-		sv_<ss_> paths;
 		sv_<std::pair<ss_, ss_>> keys;
 		ss_ mode = "pbr";
 		ss_ view_range = "120";
@@ -2351,15 +2309,39 @@ struct Module: public interface::Module
 					if(word)
 						keys.push_back({action, v.substr(eq + 1)});
 				}
-			} else if(!v.empty() && v.size() <= 4096)
-				paths.push_back(v);
+			}
+			// Anything else is ignored: the import search paths went with
+			// the import folder ([LUANTI_IMPORT_FOLDER])
 		}
-		write_settings(paths, mode, keys, view_range, view_bobbing, shoulder,
+		write_settings(mode, keys, view_range, view_bobbing, shoulder,
 				lod_detail);
-		log_i(MODULE, "settings: %zu import paths, render_mode %s, view_range "
-				"%s and %zu key bindings written to %s", paths.size(), cs(mode),
+		log_i(MODULE, "settings: render_mode %s, view_range "
+				"%s and %zu key bindings written to %s", cs(mode),
 				cs(view_range), keys.size(), cs(settings_path()));
 		send_settings(packet.sender);
+	}
+
+	ss_ import_folder()
+	{
+		return luanti_path()+"/import";
+	}
+
+	// Whether a directory can be listed: one the box denies lists as empty,
+	// as an empty one does
+	static bool listable(const ss_ &path)
+	{
+#ifdef _WIN32
+		// simplified: not told apart on Windows, where an empty listing is
+		// said as one; FindFirstFile's error is the upgrade
+		(void)path;
+		return true;
+#else
+		DIR *d = opendir(path.c_str());
+		if(!d)
+			return false;
+		closedir(d);
+		return true;
+#endif
 	}
 
 	sv_<ss_> import_roots()
@@ -2404,10 +2386,12 @@ struct Module: public interface::Module
 			}
 			out.push_back(path);
 		};
-		// The settings' paths first, the variable as an additional source
-		// for the shell and the runners
-		for(const ss_ &path : read_import_paths())
-			add(path, "settings.json");
+		// **The import folder** ([LUANTI_IMPORT_FOLDER]): the server's box
+		// grants nothing under /home, so ~/.minetest and ~/.luanti are not
+		// read; the user copies a game, a world or a whole Luanti user
+		// directory in here. Then the variable, for the shell and the
+		// runners, which reaches only what the box grants
+		add(import_folder(), "the import folder");
 		const char *extra = getenv("LUANTI_EXTRA_IMPORT_PATH");
 		if(extra && extra[0]){
 			// Several, separated the way every other path variable does it
@@ -2418,13 +2402,6 @@ struct Module: public interface::Module
 				add(one, "LUANTI_EXTRA_IMPORT_PATH");
 				rest = colon == ss_::npos ? "" : rest.substr(colon + 1);
 			}
-		}
-		const char *home = getenv("HOME");
-		if(home && home[0]){
-			// Luanti's user directory was renamed in 5.10 and a machine can
-			// have either, or both
-			add(ss_(home)+"/.luanti", "$HOME");
-			add(ss_(home)+"/.minetest", "$HOME");
 		}
 		// The two variables are one word apart in meaning and that is the
 		// trap: BUILDAT_LUANTI_IMPORT names one world to import at startup,
@@ -2539,10 +2516,11 @@ struct Module: public interface::Module
 		return "";
 	}
 
-	// What is out there to import, as one flat array: the games first with a
-	// count, then the worlds. A game is its id, its title, whether it is
-	// installed already and how big it is; a world is its name, the game it
-	// wants, whether that game is installed and how big it is.
+	// What is out there to import, as one flat array: the count of games and
+	// of worlds left out for having no gameid, then the games, then the
+	// worlds. A game is its id, its title, whether it is installed already,
+	// how big it is and the root it is in; a world is its name, the game it
+	// wants, whether that game is installed, how big it is and its root.
 	//
 	// The size is there because buildat's own game menu shows one and
 	// because it is what says whether a copy is a moment or a minute. The
@@ -2563,6 +2541,11 @@ struct Module: public interface::Module
 			return false;
 		};
 		sv_<ss_> seen_games, seen_worlds;
+		size_t no_gameid = 0;
+		// Made for the user to copy into, the shape of a Luanti user
+		// directory
+		interface::fs::create_directories(import_folder()+"/games");
+		interface::fs::create_directories(import_folder()+"/worlds");
 		auto seen = [](sv_<ss_> &list, const ss_ &name){
 			for(const ss_ &had : list){
 				if(had == name)
@@ -2573,6 +2556,12 @@ struct Module: public interface::Module
 		};
 		const sv_<ss_> roots = import_roots();
 		for(const ss_ &root : roots){
+			for(const char *sub : {"/games", "/worlds"}){
+				if(interface::fs::path_exists(root+sub) &&
+						!listable(root+sub))
+					log_w(MODULE, "import: %s%s cannot be read; its contents "
+							"are not listed", cs(root), sub);
+			}
 			for(const interface::fs::Node &n :
 					interface::fs::list_directory(root+"/games")){
 				if(!n.is_directory || n.name == "." || n.name == "..")
@@ -2589,6 +2578,7 @@ struct Module: public interface::Module
 				games.push_back(is_installed(n.name) ? "installed" : "");
 				games.push_back(itos(
 						interface::fs::directory_tree_size(path)));
+				games.push_back(root);
 			}
 			for(const interface::fs::Node &n :
 					interface::fs::list_directory(root+"/worlds")){
@@ -2596,8 +2586,12 @@ struct Module: public interface::Module
 					continue;
 				ss_ path = root+"/worlds/"+n.name;
 				ss_ gameid = read_gameid(path);
-				if(gameid.empty())
+				if(gameid.empty()){
+					log_i(MODULE, "import: %s has no gameid in world.mt; "
+							"not listed", cs(path));
+					no_gameid++;
 					continue;
+				}
 				if(seen(seen_worlds, n.name))
 					continue;
 				worlds.push_back(n.name);
@@ -2605,14 +2599,20 @@ struct Module: public interface::Module
 				worlds.push_back(is_installed(gameid) ? "installed" : "");
 				worlds.push_back(itos(
 						interface::fs::directory_tree_size(path)));
+				worlds.push_back(root);
 			}
 		}
 		// One line a user can read: "0 games and 0 worlds from 2 roots" says
 		// in one go that it is the path and not the feature
-		log_i(MODULE, "import: %zu games and %zu worlds from %zu roots",
-				games.size() / 4, worlds.size() / 4, roots.size());
+		log_i(MODULE, "import: %zu games and %zu worlds from %zu roots, %zu "
+				"worlds with no gameid", games.size() / 5, worlds.size() / 5,
+				roots.size(), no_gameid);
+		// The two counts, then five strings a game and five a world: its
+		// id or name, its title or game, "installed" or "", its size and
+		// the root it is in
 		sv_<ss_> flat;
-		flat.push_back(itos(games.size() / 4));
+		flat.push_back(itos(games.size() / 5));
+		flat.push_back(itos(no_gameid));
 		for(const ss_ &v : games)
 			flat.push_back(v);
 		for(const ss_ &v : worlds)
@@ -3049,8 +3049,11 @@ struct Module: public interface::Module
 			};
 			trim(key);
 			trim(value);
+			// Minetest Game's worlds were made as "minetest", which is
+			// minetest_game since 5.8, as Luanti reads it too
+			// ([LUANTI_IMPORT_FOLDER])
 			if(key == "gameid")
-				return value;
+				return value == "minetest" ? ss_("minetest_game") : value;
 		}
 		return "";
 	}

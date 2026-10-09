@@ -584,6 +584,45 @@
 		return 1;
 	}
 
+	// open_import_folder() -> true, or nil and why: the system's file
+	// manager on <user>/shared/<the locally launched app>/import, made if
+	// missing ([LUANTI_IMPORT_FOLDER]: vanilla's Luanti imports). No
+	// argument, as open_log_folder: the path is the native side's own. An
+	// app may call it (on the user's click), for its own local server only.
+	// simplified: one fixed subdirectory per app; an app-chosen name under
+	// its shared directory is the upgrade, when a second app wants one.
+	static int l_open_import_folder(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		const ss_ address = self->m_state ? self->m_state->get_address() : "";
+		if(address.empty() || !connected_locally(address)){
+			lua_pushnil(L);
+			lua_pushstring(L, "not a local server");
+			return 2;
+		}
+		ss_ dir = g_client_config.get<ss_>("user_path")+"/shared/"+
+				g_local_server_app+"/import";
+		if(dir.find_first_of("'\"\n") != ss_::npos){
+			lua_pushnil(L);
+			lua_pushstring(L, "the import folder has a quote in its path");
+			return 2;
+		}
+		interface::fs::create_directories(dir);
+#ifdef _WIN32
+		std::replace(dir.begin(), dir.end(), '/', '\\');
+#endif
+		if(!interface::process::open_with_system(dir)){
+			lua_pushnil(L);
+			lua_pushstring(L, "the system's opener could not be run");
+			return 2;
+		}
+		log_i(MODULE, "Opened the import folder %s", cs(dir));
+		lua_pushboolean(L, true);
+		return 1;
+	}
+
 	// aitta_install(zip, sig[, aitta[, review]]) -> the directory, or nil
 	// and why: a release fetched from an Aitta, checked and installed under
 	// <user>/installed ([AITTA_MVP]); with review, a reviewer's playtest
@@ -1703,6 +1742,17 @@
 		return 0;
 	}
 
+	// Whether the client is connected to the local server it started
+	static bool connected_locally(const ss_ &address)
+	{
+		adopt_pidfile();
+		return !g_local_server_app.empty() &&
+				interface::process::is_running(g_local_server) &&
+				(address == "localhost:"+g_local_server_port ||
+				address == "127.0.0.1:"+g_local_server_port ||
+				(!local_pipe().empty() && address == "pipe:"+local_pipe()));
+	}
+
 	static int l_game_storage_dir(lua_State *L)
 	{
 		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
@@ -1712,12 +1762,7 @@
 		if(address.empty())
 			return 0;
 		ss_ user = g_client_config.get<ss_>("user_path");
-		adopt_pidfile();
-		bool local = !g_local_server_app.empty() &&
-				interface::process::is_running(g_local_server) &&
-				(address == "localhost:"+g_local_server_port ||
-				address == "127.0.0.1:"+g_local_server_port ||
-				(!local_pipe().empty() && address == "pipe:"+local_pipe()));
+		bool local = connected_locally(address);
 		ss_ dir;
 		if(local){
 			dir = user+"/apps/"+g_local_server_app+"/client";

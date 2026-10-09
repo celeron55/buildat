@@ -1481,6 +1481,17 @@ buildat.safe.open_log_folder = function()
 	end
 	return __buildat_open_log_folder()
 end
+-- [LUANTI_IMPORT_FOLDER]: the import folder of the local server's app,
+-- <user>/shared/<app>/import, opened by the system's file manager on the
+-- user's own click; nil and why for a remote server. Absent on the web.
+if __buildat_open_import_folder then
+	buildat.safe.open_import_folder = function()
+		if not __buildat_user_activated() then
+			return nil, "open_import_folder: only right after the user's own key or click"
+		end
+		return __buildat_open_import_folder()
+	end
+end
 buildat.safe.recent_errors = function()
 	return __buildat_errors_text()
 end

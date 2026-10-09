@@ -2442,6 +2442,11 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(aitta_dev)
 		DEF_BUILDAT_FUNC(open_url)
 		DEF_BUILDAT_FUNC(open_log_folder)
+#ifndef __EMSCRIPTEN__
+		// Not in the web client, which has no folder to open: an app
+		// leaves its button out there ([LUANTI_IMPORT_FOLDER])
+		DEF_BUILDAT_FUNC(open_import_folder)
+#endif
 		DEF_BUILDAT_FUNC(start_local_server)
 		DEF_BUILDAT_FUNC(list_launchers)
 		DEF_BUILDAT_FUNC(list_installed_games)

@@ -63,11 +63,12 @@ The environment variables it reads, since none of them are in the client's -h:
     BUILDAT_CONTENTDB_URL=<url>      ContentDB, or a test's mirror of it
     BUILDAT_LUANTI_LUAPROF=<n>       Sample the module's Lua; see below
     LUANTI_EXTRA_IMPORT_PATH=<paths> Where the import menu looks for games
-                                     and worlds, before ~/.luanti and
-                                     ~/.minetest. Colon separated, each one
-                                     a directory with games/ and worlds/ in
-                                     it -- a Luanti user directory or an
-                                     in-tree build
+                                     and worlds, after the import folder.
+                                     Colon separated, each one a directory
+                                     with games/ and worlds/ in it -- a
+                                     Luanti user directory or an in-tree
+                                     build. A sandboxed server reads none
+                                     outside <user>/shared
 
 The two that force the clock are spelled the way extensions/luanti_client
 spells them, because a comparison between the two takes its pictures at the
@@ -76,7 +77,15 @@ same hour or not at all.
 LUANTI_EXTRA_IMPORT_PATH and BUILDAT_LUANTI_IMPORT are one word apart in
 meaning and are the easy mistake:
 BUILDAT_LUANTI_IMPORT takes one world, LUANTI_EXTRA_IMPORT_PATH takes a
-search path of installations. The launcher says which roots it looked at and
+search path of installations.
+
+The import folder is <user>/shared/vanilla/import (Luanti's own path plus
+/import; games/ and worlds/ are made in it at the first look). It is the
+one place a player puts what to import: the server is sandboxed by default
+and reads no ~/.luanti. The import screens' "Open the import folder" opens it
+in the desk's file manager (buildat.open_import_folder, a local server's
+only). A world.mt with "gameid = minetest" is minetest_game's; one with no
+gameid is left out and counted. The launcher says which roots it looked at and
 what it found in them, so "0 games and 0 worlds from 2 roots" in the log is
 the path and not the feature.
 
@@ -182,7 +191,7 @@ world, and a game's kick spares an admin and its unban lifts only its own
 bans.
 
 The plain game around it is apps/vanilla: a launch grid tile per
-installed game, worlds, imports from ~/.luanti, ContentDB, settings.
+installed game, worlds, imports from the import folder, ContentDB, settings.
 
 What it is checked by: the fixtures in builtin/luanti/test/*.lua (one
 feature each, run against a server with BUILDAT_LUANTI_LUA), the fuzz run

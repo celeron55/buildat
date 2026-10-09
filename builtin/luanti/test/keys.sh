@@ -20,7 +20,7 @@ mkdir -p $BUILDAT_USER_PATH/shared/vanilla
 trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null;
 	if [ -f "$tmp/settings.json.bak" ]; then cp "$tmp/settings.json.bak" "$settings"; else rm -f "$settings"; fi;
 	[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"' EXIT
-echo '{"render_mode": "pbr", "import_paths": [], "keys": {"forward": "U"}}' > "$settings"
+echo '{"render_mode": "pbr", "keys": {"forward": "U"}}' > "$settings"
 rm -rf $BUILDAT_USER_PATH/apps/vanilla/saves/buildat_test_keys
 srv=""; cli=""
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=buildat_test_keys \

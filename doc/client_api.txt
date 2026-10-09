@@ -93,6 +93,12 @@ buildat.server_address() -> string, or nil when not joined
   connection_encrypted() telling https). The admin's Starport page offers
   it as the public address ([STARPORT_DEFAULT_URL]).
 
+buildat.open_import_folder() -> ok, err
+- Opens <user>/shared/<the local server's app>/import in the desk's file
+  manager. Only after a click or a key (user activated), only with a local
+  server ("not a local server" otherwise), not on the web. Vanilla's import
+  screens use it ([LUANTI_IMPORT_FOLDER]).
+
 buildat.get_sound() -> mute, db; buildat.set_sound(mute, db) -> ok, err
 - The one preference an app may write: the player's ear, from a pause menu.
   Through the preferences' own parser and file, so the launcher's page and
