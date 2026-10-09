@@ -4743,13 +4743,15 @@ for _, a in ipairs(TOOLS) do
 end
 sel = 1
 
+local db_text = require("buildat/extension/ui_utils")
+db_text = (db_text.safe or db_text).db_text
 local function setting_value(sg)
 	if sg.tool then return "run it" end
 	if sg.pref then
 		local v = api.get_preference(sg.pref)
 		if type(v) == "boolean" then return v and "on" or "off" end
 		if sg.pref == "sound_volume_db" then
-			return v <= -33 and "off" or (string.format("%d", v) .. " dB")
+			return db_text(v)
 		end
 		local st = STEPS[sg.pref]
 		-- A number is stepped; render_scale may be "auto", which is not
@@ -4759,10 +4761,10 @@ local function setting_value(sg)
 	if sg.room == "palette" then return PRESETS[current].name end
 	if sg.room == "probe" then return probe_on and "on" or "off" end
 	if sg.room == "drone" then
-		return levels.orbs <= -33 and "off" or (levels.orbs .. " dB")
+		return db_text(levels.orbs)
 	end
 	if sg.room == "bed" then
-		return levels.bed <= -33 and "off" or (levels.bed .. " dB")
+		return db_text(levels.bed)
 	end
 	return "install a game"
 end

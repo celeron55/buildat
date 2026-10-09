@@ -95,7 +95,7 @@ local PREFERENCES = {
 		label = "Sound volume",
 		values = {-33, -30, -27, -24, -21, -18, -15, -12, -9, -6, -3, 0},
 		show = function(v)
-			return v <= -33 and "off" or (v .. " dB")
+			return ui_utils.db_text(v)
 		end,
 	},
 	{

@@ -475,6 +475,21 @@ buildat.safe.join_server(address) -> true, or false and why
   a leave pops. For a launch UI that is not launch_menu.
 buildat.safe.show_engine_settings() -> true
 - The launch menu's Engine settings screen, pushed on the main UI stack.
+buildat.safe.show_game_settings{on_close = f, sections = {...}}
+- The client's settings window over the game, the one settings menu a game
+  opens from its own ([GAME_SETTINGS]): the game's sections, then Sound,
+  Video, its declared keys and the client keys, the sections client code
+  added, Logs and errors (on the web also the address bar and the idle frame
+  rate). A section is {title =, draw = function(w, ui)}: ui.text(s),
+  ui.button(label, fn), ui.dropdown(label, choices, current, on_choose),
+  ui.toggle(label, on, on_change), ui.redraw(); an error in draw is shown in
+  the section. Escape and Close shut it and call on_close; a served game's
+  keys are read again there.
+buildat.safe.add_game_settings_section(name, {title =, draw =})
+- A section of client code's own in every game's settings window, after
+  the keys (builtin/accounts' Server: Open to LAN and Server...); the same
+  name replaces it. ui.away(f) closes the window and calls f(back), back
+  opening it again. Dropped on a connection reset.
 buildat.safe.log_path() -> path
 - The client's log file, "" where there is none (the web) ([LOG_REACH]).
 buildat.safe.open_log_folder() -> true, or nil and why
@@ -1076,6 +1091,9 @@ vertical_menu(root, options) -> menu
   navigation; :add("Label", action) creates a button, :add(button, action)
   registers one; extra widgets go on menu.window. :add("Label", action,
   true) makes the screen's main button.
+db_text(db) -> text
+- A sound volume as shown, "-6 dB (66%)", the percent loudness (2^(dB/10));
+  -33 and under "off" ([VOLUME_PERCENT]).
 rgb(name) -> r, g, b
 - The menus' colours ([MENU_BRAND]): "text", "dim", "warn", "error",
   "focus", "main"; magic.Color(ui_utils.rgb("error")).
@@ -1717,6 +1735,7 @@ magic.DRAWABLE_LIGHT:
 magic.DRAWABLE_ZONE: 
 magic.DebugRenderer: AddBoundingBox, AddCircle, AddCross, AddLine, AddNode, AddSphere, AddTriangle, SetLineAntiAlias, SetView
 magic.Drawable: castShadows, worldBoundingBox
+magic.Drawable2D: layer, orderInLayer
 magic.DropDownList: AddItem, GetItem, InsertItem, RemoveAllItems, RemoveItem, SetSelection, listView, numItems, placeholder, placeholderText, resizePopup, selectedItem, selection
 magic.ELEMENT_BLENDINDICES: 
 magic.ELEMENT_BLENDWEIGHTS: 
@@ -2341,7 +2360,10 @@ magic.SoundSource3D: farDistance, innerAngle, nearDistance, outerAngle, rolloffF
 magic.SoundStream: SetFormat, frequency, sampleSize, stopAtEnd
 magic.Sphere: Clear, Define, Distance, Merge, center, radius
 magic.Sprite: SetFixedSize, SetTexture, hotSpot, rotation
+magic.Sprite2D: 
+magic.SpriteSheet2D: GetSprite
 magic.StaticModel: SetModel, material, model
+magic.StaticSprite2D: SetAlpha, SetColor, SetFlipX, SetFlipY, SetHotSpot, SetSprite, SetUseHotSpot
 magic.StringHash: 
 magic.SubscribeToEvent: 
 magic.TEXTURE_DEPTHSTENCIL: 
@@ -2432,5 +2454,5 @@ extension.launch_console: show
 extension.serverlist: refresh, servers
 extension.skycube: new
 extension.test: f
-extension.ui_utils: add_paged, bind_button_menu, close_dropdowns, copy, dropdown, dropdown_open, keyboard_columns, keyboard_page, list_view, menu_button, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_message_dialog, show_notice, show_notification, vertical_menu
+extension.ui_utils: add_paged, bind_button_menu, close_dropdowns, copy, db_text, dropdown, dropdown_open, keyboard_columns, keyboard_page, list_view, menu_button, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_message_dialog, show_notice, show_notification, vertical_menu
 ---- end of the generated listing ----

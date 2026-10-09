@@ -27,6 +27,19 @@ local colors = {
 	focus = {0.149, 0.851, 1},     -- #26d9ff
 	main = {1, 0.62, 0.122},       -- #ff9e1f, the main button
 }
+-- db_text(db): a sound volume as it is shown, "-6 dB (66%)" ([VOLUME_PERCENT]);
+-- -33 and under is "off". The percent is loudness, 2^(dB/10): -10 dB is
+-- half as loud, which is what a reader without audio terms takes 50% for.
+function M.safe.db_text(db)
+	if db <= -33 then
+		return "off"
+	end
+	return string.format("%d dB (%d%%)", math.floor(db + 0.5),
+			math.floor(100 * 2 ^ (db / 10) + 0.5))
+end
+assert(M.safe.db_text(0) == "0 dB (100%)" and M.safe.db_text(-6) == "-6 dB (66%)"
+		and M.safe.db_text(-3) == "-3 dB (81%)" and M.safe.db_text(-33) == "off")
+
 function M.safe.rgb(name)
 	return unpack(colors[name])
 end

@@ -249,7 +249,7 @@ function M.show_pause(o)
 	-- -30 in 6 dB steps ([VOLUME_LAW])
 	local sounds = {{"muted", "muted"}}
 	for db = 0, -30, -6 do
-		sounds[#sounds + 1] = {db .. " dB", db}
+		sounds[#sounds + 1] = {(ui_utils.safe or ui_utils).db_text(db), db}
 	end
 	local mute, db = buildat.get_sound()
 	menu:add_dropdown("Sound", sounds, mute and "muted" or db, function(v)
