@@ -112,6 +112,8 @@ local function declare()
 			editor.declare(magic, nil, "Luanti", M.BINDINGS, bindable, SHARED)
 end
 declare()
+-- Read again after the game's settings window ([GAME_SETTINGS])
+M.declare = declare
 
 -- The settings list as the server sent it. The "key.<action>=<name>"
 -- rows it held before the store -- in the server's settings.json, or a

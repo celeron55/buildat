@@ -385,70 +385,19 @@ do
 		end
 	end
 
-	local function client_settings_page()
-		local w = dialog("Client settings")
+	-- **The client's settings window** ([GAME_SETTINGS]) with these rows as
+	-- its first section; the sound, the render scale and the UI size are
+	-- the window's. A client before it: these rows on a page of their own.
+	local client_settings_page
+	local function client_rows(w, again)
 		local angles = {}
 		for i = 1, #ANGLE_STEPS do
 			angles[i] = {M.angle_text(i), i}
 		end
 		panel.dropdown(w, "Angle (" .. keys.name("angle") .. ")", angles, S.angle, function(i)
 			S.angle = i
-			client_settings_page()
+			again()
 		end)
-		-- Muted, or full down to -30 dB, 6 dB at a time
-		local mute, db = buildat.get_sound()
-		local sounds = {{"muted", "muted"}}
-		for v = 0, -30, -6 do
-			sounds[#sounds + 1] = {v .. " dB", v}
-		end
-		panel.dropdown(w, "Sound", sounds, mute and "muted" or
-				math.max(-30, math.floor(db / 6 + 0.5) * 6), function(v)
-			if v == "muted" then
-				buildat.set_sound(true, 0)
-			else
-				buildat.set_sound(false, v)
-			end
-			client_settings_page()
-		end)
-		-- The engine's render_scale: the 3D drawn at a share of the
-		-- window's pixels, the UI sharp; the web has no launcher to set it
-		-- in. Automatic is the client's choice, made again on each start
-		-- and resize. A value not on the list is shown as the nearest one.
-		local scale, auto = buildat.get_render_scale()
-		local function pct(v)
-			return math.floor(v * 100 + 0.5) .. " %"
-		end
-		local scales, near = {{"automatic (" .. pct(scale) .. ")", "auto"}}, 1
-		for _, v in ipairs({0.25, 0.33, 0.5, 0.67, 0.75, 1}) do
-			scales[#scales + 1] = {pct(v), v}
-			if math.abs(v - scale) < math.abs(near - scale) then
-				near = v
-			end
-		end
-		panel.dropdown(w, "Render scale", scales, auto and "auto" or near,
-				function(v)
-			buildat.set_render_scale(v)
-			client_settings_page()
-		end)
-		-- The engine's ui_size (user, 2026-10-06): the UI scale, or
-		-- automatic, which follows the window; a client older than it has
-		-- no such call
-		if buildat.get_ui_size then
-			local now, ui_auto = buildat.get_ui_size()
-			local sizes, ui_near = {{ui_auto and "automatic (" .. pct(now) .. ")"
-					or "automatic", "auto"}}, 1
-			for _, v in ipairs({0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3}) do
-				sizes[#sizes + 1] = {pct(v), v}
-				if math.abs(v - now) < math.abs(ui_near - now) then
-					ui_near = v
-				end
-			end
-			panel.dropdown(w, "UI size", sizes, ui_auto and "auto" or ui_near,
-					function(v)
-				buildat.set_ui_size(v)
-				client_settings_page()
-			end)
-		end
 		-- How the 3D view and walking are lit ([FP_DAYLIGHT])
 		-- Lightest first
 		panel.dropdown(w, "3D lighting", {{"Unlit: plain, and lighter", "unlit"},
@@ -457,19 +406,19 @@ do
 			S.lighting = v
 			buildat.storage_write("lighting", v)
 			set_view(S.view)
-			client_settings_page()
+			again()
 		end)
 		panel.dropdown(w, "The plan's look (" .. keys.name("flat") .. ")",
 				{{"Materials, lit", 0}, {"Materials, flat colours", 1},
 				{"Technical: no materials", 2}}, S.plan_look, function(v)
 			S.plan_look = v
 			set_view(S.view)
-			client_settings_page()
+			again()
 		end)
 		panel.check(w, "Material ids shown", S.show_ids, function()
 			S.show_ids = not S.show_ids
 			S.dirty = true
-			client_settings_page()
+			again()
 		end)
 		panel.field(w, "Eye mm", S.eye, function(t)
 			local v = tonumber(t)
@@ -509,14 +458,26 @@ do
 				function()
 			S.pan_xz = not S.pan_xz
 			buildat.storage_write("pan_xz", S.pan_xz and "1" or "0")
-			client_settings_page()
+			again()
 		end)
 		panel.check(w, "3D: the wheel zooms toward the cursor", S.zoom_to_cursor,
 				function()
 			S.zoom_to_cursor = not S.zoom_to_cursor
 			buildat.storage_write("zoom_to_cursor", S.zoom_to_cursor and "1" or "0")
-			client_settings_page()
+			again()
 		end)
+	end
+	client_settings_page = function()
+		if buildat.show_game_settings then
+			close_pause()
+			buildat.show_game_settings{on_close = open_pause, sections = {
+				{title = "Floor planner", draw = function(w, ui)
+					client_rows(w, ui.redraw)
+				end}}}
+			return
+		end
+		local w = dialog("Client settings")
+		client_rows(w, client_settings_page)
 		panel.button(w, "Back", function() open_pause() end)
 	end
 

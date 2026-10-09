@@ -860,6 +860,31 @@ function M.lan_row(w)
 	lan_fill(lan_shown)
 end
 
+-- **Server, in the game's settings window** ([GAME_SETTINGS]): Open to
+-- LAN for the owner, and the Server window, which comes back to it
+if buildat.add_game_settings_section then
+	buildat.add_game_settings_section("accounts", {title = "Server",
+			draw = function(w, ui)
+		if M.hello and M.hello["local"] == 1 then
+			M.lan_row(w)
+		end
+		ui.button("Server...", function()
+			ui.away(function(back)
+				M.server_window(nil, back)
+				-- Its Escape is its own here: the game opened the settings
+				local sub
+				sub = magic.SubscribeToEvent("KeyDown", function(_, data)
+					if not M.frame then
+						magic.UnsubscribeFromEvent("KeyDown", sub)
+					elseif data:GetInt("Key") == magic.KEY_ESCAPE then
+						M.back()
+					end
+				end)
+			end)
+		end)
+	end})
+end
+
 buildat.sub_packet("accounts:lan", function(data)
 	M.lan = data
 	log:info("Open to LAN: " .. lan_text())

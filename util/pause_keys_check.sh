@@ -43,11 +43,6 @@ start_server "$t/srv.log" "STATUS Listening" 120 "$port" \
 	fail "server did not listen"
 srv=$SERVER_PID
 
-# The view-range dropdown sits mid-window in the pause menu; at 1000x700 its
-# centre is about here (confirmed from a screenshot).
-BTN_X=596
-BTN_Y=445
-
 # A line logged by sky_now.set_range alone, not the F5 status line (which has
 # the range mid-string): "<ts> I vanilla : view range: N" and nothing after.
 vr_changes(){ nolog "$1" | grep -cE 'vanilla : view range: [0-9]+$'; }
@@ -63,8 +58,8 @@ run_drive(){
 		echo "delay 4000"
 		echo "keypress Escape"
 		echo "delay 1200"
-		echo "mouse_pos $BTN_X $BTN_Y"
-		echo "mouse_click left"
+		# The view range is the pause menu's one dropdown
+		echo 'click DropDownList "▼"'
 		echo "delay 500"
 		echo "keypress Up"
 		echo "delay 200"
@@ -99,7 +94,7 @@ $(nolog "$log" | grep -iE 'error|refused|luanti' | tail -5)"
 	fi
 done
 [ "$conclusive" = 1 ] ||
-	fail "no conclusive run in 5 tries (a dropped keypress every time, or stale button coordinates)"
+	fail "no conclusive run in 5 tries (a dropped keypress every time, or no view-range dropdown)"
 
 # Menu confirmed closed. Exactly one change (the click) means the Space jumps
 # did not reach the focused button; more means the button fired from the world.

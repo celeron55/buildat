@@ -76,15 +76,6 @@ local function close()
 	magic.ui:SetFocusElement(nil)
 end
 
--- muted, or 0 dB down to -30 in 6 dB steps; the settings screen has every
--- step. buildat.set_sound is the one preference a game may write ("Client
--- preferences" in doc/client_api.txt). **In decibels, as every volume in
--- the tree is** ([VOLUME_LAW])
-local SOUNDS = {{"muted", "muted"}}
-for db = 0, -30, -6 do
-	SOUNDS[#SOUNDS + 1] = {db .. " dB", db}
-end
-
 -- Held while a screen that takes Escape as its own Back is up (the key
 -- editor, the world menu): the hold swallows the key
 local function swallow()
@@ -172,32 +163,16 @@ open = function()
 	accounts.page_button(w, "Chat...", function()
 		page(function() accounts.chat_page(open) end, open)
 	end)
-	local mute, db = buildat.get_sound()
-	ui_utils.dropdown(w, SOUNDS, mute and "muted" or db, function(v)
-		buildat.set_sound(v == "muted", v == "muted" and 0 or v)
-	end, {label = "Sound", fill = true})
-	-- The engine's render_scale: the 3D drawn at a share of the window's
-	-- pixels, the UI sharp. Automatic is the client's choice, made again on
-	-- each start and resize; the web has no launcher to set it in.
-	local scales = {{"automatic", "auto"}}
-	local now, auto = buildat.get_render_scale()
-	local scale = auto and "auto" or nil
-	for _, v in ipairs({1, 0.75, 0.67, 0.5, 0.33, 0.25}) do
-		scales[#scales + 1] = {math.floor(v * 100 + 0.5) .. " %", v}
-		if not auto and math.abs(v - now) < 0.005 then
-			scale = v
-		end
-	end
-	ui_utils.dropdown(w, scales, scale, function(v)
-		buildat.set_render_scale(v)
-	end, {label = "Render scale", fill = true})
-	-- The preference, which takes effect as the menu closes
-	if WEB and buildat.get_web_address_bar then
-		local hide = buildat.get_web_address_bar() == "hide"
-		accounts.page_button(w, hide and "Show the address bar" or
-				"Hide the address bar", function()
-			buildat.set_web_address_bar(hide and "show" or "hide")
-			open()
+	-- The engine's settings, the keys and the logs: the client's window
+	-- ([GAME_SETTINGS]), over the world; the keys read again after it
+	if buildat.show_game_settings then
+		accounts.page_button(w, "Settings...", function()
+			page(function()
+				buildat.show_game_settings{on_close = function()
+					o.keys.declare()
+					later(open)
+				end}
+			end)
 		end)
 	end
 	-- **The viewing range, the player's own** (user, 2026-09-30), kept on

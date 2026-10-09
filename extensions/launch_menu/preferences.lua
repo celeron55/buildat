@@ -127,6 +127,13 @@ local PREFERENCES = {
 		values = {"hide", "show"},
 		show = function(v) return v == "hide" and "hidden" or "shown" end,
 	},
+	-- The web client's frame rate while unfocused or idle
+	{
+		name = "web_idle_fps",
+		label = "Frame rate while idle",
+		web = true,
+		values = {1, 5, 10, 30, 60},
+	},
 	-- The two logs' levels ([LOG_LEVEL_PREF]): a box report without a
 	-- shell. The client's takes at once, the server's on its next start;
 	-- -l on the command line wins for that run. The logs are
@@ -360,6 +367,281 @@ function M.show()
 		uistack.main:pop(root)
 	end)
 end
+
+--
+-- **A game's settings** ([GAME_SETTINGS], user 2026-10-09):
+-- buildat.show_game_settings{} (client/api.lua) draws this over the game.
+-- The client's code, so it sets what a game may not; the game's own code
+-- runs only in its sections' draw(w, ui). From the top: the game's
+-- sections, Sound, Video (with the web's own rows on the web), Keys (the
+-- game's declared actions and two of the client's), those the builtins
+-- added (accounts' Server), and Logs and errors.
+--
+local GAME_ROWS = {
+	{"Sound", {"sound_volume_db", "sound_mute"}},
+	{"Video", {"render_scale", "max_fps", "vsync", "multisampling",
+		"ui_size", "web_address_bar", "web_idle_fps"}},
+}
+local CLIENT_KEYS_SHOWN = {fullscreen = "Fullscreen", screenshot = "Screenshot"}
+local game = nil
+
+local function game_close(silent)
+	if not game then
+		return
+	end
+	local g = game
+	game = nil
+	magic.UnsubscribeFromEvent("KeyDown", g.key_sub)
+	g.backdrop:Remove()
+	g.win:Remove()
+	if not silent and g.o.on_close then
+		g.o.on_close()
+	end
+end
+
+-- o: on_close, sections; app_key: the key store's id of the game (nil
+-- with none); extra: the builtins' sections
+function M.show_game(o, app_key, extra)
+	game_close(true)
+	local root = magic.ui.root
+	local g = {o = o}
+	game = g
+	-- **Black behind it, over the game's windows**, as builtin/accounts'
+	-- Server window a game opens
+	g.backdrop = root:CreateChild("BorderImage")
+	g.backdrop.color = magic.Color(0, 0, 0, 1)
+	g.backdrop.priority = 101
+	g.backdrop:SetFixedSize(root.width, root.height)
+	local win = root:CreateChild("Window")
+	g.win = win
+	-- Its own style, for a game whose root has none
+	win.defaultStyle = magic.cache:GetResource("XMLFile",
+			"launch_menu/res/main_style.xml")
+	win:SetStyleAuto()
+	win.priority = 102
+	win:SetLayout(LM_VERTICAL, 8, magic.IntRect(12, 12, 12, 12))
+	win:SetAlignment(HA_CENTER, magic.VA_CENTER)
+	local width = math.min(620, root.width - 16)
+	win:SetFixedSize(width, math.min(720, root.height - 16))
+	local top = win:CreateChild("UIElement")
+	top:SetLayout(LM_HORIZONTAL, 8, magic.IntRect(0, 0, 0, 0))
+	top:SetFixedHeight(28)
+	local title = top:CreateChild("Text")
+	title:SetStyleAuto()
+	title.text = "Settings"
+	title:SetFontSize(20)
+	local view = win:CreateChild("ScrollView")
+	view:SetStyleAuto()
+	view.scrollBarsAutoVisible = true
+	local page = view:CreateChild("UIElement")
+	page:SetLayout(LM_VERTICAL, 8, magic.IntRect(4, 4, 8, 4))
+	-- Less the window's border and the vertical bar
+	local inner = width - 24 - 24
+	page:SetFixedWidth(inner)
+	view.contentElement = page
+
+	local function text(parent, t, color, size)
+		local l = parent:CreateChild("Text")
+		l:SetStyleAuto()
+		l:SetWordwrap(true)
+		l:SetFixedWidth(inner - 12)
+		l.text = t
+		if size then l:SetFontSize(size) end
+		if color then l.color = magic.Color(ui_utils.rgb(color)) end
+		return l
+	end
+	local function button(parent, label, on_click)
+		local b = make_row(parent, label)
+		b.minWidth = 0
+		b.minHeight = 28
+		magic.SubscribeToEvent(b, "Released", function() on_click() end)
+		return b
+	end
+	local function dropdown(parent, label, choices, current, on_choose)
+		local list, at = {}, 1
+		for i, c in ipairs(choices) do
+			list[i] = {c[1], i}
+			if c[2] == current then at = i end
+		end
+		return ui_utils.dropdown(parent, list, at, function(_, i)
+			on_choose(choices[i][2])
+		end, {label = label, label_width = math.floor(inner * 0.45),
+			width = math.floor(inner * 0.5)})
+	end
+	local close_button = button(top, "Close", function() game_close() end)
+	close_button:SetFixedWidth(90)
+
+	local shown = {}
+	local function section(t, draw)
+		shown[#shown + 1] = t
+		text(page, t, nil, 17)
+		local w = page:CreateChild("UIElement")
+		w:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
+		local ui = {}
+		ui.text = function(t2, color) return text(w, t2, color) end
+		ui.button = function(label, f) return button(w, label, f) end
+		ui.dropdown = function(label, choices, current, f)
+			return dropdown(w, label, choices, current, f)
+		end
+		ui.toggle = function(label, on, f)
+			return dropdown(w, label, {{"off", false}, {"on", true}},
+					on == true, f)
+		end
+		-- Drawn again, after a change it shows
+		ui.redraw = function()
+			w:RemoveAllChildren()
+			local ok, err = pcall(draw, w, ui)
+			if not ok then
+				log:warning("A settings section failed: " .. tostring(err))
+				text(w, "This section failed: " .. tostring(err), "error")
+			end
+		end
+		-- This window closed for another, which comes back to it with
+		-- back() (accounts' Server window)
+		ui.away = function(f)
+			game_close(true)
+			f(function() M.show_game(o, app_key, extra) end)
+		end
+		ui.redraw()
+	end
+
+	for _, sec in ipairs(o.sections or {}) do
+		section(tostring(sec.title), sec.draw)
+	end
+	for _, group in ipairs(GAME_ROWS) do
+		local rows = {}
+		for _, name in ipairs(group[2]) do
+			for _, pref in ipairs(PREFERENCES) do
+				if pref.name == name and api.get_preference(name) ~= nil then
+					rows[#rows + 1] = pref
+				end
+			end
+		end
+		section(group[1], function(w)
+			for _, pref in ipairs(rows) do
+				local choices = {}
+				for i, v in ipairs(pref.values) do
+					choices[i] = {show_value(pref, v), i}
+				end
+				dropdown(w, pref.label, choices,
+						nearest_index(pref, api.get_preference(pref.name)),
+						function(i)
+					local ok, err = api.set_preference(pref.name, pref.values[i])
+					if not ok then
+						log:warning(pref.name .. ": " .. tostring(err))
+					end
+				end)
+			end
+		end)
+		for _, pref in ipairs(rows) do
+			shown[#shown + 1] = pref.name
+		end
+	end
+
+	-- **Keys**: a row picked says "Press a key..." and the next key binds
+	-- it; Escape leaves it, Backspace puts the default back. The game
+	-- reads its keys again in on_close.
+	local store = api.key_store and api.key_store()
+	local acts = {}
+	for _, a in ipairs(store and store.apps or {}) do
+		if a.id == app_key then acts = a.actions end
+	end
+	local capture = nil
+	shown[#shown + 1] = #acts .. " of the game's keys"
+	section("Keys", function(w, ui)
+		local function row(label, key, set)
+			local b
+			b = button(w, label .. ": " .. (key ~= "" and key or "none"),
+					function()
+				capture = {set = set, redraw = ui.redraw}
+				b:GetChild(0).text = label .. ": press a key..."
+			end)
+		end
+		store = api.key_store()
+		for _, a in ipairs(store.apps) do
+			if a.id == app_key then acts = a.actions end
+		end
+		for _, e in ipairs(acts) do
+			row(e.label, e.key or "", function(name)
+				api.set_app_keys(app_key, {[e.id] = name or false})
+			end)
+		end
+		for _, c in ipairs(store.client) do
+			if CLIENT_KEYS_SHOWN[c.which] then
+				row(CLIENT_KEYS_SHOWN[c.which], c.key or "", function(name)
+					api.set_client_key(c.which, name or c.default)
+				end)
+			end
+		end
+		if #acts > 0 then
+			button(w, "Defaults", function()
+				local all = {}
+				for _, e in ipairs(acts) do all[e.id] = false end
+				api.set_app_keys(app_key, all)
+				ui.redraw()
+			end)
+		end
+	end)
+
+	for _, sec in ipairs(extra or {}) do
+		section(tostring(sec.title), sec.draw)
+	end
+
+	-- [LOG_REACH]'s rows, for a tester mid-game
+	section("Logs and errors", function(w)
+		local path = api.log_path() or ""
+		text(w, path ~= "" and "The log: " .. path or
+				"No log file here: the browser's console (F12) has it.")
+		local status = text(w, "", "dim")
+		if path ~= "" then
+			button(w, "Copy the path", function()
+				ui_utils.copy(path)
+				status.text = "The path is on the clipboard"
+			end)
+			if api.get_preference("web_address_bar") == nil then
+				button(w, "Open the log folder", function()
+					local ok, why = api.open_log_folder()
+					status.text = ok and "Opened" or tostring(why)
+				end)
+			end
+		end
+		button(w, "Copy the last errors", function()
+			ui_utils.copy(api.recent_errors() or "")
+			status.text = "The last errors, with the version, are on the clipboard"
+		end)
+	end)
+
+	ui_utils.keyboard_page(win)
+	-- simplified: not the key that opened it again (the Escape that
+	-- closed a window it went away for); a frame's time rather than a frame
+	local opened = api.get_time_us()
+	g.key_sub = magic.SubscribeToEvent("KeyDown", function(_, data)
+		local key = data:GetInt("Key")
+		if api.get_time_us() - opened < 100000 then
+			return
+		end
+		if capture then
+			local c = capture
+			capture = nil
+			if key == magic.KEY_BACKSPACE then
+				c.set(nil)
+			elseif key ~= KEY_ESCAPE and
+					(magic.input:GetKeyName(key) or "") ~= "" then
+				c.set(magic.input:GetKeyName(key))
+			end
+			c.redraw()
+			return
+		end
+		if key == KEY_ESCAPE and not ui_utils.dropdown_open() then
+			game_close()
+		end
+	end)
+	-- What a check reads
+	log:info("Game settings shown: " .. table.concat(shown, ", "))
+end
+
+-- Closed by the game (it left, or its own key)
+M.close_game = function() game_close(true) end
 
 return M
 -- vim: set noet ts=4 sw=4:

@@ -1729,6 +1729,55 @@ __buildat_served_overrides.set_app_keys = function(_, map)
 	if not id then return false, "set_app_keys: not connected" end
 	return set_app_keys(id, map)
 end
+-- **A game's settings window** ([GAME_SETTINGS]):
+-- show_game_settings{on_close = f, sections = {{title =, draw =
+-- function(w, ui) end}, ...}}, drawn by the client over the game with
+-- the engine's settings, the game's keys and the logs after the game's
+-- sections (extensions/launch_menu/preferences.lua, show_game). A
+-- section's draw(w, ui) fills w with ui.text(t, colour), ui.button(label,
+-- f), ui.dropdown(label, {{label, value}, ...}, current, f(value)),
+-- ui.toggle(label, on, f(on)), or with its own widgets; ui.redraw()
+-- draws it again, ui.away(f) closes the window for another, f(back).
+-- on_close: Close or Escape; the keys may have changed, so a game reads
+-- them again there. add_game_settings_section(name, section): a
+-- builtin's own (accounts' Server), in every game's window, until the
+-- connection ends.
+local game_settings, game_settings_extra = nil, {}
+buildat.safe.show_game_settings = function(o)
+	if type(o) ~= "table" then
+		return false, "show_game_settings{on_close =, sections =}"
+	end
+	local extra = {}
+	for _, name in ipairs(game_settings_extra.order or {}) do
+		extra[#extra + 1] = game_settings_extra[name]
+	end
+	game_settings = game_settings or launch_grid.screens("preferences.lua")
+	game_settings.show_game({on_close = o.on_close,
+		sections = type(o.sections) == "table" and o.sections or nil},
+		served_key_app(), extra)
+	return true
+end
+buildat.safe.add_game_settings_section = function(name, section)
+	if type(name) ~= "string" or type(section) ~= "table" or
+			type(section.draw) ~= "function" then
+		return false, "add_game_settings_section(name, {title =, draw =})"
+	end
+	game_settings_extra.order = game_settings_extra.order or {}
+	if not game_settings_extra[name] then
+		table.insert(game_settings_extra.order, name)
+	end
+	game_settings_extra[name] = {title = section.title or name,
+		draw = section.draw}
+	return true
+end
+-- The connection's sandbox reset (sandbox.lua): its sections dropped, and
+-- the window, whose game is gone
+function __buildat_game_settings_reset()
+	game_settings_extra = {}
+	if game_settings then
+		game_settings.close_game()
+	end
+end
 -- Whether the client has a local server up, which is how a launcher
 -- knows a launch action started a game rather than opening a screen
 buildat.safe.local_server_running = __buildat_local_server_running
