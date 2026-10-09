@@ -321,11 +321,63 @@ local function launch_history_note(key)
 	f:close()
 end
 
+-- **A game or an app just installed is on the recent list**
+-- ([INSTALLED_RECENT]): one this side has never seen in the list is noted
+-- as launched now. A Luanti game, or an installed app's first action (its
+-- own tile; not move_saves, not Feedback). The keys seen are one a line in
+-- <user>/launch_seen.csv, an app's without its version, so a new version
+-- is not new. With no such file every one there now is seen and none
+-- noted: an upgrade of the client puts nothing on the list.
+local function launch_note_installed(actions)
+	local path = __buildat_get_path("user") .. "/launch_seen.csv"
+	local seen, first_run = {}, true
+	local f = io.open(path, "r")
+	if f then
+		first_run = false
+		for line in f:lines() do
+			seen[line] = true
+		end
+		f:close()
+	end
+	local froms, new = {}, {}
+	for i, a in ipairs(actions) do
+		local key = tostring(a.from) .. "/" .. tostring(a.id or i)
+		local app = a.kind == "installed" and not froms[a.from]
+		froms[a.from] = true
+		if a.category == "game" or app then
+			local id = key:gsub("^(installed/[^/@]*)@[^/]*", "%1")
+			if not seen[id] then
+				seen[id] = true
+				new[#new + 1] = id
+				if not first_run then
+					launch_history_note(key)
+				end
+			end
+		end
+	end
+	if #new == 0 and not first_run then
+		return
+	end
+	f = io.open(path, "a")
+	if not f then
+		log:warning("launch: cannot write " .. path)
+		return
+	end
+	for _, id in ipairs(new) do
+		if not id:find("%c") then
+			f:write(id .. "\n")
+		end
+	end
+	f:close()
+end
+
 buildat.safe.launch_actions = function()
 	local out = {}
+	local actions = launch_grid.actions(log)
+	launch_note_installed(actions)
 	local history = launch_history_read()
 	launch_runs = {}
-	for i, a in ipairs(launch_grid.actions(log)) do
+	for i, a in ipairs(actions) do
 		local key = tostring(a.from) .. "/" .. tostring(a.id or i)
 		launch_runs[key] = a.run
 		out[i] = {key = key, id = a.id, label = a.label, icon = a.icon,
