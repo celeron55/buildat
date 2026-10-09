@@ -51,27 +51,22 @@ end
 -- curve: the sky's band is brightened by it as a radiance, and the
 -- ambient, the bounce and the ground light take a share of it, in the
 -- glow's orange. Dusk is the mirror, the sun's height being the same.
---   BUILDAT_LUANTI_DAWN_GLOW     the band's radiance at its peak
---   BUILDAT_LUANTI_DAWN_AMBIENT  the share of it the ambient terms take
--- The defaults are the user's pick off local/options_for_DAWN_LIGHT/glow/,
+-- The band's radiance at its peak and the share of it the ambient terms
+-- take are the user's pick off local/options_for_DAWN_LIGHT/glow/,
 -- g1.0_a0.3 (2026-10-03).
-M.DAWN_GLOW = tonumber(buildat.get_env("BUILDAT_LUANTI_DAWN_GLOW") or "") or 1.0
-M.DAWN_AMBIENT = tonumber(buildat.get_env("BUILDAT_LUANTI_DAWN_AMBIENT") or "")
-		or 0.3
+M.DAWN_GLOW = 1.0
+M.DAWN_AMBIENT = 0.3
 M.DAWN_COLOR = {r = 1.0, g = 0.55, b = 0.25}
 -- [DUSK_SKY], pbr only: the band round the low sun is this many times the
 -- sky's own level, in the glow's orange (a fixed white before, which was
 -- a white patch on a black sky after sunset), and the glow reaches the
 -- dome away from the sun at this share of what it is towards it.
---   BUILDAT_LUANTI_DUSK_BAND, BUILDAT_LUANTI_DUSK_AWAY
-M.DUSK_BAND = tonumber(buildat.get_env("BUILDAT_LUANTI_DUSK_BAND") or "") or 2.0
-M.DUSK_AWAY = tonumber(buildat.get_env("BUILDAT_LUANTI_DUSK_AWAY") or "") or 0.3
+M.DUSK_BAND = 2.0
+M.DUSK_AWAY = 0.3
 -- [DUSK_CLOUD]: the share of the glow and the band the sky itself shows
--- (the ambient keeps all of it), and a gain on the glow the clouds get as
--- sky light (1 is the dome's mean).
---   BUILDAT_LUANTI_DUSK_SKY, BUILDAT_LUANTI_DUSK_CLOUD
-M.DUSK_SKY = tonumber(buildat.get_env("BUILDAT_LUANTI_DUSK_SKY") or "") or 0.7
-M.DUSK_CLOUD = tonumber(buildat.get_env("BUILDAT_LUANTI_DUSK_CLOUD") or "") or 1
+-- (the ambient keeps all of it); the clouds get the glow as sky light at
+-- the dome's mean (the user kept gain 1 off local/options_for_DUSK_CLOUD/).
+M.DUSK_SKY = 0.7
 
 -- **Luanti's dusk colours** ([DUSK_PARITY], the parity modes): its
 -- directional coloured fog, on by default, mixes the horizon half way and
@@ -130,14 +125,10 @@ M.DUSK_PEAK = -0.151  -- 19:30, 04:30
 -- holds it at one brightness, so it read as a flat orange hour. The
 -- predawn light keeps its own -0.403.
 M.DUSK_TO = -0.279  -- 19:55, 04:05
--- How each part of it is crossed, the options round's two:
---   BUILDAT_LUANTI_DUSK_CURVE=linear|eased
-M.DUSK_CURVE = buildat.get_env("BUILDAT_LUANTI_DUSK_CURVE") or "eased"
+-- Each part of it crossed eased (smoothstep); linear was the options
+-- round's other, and the meter hides the difference (e24fb6e6)
 local function dusk_shape(u)
 	u = clamp01(u)
-	if M.DUSK_CURVE == "linear" then
-		return u
-	end
 	return u * u * (3 - 2 * u)
 end
 

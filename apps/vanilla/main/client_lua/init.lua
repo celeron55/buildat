@@ -1409,15 +1409,9 @@ local WHITE_DISC_COLOR = {r = 1, g = 1, b = 1}
 -- chunk being at Lua 5.1's two hundred locals.
 local SKY_ENV = {
 	ablate = buildat.get_env("BUILDAT_LUANTI_ABLATE") or "",
-	predawn_mode = buildat.get_env("BUILDAT_LUANTI_PREDAWN_MODE"),
 	translucency = tonumber(
 			buildat.get_env("BUILDAT_LUANTI_TRANSLUCENCY") or ""),
-	cave_ao_floor = tonumber(
-			buildat.get_env("BUILDAT_CAVE_AO_FLOOR") or "") or PHYS.cave_floor,
-	chamber_light = tonumber(
-			buildat.get_env("BUILDAT_CHAMBER_LIGHT") or "") or 1.0,
 	light_log = buildat.get_env("BUILDAT_LUANTI_LIGHT_LOG") == "1",
-	zone_tint = buildat.get_env("BUILDAT_LUANTI_ZONE_TINT") == "1",
 	cloud_n = tonumber(buildat.get_env("BUILDAT_LUANTI_CLOUD_N") or ""),
 }
 
@@ -1710,9 +1704,9 @@ local function apply_sky_of_hour(force)
 		-- And the dusk glow is sky light too: what a cloud gets of it is
 		-- the dome's mean of LuantiSky's glow term, (1 - y)^2 over the
 		-- hemisphere (a third) times away + (1 - away) of a quarter for
-		-- cos^2 towards the sun. BUILDAT_LUANTI_DUSK_CLOUD scales it.
+		-- cos^2 towards the sun.
 		local gm = luanti_sky.dawn_glow(sky_now.height or 0) *
-				luanti_sky.DUSK_SKY * luanti_sky.DUSK_CLOUD *
+				luanti_sky.DUSK_SKY *
 				(luanti_sky.DUSK_AWAY + (1 - luanti_sky.DUSK_AWAY) / 4) / 3
 		local gc = luanti_sky.DAWN_COLOR
 		world_sky:set_cloud_lit(
@@ -1934,27 +1928,7 @@ local function update_sky(dt)
 		-- multiplies by how much sky the face sees. First cut of the
 		-- two-term ambient ([PBR_FIT] term 2): one colour for the whole
 		-- hemisphere, no ground bounce yet.
-		-- [DAWN_LIGHT]: and the hour before the sun, if it is asked for.
-		-- The term raises the *day factor*, which lights the unlit and
-		-- parity paths and tints the sky's colours; the pbr ambient is
-		-- PHYS.sky(height) and never saw it, so the two dawn windows read
-		-- the same with the term on and off -- 0.14 of a level at 04:30,
-		-- where the day factor quadruples (measured 2026-09-25, the sheet
-		-- is in local/options_for_DAWN_LIGHT/). These are the two ways to
-		-- connect it, for the ladder that picks between them:
-		--   BUILDAT_LUANTI_PREDAWN_MODE=light   the ramp is a share of the
-		--       day's sky in its own right, so 04:30 gets a sixth of it;
-		--   BUILDAT_LUANTI_PREDAWN_MODE=height  the ramp raises the sun
-		--       instead and the one curve answers, which is gentler and
-		--       keeps a single shape for the whole day.
-		-- Unset, the pbr path is what it was and no look moves.
 		local f = PHYS.sky(height)
-		local predawn_mode = SKY_ENV.predawn_mode
-		if predawn_now > 0 and predawn_mode == "light" then
-			f = math.max(f, predawn_now)
-		elseif predawn_now > 0 and predawn_mode == "height" then
-			f = math.max(f, PHYS.sky(height + predawn_now))
-		end
 		-- What a horizontal face receives over pi: the render's grass
 		-- (albedo 0.036) reads 1.50 sunlit at 13:00 and 0.15 in the
 		-- shade at 05:45, which leaves the dome at about the zenith's
@@ -2033,12 +2007,11 @@ local function update_sky(dt)
 		-- is what [UNDERGROUND_LIGHT]'s invariant needs. PHYS.cave_floor,
 		-- shared with luanti_client (0.04 picked by the user 2026-09-25 off
 		-- local/options_for_UNDERGROUND_LIGHT/, lowered by
-		-- [CAVE_EXPOSURE_FLOOR]). BUILDAT_CAVE_AO_FLOOR overrides it, 0
-		-- turning it off.
+		-- [CAVE_EXPOSURE_FLOOR]).
 		-- What the camera's own rays say the chamber has, read once: the
 		-- floor below and the bounce term's scale both take it
 		local chamber_read = voxel_shading.chamber_light()
-		local floor_f = SKY_ENV.cave_ao_floor
+		local floor_f = PHYS.cave_floor
 		-- **Only where the chamber is dark** (2026-09-25): the floor is
 		-- hour-independent on purpose -- that is what keeps a sealed
 		-- room equal at both hours -- but applied everywhere it lifts
@@ -2066,14 +2039,8 @@ local function update_sky(dt)
 		-- vp10, which nothing reaches, stops following the hour (21.47 at
 		-- noon against 0.00 at night, both 0.00 now) while vp8, a cave
 		-- lit round a corner, keeps 87% of its daylight.
-		-- BUILDAT_CHAMBER_LIGHT overrides the gain, above 1 to brighten a
-		-- lit chamber and 0 to leave the shader's floor whole.
-		local chamber_gain = SKY_ENV.chamber_light
-		local chamber = 1.0
-		if chamber_gain > 0 then
-			chamber = chamber_gain * chamber_read
-			voxel_shading.set_chamber_light(chamber)
-		end
+		local chamber = chamber_read
+		voxel_shading.set_chamber_light(chamber)
 		cave_ambient_now = chamber
 		-- **Every term of the light, said out loud** under
 		-- BUILDAT_LUANTI_LIGHT_LOG=1 ([UNDERGROUND_LIGHT]): the sky
@@ -2103,14 +2070,6 @@ local function update_sky(dt)
 		end
 		local abl = SKY_ENV.ablate
 		if abl:find("amb") then zone.ambientColor = magic.Color(0, 0, 0) end
-		-- BUILDAT_LUANTI_ZONE_TINT=1: the world zone's ambient turned
-		-- bright red ([SKY_COLUMN_CAVE], 2026-09-28). Zeroing it says
-		-- nothing when a surface is already dark, but a surface that does
-		-- not go red is a surface reading somebody else's zone -- which is
-		-- the question a night frame that survives ABLATE=amb asks.
-		if SKY_ENV.zone_tint then
-			zone.ambientColor = magic.Color(1, 0, 0)
-		end
 		if abl:find("bounce") then voxel_shading.set_bounce_light(0, 0, 0) end
 		if abl:find("ground") then voxel_shading.set_ground_light(0, 0, 0) end
 		if abl:find("lamp") then voxel_shading.set_lamp_light(0, 0, 0) end
