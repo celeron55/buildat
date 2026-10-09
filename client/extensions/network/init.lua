@@ -269,6 +269,10 @@ end
 -- description wins: that is what the user left there.
 local function ask_user(server, uri, entry, on_answer, suggested)
 	local answer
+	-- [AITTA_NET_DESC] So that the next caller without one is found
+	if (suggested or "") == "" then
+		log:warning("no description from the caller for "..uri)
+	end
 	local root = uistack.main:push({desc="network permission dialog"})
 	root.defaultStyle = magic.cache:GetResource(
 			"XMLFile", "launch_menu/res/main_style.xml")
@@ -342,6 +346,9 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 	end
 
 	local accept = menu:add("Accept", function() answer(true) end)
+	-- Return in the field accepts what is typed, empty too, as Accept
+	-- does ([AITTA_NET_DESC])
+	magic.SubscribeToEvent(edit, "TextFinished", function() answer(true) end)
 	menu:add("Decline", function() answer(false) end)
 	-- ([ACCEPT_FOCUS]) A description already there leaves Enter to accept
 	-- it; an empty one wants typing first

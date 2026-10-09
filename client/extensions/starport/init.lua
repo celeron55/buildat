@@ -2463,7 +2463,7 @@ local function aitta_page(message, query, on_discuss)
 			if waiting == 0 then
 				show_all()
 			end
-		end)
+		end, {description = "Aitta (app list)"})
 	end
 	if waiting == 0 then
 		status:SetText("No Aittas in the Starport settings")
@@ -2491,6 +2491,7 @@ local function aitta_page(message, query, on_discuss)
 					local base = rel.aitta .. "/api/aitta/archive/" ..
 							tostring(rel.sha256)
 					status:SetText("Fetching " .. k .. "...")
+					local options = {description = "Aitta (install)"}
 					network.http_get(base .. ".sig", function(sig, err1)
 						if not sig then
 							status:SetText("Could not fetch: " .. tostring(err1))
@@ -2517,8 +2518,8 @@ local function aitta_page(message, query, on_discuss)
 									": it is on the grid")) or
 									("Not installed: " .. tostring(why)), nil,
 									on_discuss)
-						end)
-					end)
+						end, options)
+					end, options)
 				end, not installed)
 				-- Without its own, the Hearth its Aitta's Starport recommends
 				if not (type(rel.home_hearth) == "string" and

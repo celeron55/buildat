@@ -75,7 +75,7 @@ function M.boot()
 				done = true
 			end
 		end)
-	end)
+	end, {description = "network_test"})
 end
 
 return M

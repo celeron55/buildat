@@ -1002,7 +1002,9 @@ udp_connect(host: string, port: number, cb: function [, options])
 - cb(socket, error) is called once the user has answered; socket is nil if the
   connection was not made or the user declined. options.description fills the
   permission dialog's description field, editable, the answer still the
-  user's ([NET_DESC]); http_get takes the same.
+  user's ([NET_DESC]); http_get takes the same. A call without one logs
+  "no description from the caller for <uri>" when the dialog asks. Return
+  in the field accepts, as Accept does.
 http_get(url, cb [, options])
 http_post(url, json_body, cb [, options])
 - cb(body) or cb(nil, error), fetched on a thread and read back on Update.

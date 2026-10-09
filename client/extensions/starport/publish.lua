@@ -305,7 +305,7 @@ local function ask_info(url, pub, done)
 					tostring(err or "no answer")}
 		end
 		done()
-	end)
+	end, {description = "Aitta (publishing)"})
 end
 
 -- The release up: its .sig, which says who signed what, then the archive
@@ -336,7 +336,7 @@ local function upload(url, zip_path, done)
 				return done(nil, tostring(v.error))
 			end
 			next_step(v)
-		end)
+		end, {description = "Aitta (publishing)"})
 	end
 	local sha = tostring(sv.sha256)
 	local function part(at)
