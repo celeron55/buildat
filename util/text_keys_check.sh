@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: quick
-# cost: ~1 min (2026-10-10)
-# covers: 3rdparty/Urho3D/Source/Urho3D/UI/LineEdit.cpp src/client/web/index.html
+# cost: ~45 s (2026-10-10)
+# covers: 3rdparty/Urho3D/Source/Urho3D/UI/LineEdit.cpp src/client/web/index.html client/extensions/uistack/init.lua
 # [TEXT_KEYS], the text field's keys and clicks, by the ui scan's text,
 # cursor and selection after each step:
 #   1. Single-line, launch_menu's "Join a Buildat server" Address: Ctrl+A
@@ -13,8 +13,12 @@
 #      text selected, nothing sent); a triple-click selects the line; Home and
 #      Alt+Backspace at a line's start join it to the one above, past its
 #      trailing spaces.
-#   3. The web page's Alt+Backspace is there, by the same word rule (the
-#      handler read, not run: the web smoke drives the page).
+#   [TEXT_UNDO]: in 1, "alpha beta" typed over the selection and "beta"
+#      pasted over "alpha"; Ctrl+Z twice, Ctrl+Y, Ctrl+Shift+Z, the text,
+#      cursor and selection each time. In 2, Ctrl+Z undoes the join.
+#   3. The web page's word rule (its wordLeft run by node), and in Firefox
+#      (util/text_keys_web.json) Alt+Backspace, Ctrl+Z and Ctrl+Shift+Z in
+#      the floorplanner's login name field.
 # Screenshots in $t (KEEP_TMP=1 keeps it).
 #
 #   util/text_keys_check.sh
@@ -44,7 +48,13 @@ s+="$(ctrl Left)keydown shift\n$(ctrl Right)keyup shift\nevent scan s3\n"
 s+='keypress End\nkeydown alt\nkeypress Backspace\nkeyup alt\ndelay 200\nevent scan s4\n'
 s+="$(ctrl Backspace)event scan s5\nkeypress Home\n$(ctrl Delete)event scan s6\n"
 s+='mouse_pos 772 285\ndelay 300\nmouse_click left\nmouse_click left\ndelay 200\nevent scan s7\n'
-s+="delay 1000\nmouse_click left\nmouse_click left\nmouse_click left\ndelay 200\nevent scan s8\nscreenshot $t/single.png\nquit\n"
+s+="delay 1000\nmouse_click left\nmouse_click left\nmouse_click left\ndelay 200\nevent scan s8\nscreenshot $t/single.png\n"
+# [TEXT_UNDO]: typed over the selection, "beta" copied and pasted over
+# "alpha", then back and forth
+s+="text alpha beta\ndelay 200\nkeypress End\nkeydown shift\n$(ctrl Left)keyup shift\n$(ctrl C)"
+s+="keypress Home\nkeydown shift\n$(ctrl Right)keyup shift\n$(ctrl V)event scan u1\n"
+s+="$(ctrl Z)event scan u2\n$(ctrl Z)event scan u3\n$(ctrl Y)event scan u4\n"
+s+="keydown shift\n$(ctrl Z)keyup shift\nevent scan u5\nquit\n"
 printf "$s" > "$t/single.cmds"
 timeout 60 bin/buildat -m launch_menu -D "$t/cl" -w 1280x720 -l 3 \
 	-o sound_mute=1 -c @"$t/single.cmds" > "$t/single.log" 2>&1
@@ -60,6 +70,12 @@ want $L s6 $A 'text " wörld " cursor 0 text " wörld "'
 want $L s7 $A 'text " wörld " cursor 6 text " wörld " selection 1+5'
 want $L s8 $A 'text " wörld " cursor 7 text " wörld " selection 0+7'
 echo "ok: single-line: Ctrl+A, by word, the word deletes, the double and triple click"
+want $L u1 $A 'text "beta beta" cursor 4 text "beta beta"'
+want $L u2 $A 'text "alpha beta" cursor 5 text "alpha beta" selection 0+5'
+want $L u3 $A 'text " wörld " cursor 7 text " wörld " selection 0+7'
+want $L u4 $A 'text "alpha beta" cursor 5 text "alpha beta" selection 0+5'
+want $L u5 $A 'text "beta beta" cursor 4 text "beta beta"'
+echo "ok: undo: Ctrl+Z twice back over a paste and a typing, Ctrl+Y and Ctrl+Shift+Z forward"
 
 # 2. Multi-line, Hearth's reply field
 start_server "$t/srv.log" "setup code" 120 auto \
@@ -84,6 +100,7 @@ grep -aq '"id":1001,.*"ok":true' "$t/setup.log" || fail "the thread: $(grep -a '
 m='delay 6000\ntext one two  x\nkeypress Backspace\nkeypress Return\ntext three four\ndelay 300\nevent scan m1\n'
 m+="$(ctrl A)event scan m2\nmouse_pos 290 201\ndelay 300\nmouse_click left\nmouse_click left\nmouse_click left\ndelay 200\nevent scan m3\n"
 m+='keypress Home\nkeydown alt\nkeypress Backspace\nkeyup alt\ndelay 200\nevent scan m4\n'
+m+="$(ctrl Z)event scan m5\n"
 m+="screenshot $t/multi.png\nquit\n"
 hearth "$t/multi.log" "" "$m" BUILDAT_HEARTH_OPEN=1
 grep -aq "Lua runtime error" "$t/multi.log" && fail "a Lua error in the multi-line drive"
@@ -94,8 +111,9 @@ wantm m1 'text "one two  |three four" cursor 20 selection 0+0'
 wantm m2 'text "one two  |three four" cursor 20 selection 0+20'
 wantm m3 'text "one two  |three four" cursor 20 selection 10+10'
 wantm m4 'text "one twothree four" cursor 7 selection 0+0'
+wantm m5 'text "one two  |three four" cursor 10 selection 0+0'
 curl -s "http://127.0.0.1:$SERVER_PORT/t/1" | grep -q "three" && fail "Ctrl+A in the reply field sent it"
-echo "ok: multi-line: Ctrl+A the field's, the triple-click a line, Alt+Backspace at a line's start joins it"
+echo "ok: multi-line: Ctrl+A the field's, the triple-click a line, Alt+Backspace at a line's start joins it, Ctrl+Z parts them"
 
 # 3. The web page's word rule, its own function run by node
 if command -v node > /dev/null; then
@@ -114,4 +132,15 @@ JS
 else
 	echo "skip: no node for the web page's word rule"
 fi
-echo "PASS: Ctrl+A, the word moves and deletes and the clicks, single- and multi-line; the web page's Alt+Backspace (see $t/*.png)"
+# The web client's name field in Firefox (web/ from util/build_web.sh)
+if [ -f "$here/web/buildat.js" ] && command -v firefox > /dev/null; then
+	"$here/util/web_drive.sh" firefox floorplanner "$here/util/text_keys_web.json" \
+		"$t/web" > "$t/web.out" 2>&1 || fail "the web drive: $(tail -3 "$t/web.out")"
+	got=$(grep -a "^eval: " "$t/web.out" | tr '\n' '|')
+	[ "$got" = 'eval: "typed alpha beta"|eval: "word alpha "|eval: "undone alpha beta"|eval: "redone alpha "|' ] ||
+		fail "the web field: $got"
+	echo "ok: the web client: Alt+Backspace, Ctrl+Z and Ctrl+Shift+Z in a field"
+else
+	echo "skip: no web/ or no firefox for the web field"
+fi
+echo "PASS: undo and redo; Ctrl+A, the word moves and deletes and the clicks, single- and multi-line; the web client's Alt+Backspace and undo (see $t/*.png)"

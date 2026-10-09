@@ -476,6 +476,13 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		});
 		// And a password input's, which puts nothing in the text
 		e.addEventListener('keydown', function(ev){
+			// Undo and redo are the field's own ([TEXT_UNDO], LineEdit
+			// hears the keys too): the browser's would undo the syncs
+			var k = ev.key.toLowerCase();
+			if((ev.ctrlKey || ev.metaKey) && (k === 'z' || k === 'y')){
+				ev.preventDefault();
+				return;
+			}
 			// Alt+Backspace deletes back a word, which Firefox and Chromium
 			// on Linux do not
 			if(ev.key === 'Backspace' && ev.altKey && !ev.ctrlKey && !e.readOnly){

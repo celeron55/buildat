@@ -304,7 +304,22 @@ beside it. A double-click selects the word under it (Urho's selected all),
 a third click within the double-click time the whole text, or the line in a
 multi-line field (lastDoubleClick_, SelectRange). In the browser the
 textarea does all of it but Alt+Backspace, which src/client/web/index.html
-does by the same rule.
+does by the same rule; LineEdit::OnKey leaves those keys to it there.
+
+Undo and redo ([TEXT_UNDO])
+---------------------------
+UI/LineEdit.{cpp,h}
+
+Ctrl+Z undoes, Ctrl+Y and Ctrl+Shift+Z redo, per field: LineEdit::Undo and
+Redo over whole-text snapshots (the text, the cursor and the selection),
+at most 100 steps or 1 MB a field, the oldest dropped. A step is taken
+before a paste, a cut, a word or a selection deleted, typing over a
+selection and a script's SetText (not a field's first text); typing and
+erasing a character at a time go on one step until a pause of a second,
+another kind of edit or, typing, a word begun. A new edit clears the redo
+steps. In the browser the page keeps the textarea's own undo from the keys
+and its syncs come in through SetTextAsTyped, as typing: both clients have
+the same steps.
 
 The web's touch: the first finger's mouse in pixels ([FP_TOUCH])
 ----------------------------------------------------------------

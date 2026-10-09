@@ -352,7 +352,8 @@ static void web_text_sync(magic::UI *ui)
 		const char *comma = strchr(a, ',');
 		if(e && a[0] == 'v' && comma && e->IsEditable()){
 			unsigned caret = (unsigned)atoi(a + 1);
-			e->SetText(magic::String(comma + 1));
+			// The user's own edit: an undo step as typing is ([TEXT_UNDO])
+			e->SetTextAsTyped(magic::String(comma + 1));
 			e->SetCursorPosition(caret);
 			e->GetTextElement()->ClearSelection();
 		} else if(e && a[0] == 'i'){

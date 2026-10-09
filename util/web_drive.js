@@ -18,6 +18,7 @@
 //   ["key", name]           Tab, Enter, Escape, Space, Backspace, F1..F12,
 //                           Up, Down, Left, Right, or one character
 //   ["selall"]              Ctrl+A
+//   ["chord", "Ctrl+Shift+z"] a key with Ctrl, Alt and Shift held
 //   ["click", x, y]         left button, in CSS pixels
 //   ["mouse", x, y]         the pointer there, no button
 //   ["wheel", x, y, dy]     the mouse wheel turned over x, y by dy CSS
@@ -85,6 +86,16 @@ const KEYS = {
 	Down: ["", "ArrowDown", 40], Left: ["", "ArrowLeft", 37],
 	Right: ["", "ArrowRight", 39],
 };
+// A chord's modifiers: WebDriver's key value, CDP's modifier bit
+const MODS = {Alt: ["\uE00A", 1], Ctrl: ["\uE009", 2], Shift: ["\uE008", 8]};
+const chordOf = c => {
+	const parts = c.split("+");
+	const k = parts.pop();
+	for (const m of parts)
+		if (!MODS[m])
+			throw new Error("chord: " + m + " is not Alt, Ctrl or Shift");
+	return [parts, k];
+};
 for (let n = 1; n <= 12; n++)
 	KEYS["F" + n] = [String.fromCharCode(0xE031 + n - 1), "F" + n, 111 + n];
 
@@ -145,6 +156,13 @@ async function firefox() {
 				wait: "complete"}),
 		type: t => keys([...t].flatMap(press)),
 		key: k => keys(press(KEYS[k] ? KEYS[k][0] : k)),
+		chord: ch => {
+			const [mods, k] = chordOf(ch);
+			const v = mods.map(m => MODS[m][0]);
+			return keys([...v.map(x => ({type: "keyDown", value: x})),
+					...press(KEYS[k] ? KEYS[k][0] : k),
+					...v.reverse().map(x => ({type: "keyUp", value: x}))]);
+		},
 		selall: () => keys([{type: "keyDown", value: ""},
 				...press("a"), {type: "keyUp", value: ""}]),
 		click: (x, y) => c.send("input.performActions", {context: ctx,
@@ -261,6 +279,10 @@ async function chrome() {
 		},
 		key: k => key(k),
 		selall: () => key("a", 2),
+		chord: ch => {
+			const [mods, k] = chordOf(ch);
+			return key(k, mods.reduce((a, m) => a | MODS[m][1], 0));
+		},
 		click: async (x, y) => {
 			for (const type of ["mouseMoved", "mousePressed", "mouseReleased"])
 				await c.send("Input.dispatchMouseEvent", {type, x, y,

@@ -47,6 +47,8 @@ LineEdit::LineEdit(Context* context) :
     cursorPosition_(0),
     dragBeginCursor_(M_MAX_UNSIGNED),
     lastDoubleClick_(0),
+    lastEditKind_(-1),
+    lastEditTime_(0),
     cursorBlinkRate_(1.0f),
     cursorBlinkTimer_(0.0f),
     maxLength_(0),
@@ -167,6 +169,77 @@ static unsigned WordRight(const PODVector<unsigned>& cs, unsigned pos)
     while (pos < cs.Size() && IsWordChar(cs[pos]))
         ++pos;
     return pos;
+}
+
+// buildat [TEXT_UNDO]: what starts an undo step. Typing, and erasing a
+// character at a time, go on one step until a pause of a second, an edit of
+// another kind or, typing, a word begun; anything else is a step of its own.
+static const int EDIT_STEP = 0, EDIT_TYPE = 1, EDIT_ERASE = 2;
+// simplified: whole-text snapshots, capped by count and size with the oldest
+// dropped; a diff per step is the upgrade if a long text's memory shows up
+static const unsigned UNDO_MAX_STEPS = 100, UNDO_MAX_BYTES = 1024 * 1024;
+
+LineEdit::EditState LineEdit::GetEditState() const
+{
+    EditState s;
+    s.text_ = line_;
+    s.cursor_ = cursorPosition_;
+    s.selectionStart_ = text_->GetSelectionStart();
+    s.selectionLength_ = text_->GetSelectionLength();
+    return s;
+}
+
+void LineEdit::RestoreEditState(const EditState& s)
+{
+    line_ = s.text_;
+    cursorPosition_ = Min(s.cursor_, line_.LengthUTF8());
+    UpdateText();
+    if (s.selectionLength_)
+        text_->SetSelection(s.selectionStart_, s.selectionLength_);
+    else
+        text_->ClearSelection();
+    UpdateCursor();
+    lastEditKind_ = -1;
+}
+
+void LineEdit::Snapshot(int kind, bool wordStart)
+{
+    unsigned now = SDL_GetTicks();
+    bool goesOn = kind != EDIT_STEP && kind == lastEditKind_ && now - lastEditTime_ < 1000 && !wordStart;
+    lastEditKind_ = kind;
+    lastEditTime_ = now;
+    redo_.Clear();
+    if (goesOn)
+        return;
+    undo_.Push(GetEditState());
+    unsigned bytes = 0;
+    for (unsigned i = 0; i < undo_.Size(); ++i)
+        bytes += undo_[i].text_.Length();
+    while (undo_.Size() > 1 && (undo_.Size() > UNDO_MAX_STEPS || bytes > UNDO_MAX_BYTES))
+    {
+        bytes -= undo_[0].text_.Length();
+        undo_.Erase(0);
+    }
+}
+
+void LineEdit::Undo()
+{
+    if (!editable_ || undo_.Empty())
+        return;
+    redo_.Push(GetEditState());
+    EditState s = undo_.Back();
+    undo_.Pop();
+    RestoreEditState(s);
+}
+
+void LineEdit::Redo()
+{
+    if (!editable_ || redo_.Empty())
+        return;
+    undo_.Push(GetEditState());
+    EditState s = redo_.Back();
+    redo_.Pop();
+    RestoreEditState(s);
 }
 
 void LineEdit::SelectRange(unsigned start, unsigned end)
@@ -313,6 +386,13 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
     // here as well would paste twice
     if ((key == KEY_X || key == KEY_C || key == KEY_V) && (qualifiers & QUAL_CTRL))
         return;
+    // buildat [TEXT_KEYS]: and the word keys and select all, which the
+    // browser does in the textarea and the page does Alt+Backspace by the
+    // same rule; done here too, a word would go twice. Undo is this field's
+    // ([TEXT_UNDO]): the page keeps the browser's own from it.
+    if ((qualifiers & (QUAL_CTRL | QUAL_ALT)) && (key == KEY_A || key == KEY_LEFT ||
+        key == KEY_RIGHT || key == KEY_BACKSPACE || key == KEY_DELETE))
+        return;
 #endif
     bool changed = false;
     bool cursorMoved = false;
@@ -375,6 +455,8 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
 
             if (key == KEY_X && editable_)
             {
+                if (length)
+                    Snapshot(EDIT_STEP);
                 if (start + length < line_.LengthUTF8())
                     line_ = line_.SubstringUTF8(0, start) + line_.SubstringUTF8(start + length);
                 else
@@ -392,6 +474,7 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
             const String& clipBoard = GetSubsystem<UI>()->GetClipboardText();
             if (!clipBoard.Empty())
             {
+                Snapshot(EDIT_STEP);
                 // Remove selected text first
                 if (text_->GetSelectionLength() > 0)
                 {
@@ -413,6 +496,22 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
             }
         }
         break;
+
+    // buildat [TEXT_UNDO]: Ctrl+Z undoes, Ctrl+Y and Ctrl+Shift+Z redo
+    case KEY_Z:
+        if (qualifiers & QUAL_CTRL)
+        {
+            if (qualifiers & QUAL_SHIFT)
+                Redo();
+            else
+                Undo();
+        }
+        return;
+
+    case KEY_Y:
+        if (qualifiers & QUAL_CTRL)
+            Redo();
+        return;
 
     // buildat [TEXT_KEYS]: Ctrl+A selects all
     case KEY_A:
@@ -499,6 +598,7 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
                     end = WordRight(Chars(line_), cursorPosition_);
                 if (cursorPosition_ < line_.LengthUTF8())
                 {
+                    Snapshot(qualifiers & QUAL_CTRL ? EDIT_STEP : EDIT_ERASE);
                     line_ = line_.SubstringUTF8(0, cursorPosition_) + line_.SubstringUTF8(end);
                     changed = true;
                 }
@@ -506,6 +606,7 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
             else
             {
                 // If a selection exists, erase it
+                Snapshot(EDIT_STEP);
                 unsigned start = text_->GetSelectionStart();
                 unsigned length = text_->GetSelectionLength();
                 if (start + length < line_.LengthUTF8())
@@ -545,6 +646,7 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
                 if (line_.LengthUTF8() && cursorPosition_)
                 {
                     unsigned start = cursorPosition_ - 1;
+                    Snapshot(qualifiers & (QUAL_CTRL | QUAL_ALT) ? EDIT_STEP : EDIT_ERASE);
                     if (qualifiers & (QUAL_CTRL | QUAL_ALT))
                         start = WordLeft(Chars(line_), cursorPosition_);
                     line_ = line_.SubstringUTF8(0, start) + line_.SubstringUTF8(cursorPosition_);
@@ -555,6 +657,7 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
             else
             {
                 // If a selection exists, erase it
+                Snapshot(EDIT_STEP);
                 unsigned start = text_->GetSelectionStart();
                 unsigned length = text_->GetSelectionLength();
                 if (start + length < line_.LengthUTF8())
@@ -615,6 +718,13 @@ void LineEdit::OnTextInput(const String& text)
     const String newText = eventData[P_TEXT].GetString().SubstringUTF8(0);
     if (!newText.Empty() && (!maxLength_ || line_.LengthUTF8() + newText.LengthUTF8() <= maxLength_))
     {
+        // buildat [TEXT_UNDO]: a paste, or typing over a selection, is a
+        // step; typing goes on one until a word is begun
+        if (text_->GetSelectionLength() || newText.LengthUTF8() > 1)
+            Snapshot(EDIT_STEP);
+        else
+            Snapshot(EDIT_TYPE, IsWordChar(newText.AtUTF8(0)) &&
+                (cursorPosition_ == 0 || !IsWordChar(line_.AtUTF8(cursorPosition_ - 1))));
         if (!text_->GetSelectionLength())
         {
             if (cursorPosition_ == line_.LengthUTF8())
@@ -649,11 +759,29 @@ void LineEdit::SetText(const String& text)
 {
     if (text != line_)
     {
+        // buildat [TEXT_UNDO]: a script's change is a step too, but for a
+        // field's first text
+        if (!line_.Empty())
+            Snapshot(EDIT_STEP);
         line_ = text;
         cursorPosition_ = line_.LengthUTF8();
         UpdateText();
         UpdateCursor();
     }
+}
+
+void LineEdit::SetTextAsTyped(const String& text)
+{
+    if (text == line_)
+        return;
+    // A change of more than a character (a cut, the browser's word delete)
+    // is a step of its own
+    int d = (int)text.LengthUTF8() - (int)line_.LengthUTF8();
+    Snapshot(d > 1 || d < -1 ? EDIT_STEP : d < 0 ? EDIT_ERASE : EDIT_TYPE);
+    line_ = text;
+    cursorPosition_ = line_.LengthUTF8();
+    UpdateText();
+    UpdateCursor();
 }
 
 void LineEdit::SetCursorPosition(unsigned position)

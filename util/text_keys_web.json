@@ -1,0 +1,20 @@
+[
+	["nav", "${URL}"],
+	["waitlog", "run_script_file\\(accounts/accounts.lua\\)", 120],
+	["wait", 3000],
+	["click", 600, 566],
+	["wait", 1500],
+	["type", "alpha beta"],
+	["wait", 500],
+	["eval", "'typed ' + document.getElementById('text').value"],
+	["chord", "Alt+Backspace"],
+	["wait", 500],
+	["eval", "'word ' + document.getElementById('text').value"],
+	["chord", "Ctrl+z"],
+	["wait", 500],
+	["eval", "'undone ' + document.getElementById('text').value"],
+	["chord", "Ctrl+Shift+z"],
+	["wait", 500],
+	["eval", "'redone ' + document.getElementById('text').value"],
+	["shot", "${OUT}/web.png"]
+]

@@ -73,6 +73,12 @@ public:
 
     /// Set text.
     void SetText(const String& text);
+    /// buildat [TEXT_UNDO]: set the text as the user's own edit, grouped with typing as an undo step (the web page's sync).
+    void SetTextAsTyped(const String& text);
+    /// buildat [TEXT_UNDO]: undo the last step of editing.
+    void Undo();
+    /// buildat [TEXT_UNDO]: redo the last undone step.
+    void Redo();
     /// Set cursor position.
     void SetCursorPosition(unsigned position);
     /// Set cursor blink rate. 0 disables blinking.
@@ -174,6 +180,26 @@ protected:
     bool textCopyable_;
     /// buildat: multi-line flag.
     bool multiLine_;
+    /// buildat [TEXT_UNDO]: the text, cursor and selection of an undo step.
+    struct EditState
+    {
+        String text_;
+        unsigned cursor_;
+        unsigned selectionStart_;
+        unsigned selectionLength_;
+    };
+    /// buildat [TEXT_UNDO]: the state now.
+    EditState GetEditState() const;
+    /// buildat [TEXT_UNDO]: go back to a state.
+    void RestoreEditState(const EditState& state);
+    /// buildat [TEXT_UNDO]: before an edit of a kind, keep the state as a step unless it continues the last one.
+    void Snapshot(int kind, bool wordStart = false);
+    /// buildat [TEXT_UNDO]: the undo and redo steps.
+    Vector<EditState> undo_;
+    Vector<EditState> redo_;
+    /// buildat [TEXT_UNDO]: the last edit's kind (-1 none) and time (SDL ticks).
+    int lastEditKind_;
+    unsigned lastEditTime_;
 
 private:
     /// Handle being focused.
