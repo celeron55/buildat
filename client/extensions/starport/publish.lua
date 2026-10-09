@@ -455,9 +455,20 @@ page_publish = function(message)
 	end
 	-- Pack and publish
 	local files, size = __buildat_aitta_dev("files", name)
-	add_text(w, "Goes in: " .. #(files or {}) .. " files, " ..
+	files = files or {}
+	table.sort(files)
+	add_text(w, "Goes in: " .. #files .. " files, " ..
 			math.ceil((size or 0) / 1000) .. " kB (names starting with . " ..
-			"are left out): " .. table.concat(files or {}, ", "):sub(1, 300), DIM)
+			"are left out):", DIM)
+	-- Every one, a line each, in about eight rows that the wheel scrolls,
+	-- so that the buttons below stay on the page ([PUBLISH_FILES])
+	local ui_utils = require("buildat/extension/ui_utils").safe
+	local view = ui_utils.list_view(w, w.width - 24, 8 * 22,
+			{row_height = 22, spacing = 0, wheel = 44})
+	for _, f in ipairs(files) do
+		view:header(f, 13, "text")
+	end
+	view:fit()
 	local result = add_text(w, st.result or "", st.result_ok and OK or WARN)
 	local pr = add_row(w)
 	add_button(pr, "Back", function()
