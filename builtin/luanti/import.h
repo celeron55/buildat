@@ -5,6 +5,26 @@
 // The Luanti world importer, included by luanti.cpp inside struct Module
 // ([SPLITS]: moved out as it was).
 
+	// A read-only sqlite database and a statement, closed and finalized
+	// however their scope is left: an import that throws halfway through
+	// the map left both open ([SPLITS]). sqlite takes nullptr to either.
+	struct SqlDb {
+		sqlite3 *p = nullptr;
+		SqlDb() = default;
+		SqlDb(const SqlDb&) = delete;
+		SqlDb& operator=(const SqlDb&) = delete;
+		~SqlDb(){ sqlite3_close(p); }
+		operator sqlite3*() const { return p; }
+	};
+	struct SqlStmt {
+		sqlite3_stmt *p = nullptr;
+		SqlStmt() = default;
+		SqlStmt(const SqlStmt&) = delete;
+		SqlStmt& operator=(const SqlStmt&) = delete;
+		~SqlStmt(){ sqlite3_finalize(p); }
+		operator sqlite3_stmt*() const { return p; }
+	};
+
 	// The id this run gave a Luanti node name, or the one "unknown" has.
 	// Asked of Lua, because the aliases and the content ids are its tables.
 	uint32_t import_content_id(const ss_ &name, bool &known)
@@ -180,25 +200,23 @@
 		ss_ db_path = luanti_world_path+"/players.sqlite";
 		if(!interface::fs::path_exists(db_path))
 			return;
-		sqlite3 *db = nullptr;
-		if(sqlite3_open_v2(db_path.c_str(), &db, SQLITE_OPEN_READONLY,
+		SqlDb db;
+		if(sqlite3_open_v2(db_path.c_str(), &db.p, SQLITE_OPEN_READONLY,
 				nullptr) != SQLITE_OK){
 			log_w(MODULE, "import_world(): %s: %s", cs(db_path),
 					db ? sqlite3_errmsg(db) : "cannot open");
-			sqlite3_close(db);
 			return;
 		}
 		auto query = [&](const char *sql,
 				const std::function<void(sqlite3_stmt*)> &row){
-			sqlite3_stmt *st = nullptr;
-			if(sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK){
+			SqlStmt st;
+			if(sqlite3_prepare_v2(db, sql, -1, &st.p, nullptr) != SQLITE_OK){
 				log_w(MODULE, "import_world(): %s: %s", cs(db_path),
 						sqlite3_errmsg(db));
 				return;
 			}
 			while(sqlite3_step(st) == SQLITE_ROW)
 				row(st);
-			sqlite3_finalize(st);
 		};
 		auto text = [](sqlite3_stmt *st, int i){
 			const char *p = (const char*)sqlite3_column_blob(st, i);
@@ -220,10 +238,8 @@
 			p.hp = sqlite3_column_int(st, 6);
 			p.breath = sqlite3_column_int(st, 7);
 		});
-		if(players.empty()){
-			sqlite3_close(db);
+		if(players.empty())
 			return;
-		}
 		query("SELECT player, metadata, value FROM player_metadata",
 				[&](sqlite3_stmt *st){
 			auto it = players.find(text(st, 0));
@@ -262,7 +278,6 @@
 			it->second.lists[name->second][sqlite3_column_int(st, 2) + 1] =
 					text(st, 3);
 		});
-		sqlite3_close(db);
 	}
 
 	// A world written before players.sqlite: one file per player under
@@ -440,21 +455,19 @@
 		ss_ db_path = luanti_world_path+"/mod_storage.sqlite";
 		if(!interface::fs::path_exists(db_path))
 			return;
-		sqlite3 *db = nullptr;
-		if(sqlite3_open_v2(db_path.c_str(), &db, SQLITE_OPEN_READONLY,
+		SqlDb db;
+		if(sqlite3_open_v2(db_path.c_str(), &db.p, SQLITE_OPEN_READONLY,
 				nullptr) != SQLITE_OK){
 			log_w(MODULE, "import_world(): %s: %s", cs(db_path),
 					db ? sqlite3_errmsg(db) : "cannot open");
-			sqlite3_close(db);
 			return;
 		}
-		sqlite3_stmt *st = nullptr;
+		SqlStmt st;
 		if(sqlite3_prepare_v2(db,
 				"SELECT modname, key, value FROM entries ORDER BY modname",
-				-1, &st, nullptr) != SQLITE_OK){
+				-1, &st.p, nullptr) != SQLITE_OK){
 			log_w(MODULE, "import_world(): %s: %s", cs(db_path),
 					sqlite3_errmsg(db));
-			sqlite3_close(db);
 			return;
 		}
 		// Per mod, because that is the unit the storage is a file of
@@ -467,8 +480,6 @@
 			};
 			by_mod[column(0)][column(1)] = column(2);
 		}
-		sqlite3_finalize(st);
-		sqlite3_close(db);
 		if(by_mod.empty())
 			return;
 		size_t written = 0;
@@ -642,28 +653,26 @@
 		ss_ db_path = luanti_world_path+"/map.sqlite";
 		if(!interface::fs::path_exists(db_path))
 			throw Exception("luanti: no map.sqlite in "+luanti_world_path);
-		sqlite3 *db = nullptr;
-		int rc = sqlite3_open_v2(db_path.c_str(), &db, SQLITE_OPEN_READONLY,
+		SqlDb db;
+		int rc = sqlite3_open_v2(db_path.c_str(), &db.p, SQLITE_OPEN_READONLY,
 				nullptr);
 		if(rc != SQLITE_OK){
 			ss_ err = db ? sqlite3_errmsg(db) : "cannot open";
-			sqlite3_close(db);
 			throw Exception("luanti: "+db_path+": "+err);
 		}
 		// Two schemas exist: the older one keys a block by one integer, the
 		// newer by three columns. Luanti reads both and so does this.
-		sqlite3_stmt *st = nullptr;
+		SqlStmt st;
 		bool by_xyz = false;
-		rc = sqlite3_prepare_v2(db, "SELECT pos, data FROM blocks", -1, &st,
+		rc = sqlite3_prepare_v2(db, "SELECT pos, data FROM blocks", -1, &st.p,
 				nullptr);
 		if(rc != SQLITE_OK){
 			by_xyz = true;
 			rc = sqlite3_prepare_v2(db, "SELECT x, y, z, data FROM blocks",
-					-1, &st, nullptr);
+					-1, &st.p, nullptr);
 		}
 		if(rc != SQLITE_OK){
 			ss_ err = sqlite3_errmsg(db);
-			sqlite3_close(db);
 			throw Exception("luanti: "+db_path+": "+err);
 		}
 		// What this world has room for. A block that reaches outside is
@@ -828,8 +837,6 @@
 				blocks_read++;
 			}
 		});
-		sqlite3_finalize(st);
-		sqlite3_close(db);
 		// The timers and the entities, now that the map is free: a timer
 		// starts again where it left off and an entity is placed where it
 		// was, and both of those are a mod's own code
