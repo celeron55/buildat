@@ -79,21 +79,40 @@ home = function()
 		-- Where the publish screen is ([AITTA_PUBLISH_UI])
 		button(page, "Back to the launcher", function() buildat.leave() end)
 		text(page, #me.releases .. " releases, every one unreviewed:")
+		-- **A row a release** ([AITTA_ADMIN_ROWS]): its id, its state and
+		-- the admin's action as a button of its own, in columns of fixed
+		-- widths; the rest on a dim line under it. A long id or address
+		-- wraps in its column. simplified: plain rows on the Server
+		-- window's page, which scrolls already; a list of its own
+		-- (ui_utils.list_view) would fight it for the wheel
+		local width = page.width - 12
+		local state_w, button_w = 110, me.admin and 110 or 0
+		local function column(parent, s, w, color)
+			local t = text(parent, s, color)
+			t:SetFixedWidth(w)
+			return t
+		end
 		for _, r in ipairs(me.releases) do
 			local id = r.author .. "/" .. r.name .. "/" .. r.version
-			local line = id .. "  " .. r.license_code .. " / " ..
-					r.license_media .. "  " .. math.floor(r.size / 1000) .. " kB" ..
-					((r.home_hearth or "") ~= "" and "  home: " .. r.home_hearth or "") ..
-					(r.delisted and "  (delisted)" or "")
+			local box = page:CreateChild("UIElement")
+			box:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(0, 0, 0, 0))
+			local top = accounts.page_row(box)
+			column(top, id, width - state_w - button_w - 8)
+			local state = r.delisted and "delisted" or "listed"
+			column(top, state, state_w, r.delisted and YELLOW or nil)
+			local action = r.delisted and "Relist" or "Delist"
 			if me.admin then
-				button(page, line .. "  -- " ..
-						(r.delisted and "relist" or "delist"), function()
-					req(r.delisted and "relist" or "delist", {release = id},
-							home)
-				end)
-			else
-				text(page, line)
+				button(top, action, function()
+					req(r.delisted and "relist" or "delist", {release = id}, home)
+				end):SetFixedWidth(button_w)
 			end
+			column(box, r.license_code .. " / " .. r.license_media .. "  " ..
+					math.floor(r.size / 1000) .. " kB" ..
+					((r.home_hearth or "") ~= "" and "  home: " .. r.home_hearth
+					or ""), width, GREY)
+			-- For a check
+			log:info("aitta: row " .. id .. ": " .. state ..
+					(me.admin and ", " .. action or ""))
 		end
 	end)
 end
