@@ -171,6 +171,18 @@ tap <x> <y>
     A finger down and up at x, y (TouchBegin and TouchEnd in one frame):
     the touch controls with BUILDAT_TOUCH=1, natively.
 
+finger_down <id> <x> <y>
+finger_move <id> <x> <y>
+finger_up <id>
+    One finger of up to nine (id 1-9), each a step: a drag is a down, moves
+    with delays between them, and an up; two fingers down and moved make a
+    pinch or a two-finger scroll. finger_up lifts it where it last was.
+
+    BUILDAT_TOUCH=1 natively is a touch mode: the touch controls, and the
+    UI scaled as on a phone (one UI pixel to a CSS pixel at least, half
+    again for a finger, 400 UI pixels across the short side at most). Run
+    by hand (no -c), the mouse is a finger.
+
 look <yaw> <pitch>
 look_dir <x> <y> <z>
     Aim the camera and wait until it is aimed. Degrees: yaw from +Z towards

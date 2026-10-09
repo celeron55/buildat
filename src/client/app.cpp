@@ -2082,19 +2082,29 @@ struct CApp: public App, public magic::Application
 							s <= (float)n * (1.f + UI_SNAP_OVER))
 						s = (float)n;
 				}
-#ifdef __EMSCRIPTEN__
-				if(s < 1.f)
-					s = 1.f;
+				// The web's, and a native client under BUILDAT_TOUCH=1 as a
+				// phone at one device pixel to a CSS pixel ([HEARTH_USABILITY]:
+				// the touch mode's fast loop)
 				const char *touch = getenv("BUILDAT_TOUCH");
-				if(touch && touch[0] == '1')
-					s *= 1.5f;
-				s *= (float)dpr;
-				// But a phone's short side keeps room for a dialog: at least
-				// UI_MIN_SHORT UI pixels across
-				const float fit = (float)(short_side * dpr) / UI_MIN_SHORT;
-				if(s > fit)
-					s = fit;
+				const bool finger = touch && touch[0] == '1';
+#ifdef __EMSCRIPTEN__
+				const bool phone_rules = true;
+#else
+				const bool phone_rules = finger;
+				const double dpr = 1.0;
 #endif
+				if(phone_rules){
+					if(s < 1.f)
+						s = 1.f;
+					if(finger)
+						s *= 1.5f;
+					s *= (float)dpr;
+					// But a phone's short side keeps room for a dialog: at
+					// least UI_MIN_SHORT UI pixels across
+					const float fit = (float)(short_side * dpr) / UI_MIN_SHORT;
+					if(s > fit)
+						s = fit;
+				}
 			}
 		}
 		// A scripted client keeps its logical size, which is what its
@@ -2313,6 +2323,14 @@ struct CApp: public App, public magic::Application
 		// guards read this flag (user, 2026-09-23: "I can't use my
 		// mouse during your tests").
 		m_command_seq_active = g_client_config.get<bool>("command_seq_enabled");
+		// The mouse as a finger under BUILDAT_TOUCH=1, for a person trying
+		// the touch UI by hand; a scripted run keeps its mouse and has
+		// finger_* for touches ([HEARTH_USABILITY])
+		{
+			const char *touch = getenv("BUILDAT_TOUCH");
+			if(touch && touch[0] == '1' && !m_command_seq_active)
+				GetSubsystem<magic::Input>()->SetTouchEmulation(true);
+		}
 
 		boot_launcher();
 
@@ -3000,7 +3018,9 @@ struct CApp: public App, public magic::Application
 			ok = client::command_seq::inject_mouse_wheel(input, (int)c.n, &err);
 			break;
 		case Type::Tap:
-			ok = client::command_seq::inject_tap(input,
+		case Type::Finger:
+			ok = client::command_seq::inject_finger(input, c.type == Type::Tap ?
+					"tap" : c.param, (int)c.n,
 					logical_mode() ? (int)(m_logical_ox + c.x * m_logical_scale) : c.x,
 					logical_mode() ? (int)(m_logical_oy + c.y * m_logical_scale) : c.y,
 					&err);

@@ -5,6 +5,7 @@
 #include "interface/fs.h"
 #include <ctime>
 #include <set>
+#include <map>
 #include <c55/string_util.h>
 #include <Graphics.h>
 #include <Image.h>
@@ -294,8 +295,20 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 			}
 		} else if(cmd == "tap"){
 			c.type = Type::Tap;
+			c.n = 1;
 			if(!parse_xy(rest, &c.x, &c.y, error))
 				return fail(*error);
+		} else if(cmd == "finger_down" || cmd == "finger_move" ||
+				cmd == "finger_up"){
+			c.type = Type::Finger;
+			c.param = cmd.substr(7);
+			const size_t sp = rest.find(' ');
+			const ss_ id = rest.substr(0, sp);
+			if(!parse_i64(id, &c.n) || c.n < 1 || c.n > 9)
+				return fail(cmd+" <id 1-9>"+(c.param == "up" ? "" : " <x> <y>"));
+			if(c.param != "up" && (sp == ss_::npos ||
+					!parse_xy(rest.substr(sp + 1), &c.x, &c.y, error)))
+				return fail(cmd+" <id 1-9> <x> <y>");
 		} else if(cmd == "mouse_wheel"){
 			c.type = Type::MouseWheel;
 			if(!parse_i64(rest, &c.n))
@@ -502,6 +515,9 @@ ss_ dump_command(const Command &c)
 		return "mouse_wheel "+itos(c.n);
 	case Type::Tap:
 		return "tap "+itos(c.x)+" "+itos(c.y);
+	case Type::Finger:
+		return "finger_"+c.param+" "+itos(c.n)+(c.param == "up" ? ss_() :
+				" "+itos(c.x)+" "+itos(c.y));
 	case Type::Text:
 		return "text "+c.s;
 	case Type::Quit:
@@ -899,29 +915,57 @@ bool inject_mouse_wheel(magic::Input *input, int delta, ss_ *error)
 	return true;
 }
 
-// A touchscreen's tap ([TOUCH_CHAT_CLUTTER]): the finger down and up in one
-// push, which Urho3D makes TouchBegin and TouchEnd. SDL's fingers are in
-// fractions of the window.
-bool inject_tap(magic::Input *input, int x, int y, ss_ *error)
+// A touchscreen's fingers ([TOUCH_CHAT_CLUTTER], [HEARTH_USABILITY]),
+// which Urho3D makes TouchBegin, TouchMove and TouchEnd; a tap is the down
+// and the up in one push. SDL's fingers are in fractions of the window;
+// an up is where the finger last was.
+static std::map<int, std::pair<float, float>> g_fingers;
+bool inject_finger(magic::Input *input, const ss_ &phase, int id, int x,
+		int y, ss_ *error)
 {
 	magic::Graphics *g = input->GetSubsystem<magic::Graphics>();
 	if(!g || g->GetWidth() <= 0 || g->GetHeight() <= 0){
-		*error = "tap: no window";
+		*error = "finger: no window";
 		return false;
 	}
-	for(Uint32 type : {(Uint32)SDL_FINGERDOWN, (Uint32)SDL_FINGERUP}){
+	sv_<Uint32> types;
+	if(phase == "tap")
+		types = {SDL_FINGERDOWN, SDL_FINGERUP};
+	else if(phase == "down")
+		types = {SDL_FINGERDOWN};
+	else if(phase == "move" || phase == "up"){
+		if(!g_fingers.count(id)){
+			*error = "finger "+itos(id)+" is not down";
+			return false;
+		}
+		types = {phase == "move" ? (Uint32)SDL_FINGERMOTION : (Uint32)SDL_FINGERUP};
+	}
+	float fx = (float)x / g->GetWidth(), fy = (float)y / g->GetHeight();
+	if(phase == "up"){
+		fx = g_fingers[id].first;
+		fy = g_fingers[id].second;
+	}
+	for(Uint32 type : types){
 		SDL_Event e;
 		memset(&e, 0, sizeof(e));
 		e.type = type;
 		e.tfinger.touchId = 1;
-		e.tfinger.fingerId = 1;
-		e.tfinger.x = (float)x / g->GetWidth();
-		e.tfinger.y = (float)y / g->GetHeight();
+		e.tfinger.fingerId = id;
+		e.tfinger.x = fx;
+		e.tfinger.y = fy;
+		if(type == SDL_FINGERMOTION && g_fingers.count(id)){
+			e.tfinger.dx = fx - g_fingers[id].first;
+			e.tfinger.dy = fy - g_fingers[id].second;
+		}
 		e.tfinger.pressure = 1.f;
 		if(SDL_PushEvent(&e) != 1){
 			*error = "SDL_PushEvent failed";
 			return false;
 		}
+		if(type == SDL_FINGERUP)
+			g_fingers.erase(id);
+		else
+			g_fingers[id] = {fx, fy};
 	}
 	return true;
 }

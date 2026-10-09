@@ -27,6 +27,10 @@ namespace command_seq
 		MouseWheel,
 		// tap <x> <y>: a finger down and up there, window pixels
 		Tap,
+		// finger_down <id> <x> <y>, finger_move <id> <x> <y>, finger_up
+		// <id>: one finger of several, for drags, holds and two-finger
+		// gestures (param "down", "move" or "up"; n the id)
+		Finger,
 		Text,
 		Quit,
 		Look,
@@ -113,7 +117,10 @@ namespace command_seq
 	bool inject_mouse_pos(Urho3D::Input *input, int x, int y, ss_ *error);
 	bool inject_mouse_move(Urho3D::Input *input, int dx, int dy, ss_ *error);
 	bool inject_mouse_wheel(Urho3D::Input *input, int delta, ss_ *error);
-	bool inject_tap(Urho3D::Input *input, int x, int y, ss_ *error);
+	// phase "down", "move", "up" (at the finger's last place) or "tap"
+	// (down and up)
+	bool inject_finger(Urho3D::Input *input, const ss_ &phase, int id, int x,
+			int y, ss_ *error);
 	bool inject_text(Urho3D::Input *input, const ss_ &text, ss_ *error);
 	// Waits for every screenshot still being written; before the process
 	// ends, so a run's last picture is whole
