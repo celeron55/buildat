@@ -5,9 +5,11 @@
 # [VERSION_CHECK]: a Starport whose version adapter says 0.9.0 carries it
 # in /api/list, filtered (a bad platform left out); the launcher shows the
 # notice, "Not now" is kept across a restart, a newer version (0.9.1) is
-# told again, and "Open" hands the platform's link to the system's opener
-# (an xdg-open of this check's own on PATH). The GitHub adapter prints the
-# newest release, when GitHub answers.
+# told again, and "Download" hands the platform's link to the system's
+# opener (an xdg-open of this check's own on PATH).
+# [VERSION_DOWNLOAD]: after it the amber text names the file (a .tar.gz's
+# says extract, an .exe's run) and "Close Buildat" ends the client.
+# The GitHub adapter prints the newest release, when GitHub answers.
 set -u
 . "$(dirname "$0")/check_paths.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -23,14 +25,14 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*"; exit 1; }
 cd "$here"
 
-starport() { # version
+starport() { # version [linux file]
 	[ -n "$pid" ] && kill "$pid" && wait "$pid" 2>/dev/null
 	mkdir -p "$tmp/sp/apps/starport"
 	cat > "$tmp/sp/apps/starport/version_adapter" <<A
 #!/bin/sh
 echo "a warning on stderr" >&2
 echo '{"version": "$1", "url": "https://example.org/releases",
- "platforms": {"linux": {"url": "https://example.org/linux-$1.tar.gz"},
+ "platforms": {"linux": {"url": "https://example.org/${2:-linux-$1.tar.gz}"},
   "win64": {"url": "http://example.org/insecure"}, "bad name": {"url": "https://x"}}}'
 A
 	chmod +x "$tmp/sp/apps/starport/version_adapter"
@@ -87,24 +89,47 @@ starport 0.9.1
 cat > "$tmp/c3" <<C
 wait_log_any 30000 Offering version 0.9.1
 delay 1000
-click Button "Open"
+click Button "Download"
 wait_log 5000 Version link
 delay 1000
-quit
+screenshot $tmp/next.png
+click Button "Close Buildat"
+delay 10000
 C
 launcher "$tmp/c3" "$tmp/cl3.log"
+rc=$?
 [ "$(cat "$tmp/opened" 2>/dev/null)" = "https://example.org/linux-0.9.1.tar.gz" ] ||
-	fail "Open did not open the link ($tmp/cl3.log)"
-echo "ok: a newer version told again; Open opened its link"
+	fail "Download did not open the link ($tmp/cl3.log)"
+grep -q "Version next: .*extract linux-0.9.1.tar.gz and run bin/buildat.*they are in $tmp/cl," "$tmp/cl3.log" ||
+	fail "the next steps: $(grep "Version next" "$tmp/cl3.log")"
+# 1: a scripted client that ends before its sequence does says so
+[ $rc = 1 ] && grep -q "Version: closing for the update" "$tmp/cl3.log" &&
+	grep -q "Succesful shutdown" "$tmp/cl3.log" ||
+	fail "Close Buildat did not end it ($rc, $tmp/cl3.log)"
+echo "ok: a newer version told again; Download opened its link, said to extract it, Close Buildat closed"
+
+starport 0.9.2 buildat-0.9.2-setup.exe
+cat > "$tmp/c3b" <<C
+wait_log_any 30000 Offering version 0.9.2
+delay 1000
+click Button "Download"
+wait_log 5000 Version next
+delay 500
+quit
+C
+launcher "$tmp/c3b" "$tmp/cl3b.log"
+grep -q "Version next: .*close Buildat and run buildat-0.9.2-setup.exe: it updates" "$tmp/cl3b.log" ||
+	fail "an .exe's next steps: $(grep "Version next" "$tmp/cl3b.log")"
+echo "ok: an .exe's text"
 
 # [WIN_OPEN]: no opener on PATH is a failure, said on the notice, which
 # stays; Settings' "Open the log folder" hands the opener the log's folder
 rm -f "$tmp/opened"
 mkdir -p "$tmp/none"
 cat > "$tmp/c4" <<C
-wait_log_any 30000 Offering version 0.9.1
+wait_log_any 30000 Offering version 0.9.2
 delay 1000
-click Button "Open"
+click Button "Download"
 wait_log 5000 Version link
 delay 500
 screenshot $tmp/failed.png

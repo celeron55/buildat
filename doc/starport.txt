@@ -55,8 +55,11 @@ run their own. The official one is https://starport.buildat.org.
   "version", https links only; a failed run keeps the last good answer
   and logs why. `util/starport_version_github.py` is the one for GitHub
   releases. A native client newer than its own shows a notice on the
-  launcher's screen with its platform's link, "Open" and "Not now",
-  which is kept until a newer version.
+  launcher's screen with its platform's link, "Download" and "Not
+  now", which is kept until a newer version. Once Download has opened
+  the link, the notice says what to do next by the file's name (an .exe
+  is run, an archive extracted; the saves and settings stay in the user
+  directory) and offers "Close Buildat", out of the installer's way.
 - `play_url` (`https://play.buildat.org`; "" for none) is a play page:
   a server serving the web client with no game of its own. The page at /
   links each TLS server to `<play_url>/?server=host:port`; the page joins

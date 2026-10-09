@@ -1067,11 +1067,29 @@ function M.offer_version()
 	add_text(w, n.url, DIM)
 	local r = add_row(w)
 	local failed = nil
-	add_button(r, "Open", function()
+	add_button(r, "Download", function()
 		local ok, err = __buildat_open_url(n.url)
 		log:info("Version link: " .. (ok and "opened" or tostring(err)))
 		if ok then
-			close(false)
+			-- [VERSION_DOWNLOAD] What to do next, and the client out of
+			-- the installer's way (Windows cannot replace a running .exe)
+			r.visible = false
+			local file = n.url:match("([^/?#]+)[^/]*$") or n.url
+			local next_ = file:match("%.exe$") and
+					"Let the download finish in your browser. Then close " ..
+					"Buildat and run " .. file .. ": it updates this " ..
+					"installation and keeps your saves and settings." or
+					"Let the download finish in your browser. Then close " ..
+					"Buildat, extract " .. file .. " and run bin/buildat " ..
+					"from it. Your saves and settings are kept: they are in " ..
+					__buildat_get_path("user") .. ", not in the folder you " ..
+					"extract."
+			log:info("Version next: " .. next_)
+			add_text(w, next_, WARN)
+			add_button(add_row(w), "Close Buildat", function()
+				log:info("Version: closing for the update")
+				__buildat_disconnect()
+			end, true, true)
 		elseif not failed then
 			-- The window stays, the link on it to copy by hand
 			failed = add_text(w, "Could not open it: " .. tostring(err), WARN)
