@@ -614,71 +614,6 @@ static const float AO_LEVELS_PBR[4] = {1.0f, 0.55f, 0.20f, 0.10f};
 // and flowing alike, so the flow's own dip still reads against the source.
 static const float LIQUID_SAG = 1.0f / 8.0f;
 
-// How far a hemisphere ray is walked to ask whether a surface under the
-// terrain reaches the sky at all; 0 turns the term off. See [DARK_INVARIANT]
-// and face_vertex_colors() below.
-static const int SKY_REACH = []{
-	const char *s = getenv("BUILDAT_SKY_REACH");
-	int v = s ? atoi(s) : 0;
-	return v < 0 ? 0 : (v > 64 ? 64 : v);
-}();
-// [UNDERGROUND_LIGHT] (a): what the term actually computed. A picture read
-// backwards cannot tell a face that found the sky from one whose rays ran
-// out of meshed volume -- both draw black -- so BUILDAT_SKY_REACH_LOG=1
-// counts every face the term was asked about: how open its hemisphere came
-// out, and whether the rays that stopped hit rock or the edge of the data.
-// The second number is the one that says whether the walk can see far
-// enough to mean anything, since a volume is one chunk and its padding.
-static const bool SKY_REACH_LOG = getenv("BUILDAT_SKY_REACH_LOG") != nullptr;
-static std::atomic<uint64_t> sky_reach_faces[10];
-static std::atomic<uint64_t> sky_reach_stop_solid(0);
-static std::atomic<uint64_t> sky_reach_stop_rock_beyond(0);
-static std::atomic<uint64_t> sky_reach_stop_edge(0);
-
-// Called on every face the term was asked about; prints the tally at most
-// once every five seconds, from whichever mesher thread gets there first.
-static void tally_sky_reach(float open)
-{
-	int b = (int)(open * 9.0f + 0.5f);
-	sky_reach_faces[b < 0 ? 0 : (b > 9 ? 9 : b)]
-			.fetch_add(1, std::memory_order_relaxed);
-	static std::atomic<int64_t> said_at_ms(0);
-	int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now().time_since_epoch()).count();
-	int64_t was = said_at_ms.load(std::memory_order_relaxed);
-	if(now - was < 5000)
-		return;
-	if(!said_at_ms.compare_exchange_strong(was, now))
-		return;
-	uint64_t total = 0;
-	for(int i = 0; i < 10; i++)
-		total += sky_reach_faces[i].load(std::memory_order_relaxed);
-	if(total == 0)
-		return;
-	ss_ hist;
-	for(int i = 0; i < 10; i++){
-		uint64_t n = sky_reach_faces[i].load(std::memory_order_relaxed);
-		if(n == 0)
-			continue;
-		char buf[64];
-		snprintf(buf, sizeof buf, "%s%d/9 %.1f%%", hist.empty() ? "" : ", ",
-				i, 100.0 * (double)n / (double)total);
-		hist += buf;
-	}
-	uint64_t solid = sky_reach_stop_solid.load(std::memory_order_relaxed);
-	uint64_t beyond = sky_reach_stop_rock_beyond.load(std::memory_order_relaxed);
-	uint64_t edge = sky_reach_stop_edge.load(std::memory_order_relaxed);
-	uint64_t stops = solid + beyond + edge;
-	log_i(MODULE, "sky reach %d: %llu faces asked; open %s; of %llu rays "
-			"stopped, %.1f%% on rock, %.1f%% under the terrain past the "
-			"volume and %.1f%% where the map says nothing",
-			SKY_REACH, (unsigned long long)total, cs(hist),
-			(unsigned long long)stops,
-			stops ? 100.0 * (double)solid / (double)stops : 0.0,
-			stops ? 100.0 * (double)beyond / (double)stops : 0.0,
-			stops ? 100.0 * (double)edge / (double)stops : 0.0);
-}
-
 static const bool PBR_MODE = getenv("BUILDAT_LUANTI_PBR") != nullptr && (
 		ss_(getenv("BUILDAT_LUANTI_PBR")) == "pbr" ||
 		ss_(getenv("BUILDAT_LUANTI_PBR")) == "1" ||
@@ -1047,61 +982,14 @@ static void face_vertex_colors(VoxelVolume &volume,
 		ni, ni + u, ni - u, ni + v, ni - v,
 		ni + u + v, ni + u - v, ni - u + v, ni - u - v,
 	};
-	// unknown_blocks: a voxel the meshed volume has no data for stops the
-	// ray instead of letting it through. The shade's own rays (four voxels,
-	// inside the padding) never meet one and keep the old answer; the long
-	// walk below leaves the volume often, and there "no data" has to read
-	// as "not sky" or a sealed room at a chunk's edge is lit through the
-	// seam ([DARK_INVARIANT]: the left half of the sealed shot, 2026-09-22).
-	// Where a ray leaves the meshed volume, the horizon map answers instead
-	// of the walk ([UNDERGROUND_LIGHT] (d)): the column's terrain height
-	// against the ray's own height says whether it has walked out into the
-	// open air or into the rock next door. Before this, "no data" was read
-	// as "not sky" whatever was there -- necessary, or a sealed room leaks
-	// at the seam, but a volume is one chunk and its padding, so seven rays
-	// in ten stopped at the edge rather than on anything (2026-09-25,
-	// BUILDAT_SKY_REACH_LOG) and every deep face read shut. Returns 1 for
-	// the open air, 0 for rock, -1 where the map has nothing to say and the
-	// old answer stands.
-	const pv::Vector3DInt32 vol_lc = volume.getEnclosingRegion().getLowerCorner();
-	auto horizon_says = [&](const pv::Vector3DInt32 &p) -> int {
-		if(!horizon)
-			return -1;
-		const int wx = horizon->origin_x + HORIZON_PAD +
-				(p.getX() - vol_lc.getX() - 1) * lod;
-		const int wy = horizon->origin_y + (p.getY() - vol_lc.getY() - 1) * lod;
-		const int wz = horizon->origin_z + HORIZON_PAD +
-				(p.getZ() - vol_lc.getZ() - 1) * lod;
-		const int cx = wx - horizon->origin_x, cz = wz - horizon->origin_z;
-		if(cx < 0 || cz < 0 || cx >= HORIZON_SIZE || cz >= HORIZON_SIZE)
-			return -1;
-		const int16_t h = horizon->heights[cz * HORIZON_SIZE + cx];
-		if(h == HORIZON_NONE)
-			return -1;
-		return wy > h ? 1 : 0;
-	};
-	auto open_fraction = [&](int reach, bool unknown_blocks){
+	auto open_fraction = [&](int reach){
 		int open = 0;
 		for(const pv::Vector3DInt32 &d : dirs){
 			bool blocked = false;
 			pv::Vector3DInt32 p = front_p;
 			for(int k = 0; k < reach && !blocked; k++){
 				p += d;
-				if(unknown_blocks && fmt.undefined(volume.sample_at(p))){
-					const int says = horizon_says(p);
-					if(says == 1)
-						break; // walked out under the open sky
-					blocked = true;
-					if(SKY_REACH_LOG)
-						(says == 0 ? sky_reach_stop_rock_beyond :
-								sky_reach_stop_edge)
-								.fetch_add(1, std::memory_order_relaxed);
-					continue;
-				}
 				blocked = occludes_sky(volume, voxel_reg, fmt, p);
-				if(blocked && unknown_blocks && SKY_REACH_LOG)
-					sky_reach_stop_solid.fetch_add(1,
-							std::memory_order_relaxed);
 			}
 			if(!blocked)
 				open++;
@@ -1110,7 +998,7 @@ static void face_vertex_colors(VoxelVolume &volume,
 	};
 	float hemi = 1.0f;
 	if(horizon || SHADOW_KINDS)
-		hemi = open_fraction(HEMI_REACH, false);
+		hemi = open_fraction(HEMI_REACH);
 	// And the terrain beyond the chunk, out of the horizon map: the voxel
 	// in front, in world coordinates. The volume's lower corner is the
 	// chunk's origin less its padding, and the map's origin says where
@@ -1135,32 +1023,6 @@ static void face_vertex_colors(VoxelVolume &volume,
 			int16_t h = horizon->heights[cz * HORIZON_SIZE + cx];
 			under = h != HORIZON_NONE && h > wy;
 		}
-	}
-
-	// [DARK_INVARIANT]: how much of the face's hemisphere still reaches the
-	// sky, asked over a long walk rather than the shade's four voxels. The
-	// bounce floor in the shader stands for the light the four-bit nibble
-	// cannot carry into a cave, and it follows the hour -- so a sealed room
-	// at noon is lit as if outside. The rule the item states is that where
-	// no ray reaches the sky, nothing the sky does may reach the surface;
-	// the sky's three terms in the shader (the bounce, the ground and the
-	// interior) all take the local shade in b, so multiplying b by this is
-	// the whole of it and no shader reads a new channel. Asked only where
-	// the flood's nibble is nought, which is the invariant's own domain and
-	// the only place the floor is the whole of the light; a face in the open
-	// that happens to sit at nibble nought finds the sky along its rays and
-	// reads one, so nothing above ground moves.
-	// simplified: a ray that walks out of the meshed volume counts as
-	// reaching the sky, which errs towards today's look at a chunk's edge;
-	// the upgrade is the horizon map consulted where the volume ends.
-	// Off (0) unless BUILDAT_SKY_REACH says how far to walk, because which
-	// length is right moves every cave in the game and is the user's pick
-	// off an options_for_DARK_INVARIANT/ sheet.
-	float sky_reach = 1.0f;
-	if(SKY_REACH > 0 && sky_f <= 0.0f){
-		sky_reach = open_fraction(SKY_REACH, true);
-		if(SKY_REACH_LOG)
-			tally_sky_reach(sky_reach);
 	}
 
 	for(size_t i = 0; i < 4; i++){
@@ -1223,8 +1085,7 @@ static void face_vertex_colors(VoxelVolume &volume,
 			float local_ao = ao * hemi;
 			if(local_ao < SHADE_FLOOR)
 				local_ao = SHADE_FLOOR;
-			float local = local_ao * FACE_SHADE[face_id] / 1.15f *
-					sky_reach;
+			float local = local_ao * FACE_SHADE[face_id] / 1.15f;
 			out[i] = Color(lamp_shade, under ? 0.0f : terrain,
 					local > 1.0f ? 1.0f : local,
 					sky_alpha(sky_f, sky_shade, true)).ToUInt();
@@ -1881,19 +1742,6 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			use_skylight, translucent_result, masked_result, horizon);
 }
 
-// [WATER_LIGHT] 3: BUILDAT_LIQUID_CORNER_AVG=1 averages a source column in
-// with the flowing ones instead of answering the corner with it, which is
-// what this did before. It is here so that liquid_shore.sh can read the
-// same shore both ways in one run of the world.
-static bool liquid_corner_avg()
-{
-	static const bool v = [](){
-		const char *s = getenv("BUILDAT_LIQUID_CORNER_AVG");
-		return s != nullptr && s[0] != '\0';
-	}();
-	return v;
-}
-
 // How high a liquid's surface stands at one corner of a voxel: the average
 // of the surfaces of the up to four liquid columns that meet there. This is
 // Luanti's getCornerLevel, and what it is for is a surface that runs
@@ -1935,7 +1783,7 @@ static float liquid_corner_top(VoxelVolume &volume,
 			// carries its palette index there -- used to be read as a
 			// variant and averaged with the flow beside it, and the shore
 			// sagged into the flow ([WATER_LIGHT] 3).
-			if(cdef->liquid_is_source && !liquid_corner_avg())
+			if(cdef->liquid_is_source)
 				return 0.5f;
 			// How high a flowing column stands is its own param's business:
 			// Luanti puts the level in param2. The mean is of the flowing

@@ -2,19 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [WATER_LIGHT]: the shore where a flow meets a pool, in a world of a fixed
-# seed at a fixed place, shot once as the code stands and once with
-# BUILDAT_LIQUID_CORNER_AVG=1 (the corner rule before 1627342e).
-#
-# **The two shots agree, and that is what this asserts.** Luanti's
-# getCornerLevel() answers a corner that any source touches with the full
-# height of the voxel and returns there; the averaging it replaced only ever
-# differed where a source carries a variant of its own, and no game
-# installed here gives its water one -- so the rule is a parity guard with
-# nothing in this stage to show for it. A difference here means something
-# else moved.
-#
-# What it also prints is the reading [WATER_LIGHT] 2 is about: the flowing
-# row against the pool beside it, the same surface at the same angle.
+# seed at a fixed place, shot straight down. What it asserts is the reading
+# [WATER_LIGHT] 2 is about: the flowing row against the pool beside it, the
+# same surface at the same angle. (Its A/B against the corner rule before
+# 1627342e, BUILDAT_LIQUID_CORNER_AVG, read the same both ways and went
+# with the flag, [RETIRE_DEAD].)
 #
 #   builtin/luanti/test/liquid_shore.sh
 set -u
@@ -39,7 +31,7 @@ sleep 5
 srv=$(check_pgrep buildat_server | head -1)
 [ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
-shoot() { # <tag> <env>
+shoot() { # <tag>
 	{ echo "wait_log 180000 chat: liquid_shore: ready"
 		# And the client's own world drawn before the shot, not only the
 		# server's light settled
@@ -50,18 +42,12 @@ shoot() { # <tag> <env>
 		echo "look 0 -89"
 		echo "delay 1500"
 		echo "screenshot $out/top_$1.png"
-		# And across the shore, which is where the corner rule would show
-		echo "look 0 -25"
-		echo "delay 1500"
-		echo "screenshot $out/$1.png"
 		echo "delay 500"
 		echo "quit"; } > "$out/cmds_$1.txt"
-	env $2 bin/buildat -s localhost:29788 -w 1280x720 -l 3 \
+	bin/buildat -s localhost:29788 -w 1280x720 -l 3 \
 		-c @"$out/cmds_$1.txt" > "$out/cli_$1.log" 2>&1
 }
-shoot level "BUILDAT_LIQUID_CORNER_AVG="
-sleep 3
-shoot sagged "BUILDAT_LIQUID_CORNER_AVG=1"
+shoot level
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 python3 - "$out" <<'PY'
@@ -71,23 +57,7 @@ out = sys.argv[1]
 def mean(im, box):
 	d = list(im.crop(box).getdata())
 	return sum(sum(p) for p in d) / (3.0 * len(d))
-def band(name):
-	im = Image.open("%s/%s.png" % (out, name)).convert("RGB")
-	w, h = im.size
-	# Looking straight down over the waterline: the pool runs away from the
-	# eye and the flowing row is the strip nearest it, so the two are the
-	# halves above and below the middle of the frame
-	box = (w // 3, h // 2 - 70, 2 * w // 3, h // 2 + 10)
-	d = list(im.crop(box).getdata())
-	blue = sum(1 for p in d if p[2] > p[0] + 12 and p[2] > 40)
-	return sum(sum(p) for p in d) / (3.0 * len(d)), 100.0 * blue / len(d), im
-a, ab, ia = band("level")
-b, bb, ib = band("sagged")
-print("the shore's band: level %.2f (%.1f %% water), averaged %.2f (%.1f %%)"
-		% (a, ab, b, bb))
-print("the two shots differ by %.2f levels and %.1f points of water" %
-		(abs(a - b), abs(ab - bb)))
-# And what [WATER_LIGHT] 2 asks, off the shot taken straight down: the
+# What [WATER_LIGHT] 2 asks, off the shot taken straight down: the
 # flowing row is the band under the eye and the pool the band beyond it,
 # both flat-on and both near, so nothing but the two nodes differs
 it = Image.open("%s/top_level.png" % out).convert("RGB")
@@ -101,12 +71,8 @@ print("straight down: the pool reads %.1f and the flowing row %.1f, "
 # [WATER_LIGHT] 2: the two are the same water in the same light seen the
 # same way, so what is left between them is the game's own art -- a flow
 # twice the pool's brightness is a tint that did not reach it
-near = abs(flow - pool) < 0.25 * pool
-same = abs(a - b) < 0.5 and abs(ab - bb) < 0.5
-ok = same and near
-print("PASS: the shore is the same either way and the flowing row is the "
-		"pool's own colour" if ok else
-		"FAIL: shore %.2f apart, flow and pool %.1f apart" % (
-		abs(a - b), abs(flow - pool)))
+ok = abs(flow - pool) < 0.25 * pool
+print("PASS: the flowing row is the pool's own colour" if ok else
+		"FAIL: flow and pool %.1f apart" % abs(flow - pool))
 sys.exit(0 if ok else 1)
 PY
