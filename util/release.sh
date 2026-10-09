@@ -1,8 +1,8 @@
 #!/bin/bash
 # A release in one go: bump VERSION, commit it on the development branch
-# (whatever is checked out), tag that commit v<version>-<hash>, and push
-# the branch to bitbucket (its backup) and to github with the tag, which
-# package.yml turns into a prerelease with the archives. The branch is
+# (whatever is checked out), tag that commit v<version>, and push the
+# branch to bitbucket (its backup) and to github with the tag, which
+# package.yml turns into a release with the archives. The branch is
 # released as it is, history and all (user, 2026-10-05). The session
 # working in the tree is not disturbed: only VERSION is committed, its
 # other changes are left as they are.
@@ -35,10 +35,10 @@ v="$ma.$mi.$pa"
 echo "$v" > VERSION
 # Only this file, whatever else is in flight in the tree
 git commit -q -m "version: $v" -- VERSION
-h=$(git rev-parse --short HEAD)
-# package.yml fires on the tag; a hash in it makes a prerelease, and a
-# plain v<version> tag placed by hand is the real release
-t="v$v-$h"
+# package.yml fires on the tag; a plain v<version> is a release (user,
+# 2026-10-09), and one with a hash in it, as the earlier ones are, a
+# prerelease
+t="v$v"
 git tag "$t"
 echo "committed version $v on $branch, tagged $t"
 if [ "${PUSH:-1}" = 1 ]; then
