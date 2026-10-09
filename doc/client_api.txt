@@ -420,6 +420,9 @@ buildat.disconnect()
 buildat.leave()
 - Back to the launcher's grid when there is one under the app
   ([MENU_CONTEXT]), else what disconnect() does
+buildat.can_leave_to_launcher() -> bool
+- Whether leave() would go back to a launcher ([HEARTH_CLOSE]); false on
+  a client started straight into the server and on the web page at /app
 buildat.set_leave_reason(text)
 - [LEAVE_WITH_REASON] Why the server is about to drop this client (a
   kick's text, builtin/accounts): the dialog over the launcher says "Left

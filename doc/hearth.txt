@@ -125,7 +125,9 @@ Taking part: the client
 -----------------------
 The client ([HEARTH_UI]) is a sidebar of topics beside a page, one
 scroll view, by the arrow keys between the two; Escape at the top opens
-My account, and on the web Back steps through the pages, a draft and the
+My account -- from a launcher, "Exit to launcher?" (Exit, My account,
+Cancel), which the × at the frame's top right opens too ([HEARTH_CLOSE])
+-- and on the web Back steps through the pages, a draft and the
 place kept over a restart ([HEARTH_RESUME]). A thread or topic row carries
 a ● for a message within a day and a • within a week, amber while
 unread ([HEARTH_NEW_MARKS]); home's "Waiting for you" lists the unread

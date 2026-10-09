@@ -250,6 +250,11 @@ function __buildat_leave_lost(lost, restarting)
 	__buildat_reconnect(address, why, restarting)
 	return true
 end
+-- Whether leave() goes back to a launcher rather than disconnecting: an
+-- app offers a way out only where there is one ([HEARTH_CLOSE])
+buildat.safe.can_leave_to_launcher = function()
+	return launcher_under_game()
+end
 buildat.safe.leave = function()
 	leave_reason = nil
 	if not leave_to_launcher() then

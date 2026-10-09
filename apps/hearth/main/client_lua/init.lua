@@ -400,11 +400,43 @@ local narrow = magic.ui.root.width < 560
 -- (the file picker, the menu), whose Escape is its own
 local base_top = nil
 
+-- [HEARTH_CLOSE] "Exit to launcher?", from the × and Escape at the top;
+-- only where leave() goes to a launcher (not the web page's /app)
+local function can_exit()
+	return buildat.can_leave_to_launcher and buildat.can_leave_to_launcher()
+end
+local function ask_exit()
+	local root = uistack.main:push({desc = "hearth exit"})
+	-- Over the frame, a page window's 100
+	root.priority = 200
+	local function close() uistack.main:pop(root) end
+	local menu = ui.vertical_menu(root, {on_key = function(key)
+		if key == magic.KEY_E or key == magic.KEY_Q then
+			accounts.logout()
+			return true
+		end
+	end})
+	local t = menu.window:CreateChild("Text")
+	t:SetStyleAuto()
+	t.text = "Exit to launcher?"
+	menu:add("Exit", function() accounts.logout() end, true):SetFocus(true)
+	menu:add("My account", function()
+		close()
+		accounts.show_account()
+	end)
+	menu:add("Cancel", close)
+	log:info("hearth: exit dialog")
+end
+
 local function build_frame()
 	base_top = uistack.main:top()
 	frame = accounts.page_window(880)
 	frame:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(8, 8, 8, 8))
 	frame:SetFixedHeight(math.floor(magic.ui.root.height * 0.85))
+	if can_exit() then
+		ui.close_glyph(magic.ui.root, frame, ask_exit)
+		log:info("hearth: the × to the launcher")
+	end
 	local inner = frame.width - 16
 	sidebar = frame:CreateChild("UIElement")
 	sidebar:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(0, 0, 0, 0))
@@ -1511,6 +1543,8 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 	elseif area.visible and section ~= "home" then
 		-- A section's first page: Back is to the top ([PLAYTEST_1008])
 		enter("home", function() show_home() end)
+	elseif can_exit() then
+		ask_exit()
 	else
 		accounts.show_account()
 	end
