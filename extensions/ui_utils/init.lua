@@ -1823,6 +1823,10 @@ end
 function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label, no_label, options)
 	options = options or {}
 	local root = uistack.main:push({desc="show_confirm_dialog"})
+	-- Over a window outside the stack (a page window's 100)
+	if options.priority then
+		root.priority = options.priority
+	end
 
 	local style = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
 	root.defaultStyle = style
@@ -1873,9 +1877,11 @@ function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label, no_label,
 		{yes_button, function() finish(true) end},
 		{no_button, function() finish(false) end},
 	}, function(key)
-		if options.yes_key and key == options.yes_key then
-			finish(true)
-			return true
+		for _, k in ipairs(options.yes_keys or {options.yes_key}) do
+			if key == k then
+				finish(true)
+				return true
+			end
 		end
 	end)
 	if options.yes_focused then

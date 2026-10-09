@@ -764,6 +764,23 @@ function M.logout()
 	buildat.leave()
 end
 
+-- [STARPORT_CLOSE] An app's own way out: "Exit to launcher?", Exit
+-- logging out. Only where leave() goes to a launcher (can_exit): on the
+-- web page or a client started with -s there is nothing to exit to
+function M.can_exit()
+	return buildat.can_leave_to_launcher ~= nil and
+			buildat.can_leave_to_launcher() == true
+end
+function M.ask_exit()
+	M.asking_exit = true
+	log:info("accounts: exit dialog")
+	local confirm = (ui_utils.safe or ui_utils).show_confirm_dialog
+	confirm("Exit to launcher?", M.logout,
+			function() M.asking_exit = false end, "Exit", "Cancel",
+			{yes_focused = true, yes_keys = {magic.KEY_E, magic.KEY_Q},
+			priority = 200})
+end
+
 function M.passwd(old, new)
 	buildat.send_packet("accounts:passwd", cereal.binary_output(
 			{old = old, new = new}, {"object", {"old", "string"},
@@ -2379,6 +2396,9 @@ local function build_frame()
 	local glyph = (ui_utils.safe or ui_utils).close_glyph
 	if sw.on_close and glyph then
 		glyph(root, f, function() server_close() end)
+	elseif sw.on_exit and glyph then
+		-- An app's own window: the × is its on_exit ([STARPORT_CLOSE])
+		glyph(root, f, function() sw.on_exit() end)
 	end
 end
 
@@ -2436,9 +2456,12 @@ end
 
 -- The window up at `key`, or the first entry. An admin's entries come
 -- with the users list; one asked for before it is shown when it comes
-function M.server_window(key, on_close)
+-- on_exit: for an app whose own UI this is, what its × does (it does not
+-- close the window), M.ask_exit where there is a launcher
+function M.server_window(key, on_close, on_exit)
 	-- Before the frame: its sidebar has Close
 	sw.on_close = on_close
+	sw.on_exit = on_exit
 	if not sw.frame then
 		build_frame()
 	end

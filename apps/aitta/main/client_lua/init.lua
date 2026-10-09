@@ -363,7 +363,10 @@ end
 home = function()
 	req("me", nil, function(me)
 		if not accounts.frame then
-			return accounts.server_window("aitta")
+			-- Its × "Exit to launcher?" from a launcher ([STARPORT_CLOSE])
+			return accounts.server_window("aitta", nil,
+					accounts.can_exit and accounts.can_exit() and
+					accounts.ask_exit or nil)
 		end
 		local page = accounts.server_open("Aitta, as " .. tostring(me.account))
 		if message then

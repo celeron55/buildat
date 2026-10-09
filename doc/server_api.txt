@@ -453,6 +453,8 @@ its own, closed by Close or a click outside it. An app adds its
 own pages with accounts.server_menu = function(add) add(header, label,
 key, draw, count) end, and may make the window its own UI with
 accounts.server_window(key) and server_open(title) (Starport, Aitta);
+server_window(key, nil, accounts.ask_exit) gives it a × asking "Exit to
+launcher?", passed where accounts.can_exit() ([STARPORT_CLOSE]);
 accounts.health_rows(w) adds rows to Health.
 
 builtin/moderation/api.h -- moderation::Interface: reports, their groups

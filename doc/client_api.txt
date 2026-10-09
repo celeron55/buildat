@@ -1143,7 +1143,9 @@ show_message_dialog(message [, on_close [, copy]])
 show_confirm_dialog(message, on_yes, on_no[, yes_label[, no_label[, options]]])
 - Two buttons, yes_label ("Yes" when absent), the main one, and no_label
   ("Cancel"), which has the focus; Escape is no. options.yes_focused gives
-  yes the focus, options.yes_key is a key that answers yes.
+  yes the focus, options.yes_key is a key that answers yes (options.yes_keys
+  a list of them), options.priority the dialog's over a window outside the
+  stack.
 show_notice(text [, copy])
 - A line at the top of the screen for six seconds, taking neither the mouse
   nor the focus: what a caught error is shown as in an app ([MENU_ERRORS]).

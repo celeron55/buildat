@@ -237,7 +237,9 @@ local function refresh(draw)
 	req("me", {}, function(r)
 		me = r
 		if not accounts.frame then
-			accounts.server_window("overview")
+			accounts.server_window("overview", nil,
+					accounts.can_exit and accounts.can_exit() and
+					accounts.ask_exit or nil)
 		else
 			accounts.server_sidebar()
 			if draw then
@@ -830,13 +832,19 @@ end
 
 -- [ESC_ACCOUNT]: Escape is Back -- a page's, a page's inside a page, the
 -- sidebar's on a narrow screen -- and at the top builtin's Account
--- (user, 2026-10-07)
+-- (user, 2026-10-07), from a launcher "Exit to launcher?" ([STARPORT_CLOSE])
 magic.SubscribeToEvent("KeyDown", function(_, d)
 	if d:GetInt("Key") ~= magic.KEY_ESCAPE or not accounts.frame or
 			not accounts.frame.visible then
 		return
 	end
-	if not accounts.back() then
+	-- The exit dialog's Escape is its own Cancel
+	if accounts.asking_exit or accounts.back() then
+		return
+	end
+	if accounts.can_exit and accounts.can_exit() then
+		accounts.ask_exit()
+	else
 		accounts.server_show("account")
 	end
 end)
