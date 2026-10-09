@@ -222,9 +222,11 @@ local function write_number(value)
 		error("write_json(): " .. tostring(value) ..
 				" is not a number JSON has")
 	end
-	-- A whole number stays one: %g would make 40048008 into 4.0048e+07
+	-- A whole number stays one: %g would make 40048008 into 4.0048e+07.
+	-- Not %d, which Lua 5.1 writes through a C long: 32 bits in the web
+	-- build (wasm32), where Hearth's file ids came out cut
 	if value == math.floor(value) and math.abs(value) < 2 ^ 53 then
-		return string.format("%d", value)
+		return string.format("%.0f", value)
 	end
 	return string.format("%.17g", value)
 end
