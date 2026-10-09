@@ -382,34 +382,10 @@ local function draw_overlay()
 					math.floor(dx + 0.5), math.floor(dz + 0.5)))
 		end
 	end
-	-- The Measure tool's points: each segment's length on it, the total at
-	-- the last point, the area inside when closed; to the pointer while open
-	local m = S.tool == "measure" and S.measure
-	if m then
-		local pts = {}
-		for i, p in ipairs(m.pts) do
-			pts[i] = p
-		end
-		local px, pz = M.measure_point()
-		if not m.closed and px then
-			pts[#pts + 1] = {px, pz}
-		end
-		local green, total = magic.Color(0.0, 0.65, 0.25), 0
-		for i = 1, m.closed and #pts or #pts - 1 do
-			local p, q = pts[i], pts[i % #pts + 1]
-			local l = geom.len(q[1] - p[1], q[2] - p[2])
-			total = total + l
-			thick({p, q}, green)
-			world_label((p[1] + q[1]) / 2, 0, (p[2] + q[2]) / 2, mm_text(l))
-		end
-		local last = pts[#pts]
-		if m.closed then
-			-- At the first point, off a room's label at its middle
-			world_label(pts[1][1], 0, pts[1][2], "total " .. mm_text(total) ..
-					", " .. m2(geom.area(pts)))
-		elseif #pts > 2 then
-			world_label(last[1], 0, last[2], "total " .. mm_text(total))
-		end
+	-- The registered tools' own drawing
+	local tl = S.tool and E.tools[S.tool]
+	if tl and tl.overlay then
+		tl.overlay(thick)
 	end
 	-- The voxel tool's and walking's crosshair, and what the pointer is on
 	crosshair.visible = S.captured or false

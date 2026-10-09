@@ -2534,18 +2534,42 @@ end
 -- leaves it for no tool at all (user, 2026-10-02): nothing can then be
 -- selected, and what was lets go; Select's filter is as it was when it
 -- comes back
+-- The tools in their own files ([FP_EDITOR_MODULES]): id -> {label,
+-- viewer_ok, clear(), press(), escape() -> true when it took the Esc,
+-- guide(g, hl), overlay(thick)}, on the toolbar in tool_order after the
+-- built-in ones
+E.tools, E.tool_order = {}, {}
+local BUILT_IN_TOOLS = {"select", "node", "wall", "room", "box", "hosted",
+		"voxel", "paint"}
+
+-- Esc to the tool in use first
+local function tool_escape()
+	local tl = S.tool and E.tools[S.tool]
+	return tl and tl.escape and tl.escape()
+end
+
+local function clear_tools()
+	for _, tl in pairs(E.tools) do
+		if tl.clear then
+			tl.clear()
+		end
+	end
+end
+
 local function set_tool(t, toggle)
 	if toggle and t == S.tool then
 		S.tool = nil
-		S.draw, S.corners, S.drag, S.measure = nil, nil, nil, nil
+		S.draw, S.corners, S.drag = nil, nil, nil
+		clear_tools()
 		S.sel, S.sel_face, S.primary, S.nodes = {}, {}, nil, {}
 		S.dirty = true
 		refresh_panels()
 		return
 	end
 	-- Viewing ([FP_VIEW_EDIT]): only Select, whose clicks show things
-	S.measure = nil
-	if t ~= "select" and t ~= "measure" and not doc.can("edit") then
+	clear_tools()
+	local tl = E.tools[t]
+	if t ~= "select" and not (tl and tl.viewer_ok) and not doc.can("edit") then
 		doc.notice(doc.can("can_edit") and
 				"Viewing: switch to Editing in the menu to use that tool" or
 				"Viewing only: no edit privilege")
@@ -2642,11 +2666,17 @@ local function build_toolbar()
 	-- things are not there
 	for _, t in ipairs({{"select", "Select"}, {"node", "Nodes"},
 			{"wall", "Wall"}, {"room", "Room"}, {"box", "Object"},
-			{"hosted", "Wall items"}, {"voxel", "Voxels"}, {"paint", "Material"},
-			{"measure", "Measure"}}) do
-		if t[1] == "select" or t[1] == "measure" or doc.can("edit") then
+			{"hosted", "Wall items"}, {"voxel", "Voxels"}, {"paint", "Material"}}) do
+		if t[1] == "select" or doc.can("edit") then
 			add(t[2], keys.name(t[1]), function() set_tool(t[1], true) end,
 					S.tool == t[1])
+		end
+	end
+	for _, id in ipairs(E.tool_order) do
+		local tl = E.tools[id]
+		if tl.viewer_ok or doc.can("edit") then
+			add(tl.label, keys.name(id), function() set_tool(id, true) end,
+					S.tool == id)
 		end
 	end
 	-- The panels folded away on a narrow screen, opened here
@@ -4680,21 +4710,8 @@ do
 				add_hosted(s.id, s.x, s.z, s.side)
 			end
 			refresh_panels()
-		elseif S.tool == "measure" then
-			-- A point; the first again closes it; after closing, a new one
-			local x, z = M.measure_point()
-			local m = S.measure
-			if not m or m.closed then
-				m = {pts = {}}
-				S.measure = m
-			end
-			local f = m.pts[1]
-			if x and f and #m.pts >= 3 and
-					geom.len(x - f[1], z - f[2]) <= snap_radius() then
-				m.closed = true
-			elseif x then
-				m.pts[#m.pts + 1] = {x, z}
-			end
+		elseif E.tools[S.tool] and E.tools[S.tool].press then
+			E.tools[S.tool].press()
 		elseif S.tool == "voxel" then
 			voxel_edit(S.ctrl, S.shift)
 		elseif S.tool == "wall" or S.tool == "room" then
@@ -5623,8 +5640,8 @@ do
 			S.draw = nil
 			S.corners = nil
 			S.typed = ""
-		elseif S.measure then
-			S.measure = nil
+		elseif tool_escape() then
+			-- the tool's own
 		elseif S.linking then
 			S.linking = nil
 			refresh_panels()
@@ -5705,6 +5722,14 @@ do
 		local function is(action)
 			return key == keys.key(action)
 		end
+		-- The first of actions whose key it is
+		local function is_any(actions)
+			for _, a in ipairs(actions) do
+				if is(a) then
+					return a
+				end
+			end
+		end
 		if key == magic.KEY_ESCAPE then
 			M.escape()
 		elseif S.paused then
@@ -5737,17 +5762,9 @@ do
 			rotate_selection(angle_step())
 		elseif is("turn_right") then
 			rotate_selection(-angle_step())
-		elseif is("select") or is("node") or is("wall") or is("room") or
-				is("box") or is("hosted") or is("voxel") or is("paint") or
-				is("measure") then
+		elseif is_any(BUILT_IN_TOOLS) or is_any(E.tool_order) then
 			-- Again: out of it, to no tool
-			for _, t in ipairs({"select", "node", "wall", "room", "box",
-					"hosted", "voxel", "paint", "measure"}) do
-				if is(t) then
-					set_tool(t, true)
-					break
-				end
-			end
+			set_tool(is_any(BUILT_IN_TOOLS) or is_any(E.tool_order), true)
 		elseif is("grid") then
 			next_grid()
 		elseif is("angle") then
@@ -6241,24 +6258,8 @@ do
 					g.note = "Type a length and Enter to draw it that long"
 				end
 			end
-		elseif tool == "measure" then
-			local x, z = M.measure_point()
-			local m = S.measure
-			if x then
-				hl({kind = "point", x = x, z = z})
-				local f = m and not m.closed and m.pts[1]
-				local last = m and not m.closed and m.pts[#m.pts]
-				if f and #m.pts >= 3 and
-						geom.len(x - f[1], z - f[2]) <= snap_radius() then
-					g.left = "close it: the area"
-				elseif last then
-					g.left = "a point here, " .. mm_text(geom.len(x - last[1],
-							z - last[2])) .. " on"
-				else
-					g.left = "measure from here"
-				end
-				g.note = m and "Esc: clear it" or "Ctrl: no snapping"
-			end
+		elseif E.tools[tool] and E.tools[tool].guide then
+			E.tools[tool].guide(g, hl)
 		elseif tool == "box" then
 			local x, z = snapped_point(nil)
 			if x and edit then
@@ -6601,6 +6602,7 @@ E.debug, E.BODY_R, E.HEAD, E.world_label = debug, BODY_R, HEAD, world_label
 E.m2, E.plan_symbol, E.draw_guide, E.mm_text = m2, plan_symbol, draw_guide, mm_text
 E.crosshair, E.user_color, E.over_ui = crosshair, user_color, over_ui
 local draw_overlay = load("overlay.lua")(E)
+load("tool_measure.lua")(E)
 
 -- This user's presence, for the others, every PRESENCE_SECONDS
 local PRESENCE_SECONDS = 0.1
