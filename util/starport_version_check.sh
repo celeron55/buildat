@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
-# cost: 60s (2026-10-09)
-# covers: client/extensions/starport/init.lua apps/starport/main/main.cpp util/starport_version_github.py
+# cost: 75s (2026-10-09)
+# covers: client/extensions/starport/init.lua apps/starport/main/main.cpp util/starport_version_github.py src/client/app_lua.h src/impl/linux/process.cpp extensions/launch_menu/init.lua
 # [VERSION_CHECK]: a Starport whose version adapter says 0.9.0 carries it
 # in /api/list, filtered (a bad platform left out); the launcher shows the
 # notice, "Not now" is kept across a restart, a newer version (0.9.1) is
@@ -96,6 +96,46 @@ launcher "$tmp/c3" "$tmp/cl3.log"
 [ "$(cat "$tmp/opened" 2>/dev/null)" = "https://example.org/linux-0.9.1.tar.gz" ] ||
 	fail "Open did not open the link ($tmp/cl3.log)"
 echo "ok: a newer version told again; Open opened its link"
+
+# [WIN_OPEN]: no opener on PATH is a failure, said on the notice, which
+# stays; Settings' "Open the log folder" hands the opener the log's folder
+rm -f "$tmp/opened"
+mkdir -p "$tmp/none"
+cat > "$tmp/c4" <<C
+wait_log_any 30000 Offering version 0.9.1
+delay 1000
+click Button "Open"
+wait_log 5000 Version link
+delay 500
+screenshot $tmp/failed.png
+click Button "Not now"
+delay 500
+quit
+C
+BUILDAT_STARPORT_OFFER=1 timeout 120 env PATH="$tmp/none" Build/bin/buildat \
+	-o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 4 \
+	-o sound_mute=1 -c @"$tmp/c4" > "$tmp/cl4.log" 2>&1
+grep -q "Version link: the system's opener could not be run" "$tmp/cl4.log" ||
+	fail "no opener, and not said ($tmp/cl4.log)"
+grep -q 'command: click Button "Not now"' "$tmp/cl4.log" &&
+	! grep -q "Command sequence failed" "$tmp/cl4.log" ||
+	fail "the notice closed on a failed open ($tmp/cl4.log)"
+cat > "$tmp/c5" <<C
+wait_log_any 20000 launch_menu: home
+delay 1000
+click Button "Settings"
+delay 800
+click Button "Logs and errors"
+delay 800
+click Button "Open the log folder"
+delay 800
+quit
+C
+launcher "$tmp/c5" "$tmp/cl5.log"
+opened=$(cat "$tmp/opened" 2>/dev/null)
+[ -n "$opened" ] && [ -d "$opened" ] ||
+	fail "Open the log folder opened \"$opened\" ($tmp/cl5.log)"
+echo "ok: no opener said and the notice kept; the log folder opened"
 
 if out=$(timeout 60 util/starport_version_github.py 2>&1); then
 	echo "$out" | python3 -c '

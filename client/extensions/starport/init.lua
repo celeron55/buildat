@@ -1066,10 +1066,16 @@ function M.offer_version()
 			tostring(buildat.version()) .. ".")
 	add_text(w, n.url, DIM)
 	local r = add_row(w)
+	local failed = nil
 	add_button(r, "Open", function()
 		local ok, err = __buildat_open_url(n.url)
 		log:info("Version link: " .. (ok and "opened" or tostring(err)))
-		close(false)
+		if ok then
+			close(false)
+		elseif not failed then
+			-- The window stays, the link on it to copy by hand
+			failed = add_text(w, "Could not open it: " .. tostring(err), WARN)
+		end
 	end, n.url:match("^https://") ~= nil, true)
 	add_button(r, "Not now", function() close(true) end)
 end

@@ -51,7 +51,9 @@ bool open_with_system(const ss_ &target)
 #ifdef __APPLE__
 	return shell_exec("open '"+target+"'") == 0;
 #else
-	return shell_exec("xdg-open '"+target+"' >/dev/null 2>&1 &") == 0;
+	// Not waited for, so only a missing xdg-open is seen as a failure
+	return shell_exec("command -v xdg-open >/dev/null && "
+			"{ xdg-open '"+target+"' >/dev/null 2>&1 & }") == 0;
 #endif
 }
 
