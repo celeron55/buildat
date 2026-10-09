@@ -136,8 +136,10 @@ assert(mark_for(0, false, 3600)[1] == "●" and
 -- safe_classes.lua
 local MARKUP = {{"Bold", "**bold**"}, {"List", "\n- "},
 	{"Link", "[text](https://)"}, {"Image", "![what it shows](https://)"},
-	{"Code", "`code`"}}
-local function insert_at_cursor(e, s)
+	{"Code", "`code`"},
+	-- [HEARTH_LINES_CODE] the cursor on the block's empty line
+	{"Code block", "\n```\n\n```\n", 5}}
+local function insert_at_cursor(e, s, cursor)
 	-- The cursor counts characters, the string bytes
 	local all, at, i = e:GetText(), e.cursorPosition, 1
 	for _ = 1, at do
@@ -148,7 +150,7 @@ local function insert_at_cursor(e, s)
 		i = i + (c >= 0xF0 and 4 or c >= 0xE0 and 3 or c >= 0xC0 and 2 or 1)
 	end
 	e:SetText(all:sub(1, i - 1) .. s .. all:sub(i))
-	e.cursorPosition = at + #s
+	e.cursorPosition = at + (cursor or #s)
 	e:SetFocus(true)
 end
 
@@ -157,11 +159,19 @@ end
 -- link goes in at the cursor of the field it was picked for
 local picking_into = nil
 
+-- The five entities the server writes
+-- simplified: another (&#123;) is shown as written
+local function entities(h)
+	h = h:gsub("&lt;", "<"):gsub("&gt;", ">"):gsub("&quot;", '"')
+	return (h:gsub("&#39;", "'"):gsub("&amp;", "&"))
+end
+
 -- The server's HTML of a message as text to read: a link with its address
--- after it, a spoiler and a task's box said, the entities back
--- simplified: the five entities the server writes; another (&#123;) is
--- shown as written
+-- after it, a spoiler and a task's box said, the entities back. A picture
+-- the server draws (its own /f/<id>, linked or not) is left out, being
+-- drawn under the text ([HEARTH_LINES_CODE])
 local function html_text(h)
+	h = h:gsub('<a href="[^"]*"[^>]*><img [^>]*></a>', ""):gsub("<img [^>]*>", "")
 	h = h:gsub('<a class="ref" href="[^"]*">(.-)</a>', "%1")
 	h = h:gsub('<a href="([^"]*)"[^>]*>(.-)</a>', function(u, t)
 		return t == u and t or t .. " (" .. u .. ")"
@@ -172,14 +182,37 @@ local function html_text(h)
 	h = h:gsub("<[ou]l[^>]*>\n", ""):gsub("</[ou]l>\n", "\n")
 	h = h:gsub("<li>", "  - "):gsub("<hr>", "----"):gsub("</p>\n", "\n\n")
 	h = h:gsub("</h%d>\n", "\n\n"):gsub("</t[hd]>", " | ")
-	h = h:gsub("<[^>]*>", "")
-	h = h:gsub("&lt;", "<"):gsub("&gt;", ">"):gsub("&quot;", '"')
-	h = h:gsub("&#39;", "'"):gsub("&amp;", "&")
-	return (h:gsub("%s+$", ""))
+	h = entities(h:gsub("<[^>]*>", ""))
+	return (h:gsub("\n\n\n+", "\n\n"):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 assert(html_text('<p><strong>b</strong> <a href="https://x/?a=1&amp;b">x</a> ' ..
 		'<a class="ref" href="/t/1">#1</a></p>\n<ul>\n<li>i</li>\n</ul>\n') ==
 		"b x (https://x/?a=1&b) #1\n\n  - i")
+
+-- [HEARTH_LINES_CODE] The HTML as the client's view draws it: the text
+-- parts, and each <pre> block apart as {code = its text}
+local function html_parts(h)
+	local parts, at = {}, 1
+	while true do
+		local s, e, code = h:find("<pre><code[^>]*>(.-)</code></pre>", at)
+		local t = html_text(h:sub(at, (s or #h + 1) - 1))
+		if t ~= "" then
+			parts[#parts + 1] = {text = t}
+		end
+		if not s then
+			return parts
+		end
+		parts[#parts + 1] = {code = entities(code):gsub("\n$", "")}
+		at = e + 1
+	end
+end
+do
+	local p = html_parts('<p>a<br>\nb</p>\n<p><a href="/f/1/a.png">' ..
+			'<img src="/f/1/thumb" alt="a" loading="lazy"></a></p>\n' ..
+			'<pre><code class="language-sh">x &lt; 1\n  y\n</code></pre>\n<p>c</p>\n')
+	assert(#p == 3 and p[1].text == "a\nb" and p[2].code == "x < 1\n  y" and
+			p[3].text == "c")
+end
 
 -- The page area's size
 local W, H = 100, 100
@@ -208,7 +241,7 @@ local function markup_buttons(parent, e, show, extra)
 	end
 	for _, b in ipairs(MARKUP) do
 		add(b[1], function()
-			insert_at_cursor(e, b[2])
+			insert_at_cursor(e, b[2], b[3])
 		end)
 	end
 	add("File...", function()
@@ -588,9 +621,45 @@ local function size_text(b)
 			math.floor((b + 512 * 1024) / (1024 * 1024)) .. " MiB"
 end
 
+-- [HEARTH_LINES_CODE] A code block: its lines in the mono font on a
+-- darker ground, not wrapped; a line past the width cut with "..."
+-- simplified: no sideways scroll (the web page has it)
+local mono_char
+local function code_block(parent, s)
+	local bg = parent:CreateChild("BorderImage")
+	bg.color = magic.Color(0, 0, 0, 0.35)
+	bg:SetLayout(magic.LM_VERTICAL, 0, magic.IntRect(6, 4, 6, 4))
+	local t = bg:CreateChild("Text")
+	t:SetStyleAuto()
+	t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 12)
+	if not mono_char then
+		t:SetText(("0"):rep(10))
+		mono_char = math.max(1, t.minWidth / 10)
+	end
+	local fit = math.max(8, math.floor((W - 48) / mono_char))
+	local lines = {}
+	for l in (s:gsub("\t", "    ") .. "\n"):gmatch("(.-)\n") do
+		-- simplified: bytes, so a non-ASCII line is cut early; never
+		-- inside a character
+		if #l > fit then
+			local cut = fit - 3
+			while cut > 0 and (l:byte(cut + 1) or 0) >= 0x80 and
+					l:byte(cut + 1) < 0xC0 do
+				cut = cut - 1
+			end
+			l = l:sub(1, cut) .. "..."
+		end
+		lines[#lines + 1] = l
+	end
+	t:SetText(table.concat(lines, "\n"))
+	t:SetName("code")
+	return t
+end
+
 -- A box of the list: a button holding a head line and a wrapped body,
 -- inside an element that can hold more under it (a message's actions).
--- `name` goes on the head, which is how the box is known.
+-- `name` goes on the head, which is how the box is known. The body is a
+-- text or html_parts()' parts.
 local function add_box(v, name, head, body, head_color, on_click)
 	local holder = v.list:CreateChild("UIElement")
 	holder:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(0, 0, 0, 0))
@@ -599,7 +668,15 @@ local function add_box(v, name, head, body, head_color, on_click)
 	b:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(8, 4, 8, 6))
 	local h = text(b, head, head_color or DIM, W - 32)
 	h:SetName(name or "")
-	if body and body ~= "" then
+	if type(body) == "table" then
+		for _, p in ipairs(body) do
+			if p.code then
+				code_block(b, p.code)
+			else
+				text(b, p.text, nil, W - 32)
+			end
+		end
+	elseif body and body ~= "" then
 		text(b, body, nil, W - 32)
 	end
 	if on_click then
@@ -642,6 +719,7 @@ local show_home, show_topic, show_thread, show_notifications, show_following
 local show_search, show_account, show_compose, show_report, show_link
 local show_queue, show_settings, show_tracker_link, show_topic_edit
 local show_place, show_server, show_discussed, read_on
+local show_delete, show_ban
 
 local function mark_name(mk)
 	return (mk[1] == "●" and "medium" or mk[1] == "•" and "small" or "none") ..
@@ -875,6 +953,7 @@ show_notifications = function()
 		local said = {reply = "replied in", mention = "mentioned you in",
 				answer = "marked your message the answer in",
 				hidden = "hid your message in",
+				deleted = "deleted your message in",
 				restored = "restored your message in",
 				appeal_dismissed = "kept your message hidden in",
 				status = "set the status of",
@@ -1111,17 +1190,24 @@ show_thread = function(id, at, missing)
 			end
 			local head = (is_answer and "This answered it -- " or "") .. m.author ..
 					" · " .. ago(m.created) .. (m.edited ~= 0 and " · edited" or "")
-			local body = m.body
+			-- [HEARTH_LINES_CODE] the page's own markup, as the web shows it
+			local body = html_parts(m.html or "")
 			if m.hidden then
-				body = (m.hidden_text or "Hidden: " ..
-						m.hidden_reason) ..
-						(body ~= "" and "\n\n" .. body or "")
+				table.insert(body, 1, {text = m.hidden_text or "Hidden: " ..
+						m.hidden_reason})
 			end
 			for _, p in ipairs(m.patches or {}) do
-				body = body .. "\n\n" .. p.name .. "\n" .. p.text
+				body[#body + 1] = {text = p.name}
+				body[#body + 1] = {code = p.text}
 			end
 			local holder, box, head_text = add_box(v, "m" .. m.id, head, body,
 					is_answer and MAIN or nil)
+			if scripted then
+				for _, p in ipairs(body) do
+					log:info("hearth: m" .. m.id .. (p.code and " code: " .. p.code or
+							" text: " .. p.text):gsub("\n", "|"))
+				end
+			end
 			-- [HEARTH_ATTACHMENTS]: the images the text draws, in its order,
 			-- then its files, an image the text does not draw with its
 			-- thumbnail
@@ -1143,13 +1229,6 @@ show_thread = function(id, at, missing)
 						(f.vetted == false and "; a new account's image, " ..
 						(f.shown and "not shown to everyone yet" or
 						"not shown until a helper says") or ""), DIM, W - 32)
-				if me.helper and f.image and (f.vetted == false or f.vet == 1) then
-					local r = row(box)
-					button(r, f.vetted and "Take back" or "Show to everyone",
-							function()
-						req("vet_file", {file = f.id, on = not f.vetted}, redraw)
-					end)
-				end
 			end
 			-- [HEARTH_THANKS]: the count at the top right, as dim as the
 			-- author's name
@@ -1159,11 +1238,25 @@ show_thread = function(id, at, missing)
 			end
 			-- Its actions, shown while it is selected
 			local acts = holder:CreateChild("UIElement")
-			acts:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(8, 0, 0, 2))
+			acts:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(8, 0, 0, 2))
 			acts:SetName("acts" .. m.id)
 			acts.visible = false
+			-- In rows: a moderator's are more than a page's width
+			-- ([HEARTH_MOD_TOOLS])
+			local arow, used = nil, 0
 			local function action(label, fn)
-				button(acts, label, fn):SetName("a" .. m.id)
+				arow = arow or row(acts)
+				local b = button(arow, label, fn)
+				if used > 0 and used + b.minWidth > W - 40 then
+					b:Remove()
+					arow, used = row(acts), 0
+					b = button(arow, label, fn)
+				end
+				used = used + b.minWidth + 4
+				b:SetName("a" .. m.id)
+				if scripted then
+					log:info("hearth: action m" .. m.id .. " " .. label)
+				end
 			end
 			action("Quote", function()
 				if composer then
@@ -1205,6 +1298,34 @@ show_thread = function(id, at, missing)
 			action("Copy #" .. id, function()
 				magic.ui:SetClipboardText("#" .. id)
 			end)
+			-- [HEARTH_MOD_TOOLS] A helper's one button for the message's new
+			-- account's images; a moderator's Delete... (not the admin's
+			-- message) and Ban... (not a helper's or above)
+			local new_images, unshown = false, false
+			for _, f in ipairs(m.files or {}) do
+				if f.image and (f.vetted == false or f.vet == 1) then
+					new_images = true
+					unshown = unshown or f.vetted == false
+				end
+			end
+			if me.helper and new_images then
+				action(unshown and "Show images to everyone" or
+						"Hide images from everyone", function()
+					req("vet_file", {message = m.id, on = unshown}, redraw)
+				end)
+			end
+			local author_level = m.author_level or 0
+			if me.moderator and m.author ~= me.account and author_level < 40 and
+					not (m.hidden_text or ""):match("^Deleted") then
+				action("Delete...", function()
+					go(function() show_delete(m, m.id == t.first, id) end)
+				end)
+			end
+			if me.moderator and m.author ~= me.account and author_level < 20 then
+				action("Ban...", function()
+					go(function() show_ban(m) end)
+				end)
+			end
 			boxes[m.id], boxes.last = holder, holder
 		end
 		-- The question, its answer, then the rest in order
@@ -1243,6 +1364,8 @@ show_thread = function(id, at, missing)
 				v:show(boxes.last)
 			end
 		end
+		-- Opened at a message, which keeps the focus (place() clears at)
+		local opened_at = at and boxes[at]
 		place()
 		-- [HEARTH_RESUME]: where it was scrolled to when kept
 		if restore_scroll then
@@ -1299,7 +1422,7 @@ show_thread = function(id, at, missing)
 			button(r, "Send", send, true)
 		end)
 		-- A touchscreen's keyboard would cover the thread: it opens on a tap
-		if buildat.get_env("BUILDAT_TOUCH") ~= "1" and not at then
+		if buildat.get_env("BUILDAT_TOUCH") ~= "1" and not opened_at then
 			e:SetFocus(true)
 		end
 	end, function(why)
@@ -1858,6 +1981,118 @@ show_report = function(m, kind)
 	e:SetFocus(true)
 end
 
+-- [HEARTH_MOD_TOOLS] The reasons a moderator's Delete and Ban give; the
+-- author is told it with the text
+local MOD_REASONS = {"Spam", "Harassment or abuse", "Illegal content",
+		"Off topic", "Other"}
+
+-- One button an option, in rows under `parent`, the chosen one in the main
+-- style; on_pick(i)
+local function choices(parent, options, chosen, on_pick)
+	local r, used = row(parent), 0
+	for i, o in ipairs(options) do
+		local function add()
+			return button(r, o, function() on_pick(i) end, i == chosen)
+		end
+		local b = add()
+		if used > 0 and used + b.minWidth > W then
+			b:Remove()
+			r, used = row(parent), 0
+			b = add()
+		end
+		used = used + b.minWidth + 4
+	end
+end
+
+-- A moderator's dialog on a message: `draw(w, s, redraw)` adds its
+-- choices to the page, kept in `s` across a redraw with the text typed;
+-- `send(s, text, status)` once a reason is chosen
+local function mod_dialog(title, m, s, draw, send)
+	open_thread = nil
+	local function redraw_(e)
+		s.text = e and e:GetText() or s.text
+		local w = open(title)
+		text(w, m.author .. ": " .. (m.html and html_text(m.html) or m.body),
+				DIM, W)
+		local e2
+		local function again() redraw_(e2) end
+		draw(w, s, again)
+		text(w, "Why (they are told it):", DIM)
+		choices(w, MOD_REASONS, s.reason, function(i)
+			s.reason = i
+			again()
+		end)
+		e2 = edit(w, "What they did (optional)", true, nil, W)
+		e2:SetText(s.text or "")
+		local status = text(w, "", WARN, W)
+		button(w, title, function()
+			if not s.reason then
+				status:SetText("Choose a reason")
+				return
+			end
+			send(s, e2:GetText(), status)
+		end, true)
+	end
+	redraw_()
+end
+
+-- Delete...: this message or the whole thread (the first message only the
+-- thread); deleted for everyone but the moderators, its place saying so,
+-- the author told why and able to appeal
+show_delete = function(m, first, thread_id)
+	mod_dialog("Delete", m, {what = first and 2 or 1}, function(w, s, again)
+		if first then
+			text(w, "The thread's first message: the whole thread goes.", DIM, W)
+			return
+		end
+		choices(w, {"This message", "The whole thread"}, s.what, function(i)
+			s.what = i
+			again()
+		end)
+	end, function(s, t)
+		req("delete", {message = m.id, thread = s.what == 2,
+				reason = MOD_REASONS[s.reason], text = t}, function()
+			message = (s.what == 2 and "The thread" or "The message") ..
+					" is deleted; " .. m.author .. " is told why."
+			back()
+		end)
+	end)
+end
+
+-- Ban...: for how long, why (said to them when their join is refused),
+-- and their latest messages deleted with it
+local BAN_DAYS = {{"A day", 1}, {"A week", 7}, {"A month", 30},
+		{"Until lifted", 0}}
+local BAN_DELETE = {{"Keep their messages", 0}, {"Delete their last day's", 1},
+		{"Delete their last week's", 7}}
+show_ban = function(m)
+	local function labels(t)
+		local out = {}
+		for i, x in ipairs(t) do
+			out[i] = x[1]
+		end
+		return out
+	end
+	mod_dialog("Ban", m, {days = 1, del = 1}, function(w, s, again)
+		text(w, "Ban " .. m.author .. " for:", DIM)
+		choices(w, labels(BAN_DAYS), s.days, function(i)
+			s.days = i
+			again()
+		end)
+		choices(w, labels(BAN_DELETE), s.del, function(i)
+			s.del = i
+			again()
+		end)
+	end, function(s, t)
+		req("ban", {name = m.author, days = BAN_DAYS[s.days][2],
+				reason = MOD_REASONS[s.reason], text = t,
+				delete_days = BAN_DELETE[s.del][2]}, function()
+			message = m.author .. " is banned."
+			back()
+		end)
+	end)
+end
+
 -- **The moderators' queue**: open reports (hide or dismiss), appeals
 -- (restore or dismiss), tracker domains (accept or dismiss) and held links
 -- (approve or reject, a helper's too; the rest a helper only sees) as
@@ -2241,12 +2476,15 @@ accounts.on_joined = function()
 		req("topics", nil, function(tr)
 			topics = tr.topics
 			draw_sidebar()
-			-- BUILDAT_HEARTH_OPEN=<thread>: a scripted client opens it, as a
-			-- click on it would; "queue" or "account:<name>" a page, and
+			-- BUILDAT_HEARTH_OPEN=<thread>[#<message>]: a scripted client
+			-- opens it, as a click on it would, the message selected;
+			-- "queue" or "account:<name>" a page, and
 			-- "server:<key>" a Server window page
 			local open_page = buildat.get_env("BUILDAT_HEARTH_OPEN") or ""
 			local kept = load_state()
-			local open_ = tonumber(open_page)
+			local open_ = tonumber(open_page or "") or
+					tonumber(open_page:match("^(%d+)#") or "")
+			local open_at = tonumber(open_page:match("^%d+#(%d+)$") or "")
 			-- **"Feedback..." on an app** ([PACKAGE_SUBJECT]): the launch grid
 			-- came here with the app's package and versions, which start the
 			-- message and go with the thread as its subject
@@ -2276,7 +2514,7 @@ accounts.on_joined = function()
 				end
 			elseif open_ then
 				here = function() show_home() end
-				go(function() show_thread(open_) end)
+				go(function() show_thread(open_, open_at) end)
 			elseif open_page == "queue" or open_page:match("^account:") then
 				here = function() show_home() end
 				go(function()

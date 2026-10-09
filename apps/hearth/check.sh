@@ -270,6 +270,11 @@ done
 client bob bobpass1234 "$t/bob_preview.log" '{"cmd":"preview","body":"**b** @carol <i>"}'
 answer "$t/bob_preview.log" 1001 | grep -qF '<strong>b<\/strong> <a class=\"ref\" href=\"\/u\/carol\">@carol<\/a> &lt;i&gt;' ||
 	fail "the preview: $(answer "$t/bob_preview.log" 1001)"
+# [HEARTH_LINES_CODE]: a newline breaks the line; a fenced block is one
+# <pre><code>
+client bob bobpass1234 "$t/bob_lines.log" '{"cmd":"preview","body":"a\nb\n\n```\nx\ny\n```"}'
+answer "$t/bob_lines.log" 1001 | grep -qF '<p>a<br>\nb<\/p>\n<pre><code>x\ny\n<\/code><\/pre>' ||
+	fail "a line break and a block: $(answer "$t/bob_lines.log" 1001)"
 # An @name's page: the account's messages that stand
 [ "$(get /u/admin)" = 200 ] && grep -q 'href="/t/1#m' "$t/page" ||
 	fail "the account's page"
@@ -286,7 +291,7 @@ grep -qi 'href="[^"]*script\|<script\|<img' "$t/page" &&
 CMDS='delay 5000\ntext one two\ndelay 200\nkeypress Return\ndelay 200\ntext three\ndelay 200\nkeypress Return\ndelay 200\nkeypress Return\ndelay 200\ntext four\ndelay 200\nkeypress Up\ndelay 200\nkeypress Up\ndelay 200\ntext X\ndelay 200\nkeydown ctrl\ndelay 100\nkeypress Return\ndelay 100\nkeyup ctrl\ndelay 1500\nquit\n' \
 	client admin checkpass12 "$t/admin9.log" '' BUILDAT_HEARTH_OPEN=1
 get /t/1 > /dev/null
-grep -qPz '<p>one two\nXthree</p>\n<p>four</p>' "$t/page" ||
+grep -qPz '<p>one two<br>\nXthree</p>\n<p>four</p>' "$t/page" ||
 	fail "the multi-line reply: $(grep -a -B1 -A2 'Xthree\|one two' "$t/page" | head -6)"
 
 # 9. Files ([FORUM] step 5): a new account uploads none; the admin's JPEG

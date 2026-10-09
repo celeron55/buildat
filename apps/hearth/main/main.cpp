@@ -578,13 +578,17 @@ static Limits limits(int lv)
 }
 // messages.hidden: by a moderator (with a statement), a new account's
 // link held for approval, or hidden by reports until a moderator looks
-static const int HIDDEN = 1, HELD = 2, REPORTED = 3;
+static const int HIDDEN = 1, HELD = 2, REPORTED = 3, DELETED = 4;
+// [HEARTH_MOD_TOOLS] A deleted message is kept this long for its appeal
+// (the DSA's complaint window), then purged with its files
+static const int64_t DELETED_KEEP_S = 183 * 86400;
 static ss_ hidden_text(int64_t hidden, const ss_ &reason)
 {
 	return hidden == HELD ? "Waiting for a "+level_name(LV_HELPER)+
 			" to approve its link" : hidden == REPORTED ?
 			"Reported; hidden until a "+level_name(LV_MODERATOR)+" looks" :
-			"Hidden by a "+level_name(LV_MODERATOR)+": "+reason;
+			hidden == DELETED ? "Deleted by a "+level_name(LV_MODERATOR)+": "+
+			reason : "Hidden by a "+level_name(LV_MODERATOR)+": "+reason;
 }
 // Approvals a day by a helper, and how long it may take one back
 static const int APPROVALS_A_DAY = 20;
@@ -990,6 +994,22 @@ struct Module: public interface::Module
 		m_files_swept = now_s();
 		try {
 			exec("BEGIN");
+			// [HEARTH_MOD_TOOLS] Deleted past the appeal's window: gone, and
+			// the files only it used
+			Q p(m_db, "SELECT m.id, m.body FROM messages m WHERE m.hidden = ? "
+					"AND (SELECT max(handled_time) FROM reports WHERE kind = "
+					"'delete' AND message = m.id) < ?");
+			p.b((int64_t)DELETED).b(now_s() - DELETED_KEEP_S);
+			while(p.step()){
+				delete_message(p.i(0));
+				for(int64_t f : file_ids(p.s(1))){
+					Q d(m_db, "DELETE FROM files WHERE id = ? AND NOT EXISTS "
+							"(SELECT 1 FROM file_links WHERE file = ?)");
+					d.b(f).b(f).step();
+				}
+				log_i(MODULE, "Hearth: deleted message %lld purged",
+						(long long)p.i(0));
+			}
 			const json::Value s = file_settings();
 			const int64_t now = now_s(), budget = jint(s, "budget");
 			const int64_t gone = now - jint(s, "delete_after");
@@ -1492,6 +1512,8 @@ struct Module: public interface::Module
 			v.set("edited", m.i(4));
 			v.set("hidden", hidden);
 			v.set("hidden_reason", m.s(6));
+			// What a moderator's tools offer on it ([HEARTH_MOD_TOOLS])
+			v.set("author_level", (int64_t)accounts::level(m_server, m.s(1)));
 			// A hidden message's thanks are kept and not shown
 			v.set("thanks", hidden ? (int64_t)0 : m.i(7));
 			v.set("thanked", m.i(8) != 0);
@@ -1499,9 +1521,11 @@ struct Module: public interface::Module
 				v.set("hidden_text", hidden_text(m.i(5), m.s(6)));
 			v.set("patches", patches_in(jstr(v, "body")));
 			v.set("files", files_of(jstr(v, "body"), helper));
+			// The client draws the page's own markup ([HEARTH_LINES_CODE])
+			v.set("html", interface::markup::to_html(jstr(v, "body")));
 			// A message's own bytes besides its body: many short ones fill
 			// a part too
-			bytes += 256 + jstr(v, "body").size();
+			bytes += 256 + jstr(v, "body").size() + jstr(v, "html").size();
 			for(unsigned i = 0; i < v.get("patches").size(); i++)
 				bytes += jstr(v.get("patches").at(i), "text").size();
 			list.append(v);
@@ -2385,12 +2409,12 @@ struct Module: public interface::Module
 	// counted once it is over -- a thread read on it, or a message
 	// written on it that stands; more of either on one day is no more
 	// trust, so it comes at a day's pace however busy a script is -- and
-	// messages hidden in the last 30 days
+	// messages hidden or deleted in the last 30 days
 	json::Value trust(const ss_ &name)
 	{
 		const int64_t now = now_s();
 		Q hd(m_db, "SELECT count(*) FROM messages WHERE author = ? AND "
-				"hidden = 1 AND created > ?");
+				"hidden IN (1, 4) AND created > ?");
 		hd.b(name).b(now - 30 * 86400).step();
 		Q d(m_db, "SELECT count(*) FROM (SELECT day FROM active_days "
 				"WHERE account = ?1 AND day < ?2 UNION SELECT created / 86400 "
@@ -2692,7 +2716,8 @@ struct Module: public interface::Module
 		const bool first = m.i(3) == message_id;
 		Q u(m_db, "UPDATE messages SET hidden = ?, hidden_reason = ? "
 				"WHERE id = ?");
-		u.b((int64_t)hidden).b(hidden == HIDDEN ? reason : ss_()).b(message_id)
+		u.b((int64_t)hidden).b(hidden == HIDDEN || hidden == DELETED ? reason :
+				ss_()).b(message_id)
 				.step();
 		if(first){
 			Q t(m_db, "UPDATE threads SET hidden = ? WHERE id = ?");
@@ -2704,6 +2729,30 @@ struct Module: public interface::Module
 			Q i(m_db, "INSERT INTO search(rowid, title, body) VALUES(?, ?, ?)");
 			i.b(message_id).b(first ? m.s(2) : ss_()).b(m.s(1)).step();
 		}
+	}
+
+	// [HEARTH_MOD_TOOLS] A moderator's Delete: hidden as DELETED with the
+	// statement, its open reports upheld, the author told, and the decision
+	// in the reports as a queue's is
+	void delete_as_moderator(int64_t message_id, int64_t thread_id,
+			const ss_ &author, const ss_ &by, const ss_ &reason,
+			const ss_ &text)
+	{
+		if(accounts::level(m_server, author) >= LV_ADMIN)
+			throw Exception("the "+level_name(LV_ADMIN)+"'s message is not "
+					"deleted");
+		const ss_ statement = reason+(text.empty() ? ss_() : ": "+text);
+		set_hidden(message_id, DELETED, statement);
+		Q u(m_db, "UPDATE reports SET state = 'upheld', handled_by = ?, "
+				"handled_time = ?, statement = ?, bin = '' WHERE state = 'open' "
+				"AND kind = 'report' AND message = ?");
+		u.b(by).b(now_s()).b(statement).b(message_id).step();
+		Q i(m_db, "INSERT INTO reports(kind, message, by, reason, time, state, "
+				"handled_by, handled_time, statement) VALUES('delete', ?, ?, ?, "
+				"?, 'upheld', ?, ?, ?)");
+		i.b(message_id).b(by).b(reason).b(now_s()).b(by).b(now_s())
+				.b(statement).step();
+		notify(author, "deleted", thread_id, message_id, by, statement);
 	}
 
 	static void need(const ss_ &why)
@@ -3207,20 +3256,106 @@ struct Module: public interface::Module
 			return v;
 		}
 		if(cmd == "vet_file"){
-			// [HEARTH_NEW_IMAGES] {file, on}: a new account's image shown to
-			// everyone, or taken back (then not shown when it is a member
-			// either), by a helper or above
+			// [HEARTH_NEW_IMAGES] {file | message, on}: a new account's image
+			// shown to everyone, or taken back (then not shown when it is a
+			// member either), by a helper or above; with message, each of its
+			// images that is a new account's ([HEARTH_MOD_TOOLS])
 			if(lv < LV_HELPER)
 				throw Exception("a "+level_name(LV_HELPER)+" says whether "
 						"everyone sees an image");
-			const int64_t id = jint(q, "file");
+			std::vector<int64_t> ids;
+			if(q.get("message").is_number()){
+				Q m(m_db, "SELECT body FROM messages WHERE id = ?");
+				m.b(jint(q, "message"));
+				if(!m.step())
+					throw Exception("no such message");
+				const json::Value fs = files_of(m.s(0), true);
+				for(unsigned i = 0; i < fs.size(); i++)
+					if(fs.at(i).get("image").is_true() &&
+							(!fs.at(i).get("vetted").is_true() ||
+							jint(fs.at(i), "vet") == 1))
+						ids.push_back(jint(fs.at(i), "id"));
+			} else {
+				ids.push_back(jint(q, "file"));
+			}
 			const bool on = q.get("on").is_true();
-			Q u(m_db, "UPDATE files SET vetted = ? WHERE id = ? AND lod > 0");
-			u.b((int64_t)(on ? 1 : -1)).b(id).step();
-			if(sqlite3_changes(m_db) == 0)
+			int changed = 0;
+			for(int64_t id : ids){
+				Q u(m_db, "UPDATE files SET vetted = ? WHERE id = ? AND lod > 0");
+				u.b((int64_t)(on ? 1 : -1)).b(id).step();
+				changed += sqlite3_changes(m_db);
+				log_i(MODULE, "%s %s image %lld", cs(name), on ?
+						"showed everyone" : "took back", (long long)id);
+			}
+			if(changed == 0)
 				throw Exception("no such image");
-			log_i(MODULE, "%s %s image %lld", cs(name), on ?
-					"showed everyone" : "took back", (long long)id);
+			return json::Value(true);
+		}
+		if(cmd == "delete"){
+			// [HEARTH_MOD_TOOLS] {message, thread, reason, text}: a
+			// moderator's Delete, of the message or (thread, or the thread's
+			// first message) the whole thread -- hidden as DELETED, its place
+			// saying so, the author told why and able to appeal; purged after
+			// DELETED_KEEP_S. The admin's message is no one's to delete.
+			if(!mod)
+				throw Exception("only a "+level_name(LV_MODERATOR)+" deletes");
+			const ss_ reason = jstr(q, "reason"), text = jstr(q, "text");
+			need(text_ok(reason, 60, false, "the reason"));
+			if(!text.empty())
+				need(text_ok(text, 1000, true, "the text"));
+			Q m(m_db, "SELECT m.author, m.thread, (SELECT min(id) FROM messages "
+					"WHERE thread = m.thread) FROM messages m WHERE m.id = ?");
+			m.b(jint(q, "message"));
+			if(!m.step())
+				throw Exception("no such message");
+			const int64_t thread_id = m.i(1);
+			const int64_t target = q.get("thread").is_true() ? m.i(2) :
+					jint(q, "message");
+			Q a(m_db, "SELECT author FROM messages WHERE id = ?");
+			a.b(target).step();
+			const ss_ author = a.s(0);
+			delete_as_moderator(target, thread_id, author, name, reason, text);
+			return json::Value(true);
+		}
+		if(cmd == "ban"){
+			// [HEARTH_MOD_TOOLS] {name, days (0: until lifted), reason, text,
+			// delete_days}: a moderator's Ban, by builtin/accounts, with its
+			// end and why, which a refused join says; with delete_days their
+			// messages of those days deleted, each as Delete does it. Not on
+			// a helper or above.
+			if(!mod)
+				throw Exception("only a "+level_name(LV_MODERATOR)+" bans");
+			const ss_ who = jstr(q, "name"), reason = jstr(q, "reason"),
+					text = jstr(q, "text");
+			need(text_ok(who, NAME_MAX, false, "the name"));
+			need(text_ok(reason, 60, false, "the reason"));
+			if(!text.empty())
+				need(text_ok(text, 1000, true, "the text"));
+			const int64_t days = jint(q, "days"), del = jint(q, "delete_days");
+			if(days < 0 || days > 3650 || del < 0 || del > 30)
+				throw Exception("days out of range");
+			if(accounts::level(m_server, who) >= LV_HELPER)
+				throw Exception("a "+level_name(LV_HELPER)+" or above is not "
+						"banned here");
+			ss_ why;
+			accounts::access(m_server, [&](accounts::Interface *ai){
+				why = ai->ban(who, name, days ? now_s() + days * 86400 : 0,
+						reason+(text.empty() ? ss_() : " -- "+text));
+			});
+			need(why);
+			if(del > 0){
+				Q ms(m_db, "SELECT id, thread FROM messages WHERE author = ? "
+						"AND created > ? AND hidden != ?");
+				ms.b(who).b(now_s() - del * 86400).b((int64_t)DELETED);
+				std::vector<std::pair<int64_t, int64_t>> ids;
+				while(ms.step())
+					ids.emplace_back(ms.i(0), ms.i(1));
+				for(auto &p : ids)
+					delete_as_moderator(p.first, p.second, who, name, reason,
+							text);
+			}
+			log_i(MODULE, "%s banned %s for %lld days: %s", cs(name), cs(who),
+					(long long)days, cs(reason));
 			return json::Value(true);
 		}
 		if(cmd == "delete_file"){
@@ -3570,8 +3705,8 @@ struct Module: public interface::Module
 				throw Exception("no such message");
 			if(appeal && m.s(0) != name)
 				throw Exception("only its author appeals");
-			if(appeal && m.i(1) != HIDDEN)
-				throw Exception("the message is not hidden by a "+
+			if(appeal && m.i(1) != HIDDEN && m.i(1) != DELETED)
+				throw Exception("the message is not hidden or deleted by a "+
 						level_name(LV_MODERATOR));
 			if(!appeal && m.s(0) == name)
 				throw Exception("one's own message is edited, not reported");

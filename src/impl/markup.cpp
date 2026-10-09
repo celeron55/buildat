@@ -267,7 +267,9 @@ static int text(MD_TEXTTYPE t, const MD_CHAR *s, MD_SIZE n, void *u)
 	switch(t){
 	case MD_TEXT_NULLCHAR: o->r += "\xEF\xBF\xBD"; break;
 	case MD_TEXT_BR: o->r += "<br>\n"; break;
-	case MD_TEXT_SOFTBR: o->r += "\n"; break;
+	// A newline breaks the line, as the client shows it and GitHub's
+	// comments do; CommonMark's soft break is a space ([HEARTH_LINES_CODE])
+	case MD_TEXT_SOFTBR: o->r += "<br>\n"; break;
 	case MD_TEXT_ENTITY: {
 		// "&name;", "&#123;" or "&#x1F;" as md4c found it: kept, so the
 		// browser reads it, unless it holds anything else

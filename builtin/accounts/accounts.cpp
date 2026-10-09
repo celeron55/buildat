@@ -888,7 +888,8 @@ struct Module: public interface::Module, public Interface
 		});
 	}
 
-	ss_ ban(const ss_ &name, const ss_ &by)
+	ss_ ban(const ss_ &name, const ss_ &by, int64_t until = 0,
+			const ss_ &reason = "")
 	{
 		if(!m_store)
 			return "No accounts yet";
@@ -910,15 +911,46 @@ struct Module: public interface::Module, public Interface
 		if(!peers.empty() && m_access.open_registration)
 			b.address = address_of(peers[0]);
 		m_store->set("ban/"+name, pack(b));
+		// Its end and reason apart from Ban, whose stored form stays as it
+		// was ([HEARTH_MOD_TOOLS])
+		if(until > 0 || !reason.empty())
+			m_store->set("banterm/"+name, pack(std::make_pair(until, reason)));
+		else
+			m_store->remove("banterm/"+name);
 		if(m_access.open_registration)
 			for(PeerId p : peers)
 				m_store->set("banaddr/"+network::address_key(address_of(p)),
 						name);
 		log_i(MODULE, "%s banned %s (%s)", cs(by), cs(name), cs(b.address));
 		for(PeerId p : peers)
-			kick(p, "banned by "+by);
+			kick(p, "banned by "+by+(reason.empty() ? ss_() : ": "+reason));
 		send_users_to_staff();
 		return "";
+	}
+
+	// A ban's end and reason as a refused join says them; false when it
+	// has ended, then lifted
+	bool ban_term(const ss_ &name, ss_ &why)
+	{
+		ss_ data;
+		std::pair<int64_t, ss_> term(0, "");
+		if(m_store->get("banterm/"+name, data))
+			unpack(data, term);
+		if(term.first > 0 && interface::os::wall_us() / 1000000 >= term.first){
+			unban(name, "");
+			return false;
+		}
+		if(term.first > 0){
+			char buf[40];
+			const time_t t = term.first;
+			struct tm tm_;
+			gmtime_r(&t, &tm_);
+			strftime(buf, sizeof buf, " until %Y-%m-%d %H:%M UTC", &tm_);
+			why += buf;
+		}
+		if(!term.second.empty())
+			why += ": "+term.second;
+		return true;
 	}
 
 	ss_ unban(const ss_ &name_or_address, const ss_ &only_by)
@@ -946,6 +978,7 @@ struct Module: public interface::Module, public Interface
 				m_store->remove("banaddr/"+network::address_key(b.address));
 			}
 			m_store->remove("ban/"+name_or_address);
+			m_store->remove("banterm/"+name_or_address);
 			// Off the Starports at the next announce, too (10d)
 			m_store->remove("ban_report/"+name_or_address);
 			found = true;
@@ -962,6 +995,7 @@ struct Module: public interface::Module, public Interface
 		}
 		if(!banned_name.empty()){
 			m_store->remove("ban/"+banned_name);
+			m_store->remove("banterm/"+banned_name);
 			m_store->remove("ban_report/"+banned_name);
 			found = true;
 		}
@@ -997,14 +1031,15 @@ struct Module: public interface::Module, public Interface
 	// Why a name or an address may not join, or ""
 	ss_ banned(const ss_ &name, const ss_ &address)
 	{
-		ss_ data;
-		if(m_store->get("ban/"+name, data))
-			return "You are banned from this server";
+		ss_ data, why = "You are banned from this server";
+		if(m_store->get("ban/"+name, data) && ban_term(name, why))
+			return why;
 		// The exact address too: a ban saved before [DUAL_STACK]'s key
+		why = "This address is banned from this server";
 		if(m_access.open_registration && !address.empty() &&
 				(m_store->get("banaddr/"+network::address_key(address), data) ||
-				m_store->get("banaddr/"+address, data)))
-			return "This address is banned from this server";
+				m_store->get("banaddr/"+address, data)) && ban_term(data, why))
+			return why;
 		return "";
 	}
 

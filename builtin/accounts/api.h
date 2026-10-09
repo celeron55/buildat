@@ -96,9 +96,12 @@ namespace accounts
 		// Off the server, told why
 		virtual void kick(PeerId peer, const ss_ &why) = 0;
 		// A ban by name, and by the address the name last joined from while
-		// registration is open.
+		// registration is open; until a time (wall_us() seconds; 0: until
+		// lifted), when it lifts itself, and why, both said at a refused
+		// join ([HEARTH_MOD_TOOLS]).
 		// "" when done, else why not.
-		virtual ss_ ban(const ss_ &name, const ss_ &by) = 0;
+		virtual ss_ ban(const ss_ &name, const ss_ &by, int64_t until = 0,
+				const ss_ &reason = "") = 0;
 		// A name or an address; "" when done, else why not. With only_by,
 		// only a ban that one made: a game's /unban lifts the game's bans
 		// and not an admin's

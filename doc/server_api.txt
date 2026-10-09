@@ -367,7 +367,9 @@ connection) and find_peers(name) (all of them), address_of, is_admin,
 exists, account_names, is_local (the launcher's own user of a server it
 started -- told by the token the launcher gives its server in
 BUILDAT_OWNER_TOKEN and its own client, never a WebSocket peer), launched;
-kick, ban (by name, and by address while registration is open),
+kick, ban(name, by, until, reason) (by name, and by address while
+registration is open; until 0 or a time it lifts itself at, and the
+reason, both said at a refused join),
 unban(name_or_address, only_by) (with only_by, only that one's bans: a
 game's /unban lifts the game's), ban_list; create_account, check_password,
 set_password, delete_account; TOTP (totp_on, check_totp, totp_begin,
