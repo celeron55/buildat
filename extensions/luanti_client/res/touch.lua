@@ -23,7 +23,9 @@
 --   touch = <this file>(o)
 -- o: on_key(key), BIND, pause(), place(), set_wield(i), inventory(),
 --    chat(), hotbar() -> count, slot_size, margin, form_open(),
---    form_click(x, y) (a tap on an open form, in UI pixels)
+--    form_click(x, y) (a tap on an open form, in UI pixels), clutter()
+--    (optional: the chat's Declutter toggled, -> whether it is on; a
+--    "Clutter" button in More, and T.show_clutter(on) for its look)
 local magic = require("buildat/extension/urho3d")
 local log = buildat.Logger("luanti/touch")
 
@@ -56,6 +58,9 @@ return function(o)
 		b:SetPosition(x, y)
 		b:SetFixedSize(w, h)
 		b.opacity = 0.7
+		-- Never the focus: a focused button took the keys after it, and
+		-- the client's own (T, Escape) went quiet
+		b:SetFocusMode(magic.FM_NOTFOCUSABLE)
 		-- Under the pause menu and the pages (100), over the HUD
 		b.priority = 50
 		local t = b:CreateChild("Text")
@@ -117,11 +122,28 @@ return function(o)
 	more = {}
 	local rest = {{"Drop", "drop"}, {"Fly", "fly"}, {"Fast", "fast"},
 		{"Noclip", "noclip"}, {"Camera", "camera"}, {"Minimap", "minimap"}}
+	-- Clutter: the chat overlay cut down ([TOUCH_CHAT_CLUTTER]), its text
+	-- yellow while it is
+	local clutter_text = nil
+	if o.clutter then
+		rest[#rest + 1] = {"Clutter", nil, function()
+			T.show_clutter(o.clutter())
+		end}
+	end
 	for i, r in ipairs(rest) do
 		local b = button(r[1], magic.HA_RIGHT, magic.VA_TOP, -16,
-				TOP + i * 52, 90, 44, key(r[2]))
+				TOP + i * 52, 90, 44, r[3] or key(r[2]))
 		b.visible = false
 		more[#more + 1] = b
+		if r[3] then
+			clutter_text = b:GetChild(0)
+		end
+	end
+	function T.show_clutter(on)
+		if clutter_text then
+			clutter_text.color = on and magic.Color(1, 0.85, 0.3) or
+					magic.Color(1, 1, 1)
+		end
 	end
 
 	-- The stick's base and knob, where the finger landed

@@ -167,6 +167,10 @@ click <type> "<label>" [x y]
 mouse_wheel <delta>
     Wheel ticks. Positive is away from the user.
 
+tap <x> <y>
+    A finger down and up at x, y (TouchBegin and TouchEnd in one frame):
+    the touch controls with BUILDAT_TOUCH=1, natively.
+
 look <yaw> <pitch>
 look_dir <x> <y> <z>
     Aim the camera and wait until it is aimed. Degrees: yaw from +Z towards

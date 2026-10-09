@@ -2970,6 +2970,12 @@ struct CApp: public App, public magic::Application
 		case Type::MouseWheel:
 			ok = client::command_seq::inject_mouse_wheel(input, (int)c.n, &err);
 			break;
+		case Type::Tap:
+			ok = client::command_seq::inject_tap(input,
+					logical_mode() ? (int)(m_logical_ox + c.x * m_logical_scale) : c.x,
+					logical_mode() ? (int)(m_logical_oy + c.y * m_logical_scale) : c.y,
+					&err);
+			break;
 		case Type::Text:
 			ok = client::command_seq::inject_text(input, c.s, &err);
 			break;

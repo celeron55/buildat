@@ -370,6 +370,11 @@ local function show_client(host, port, name, password, mode, origin)
 	status_text:SetStyleAuto()
 	status_text:SetAlignment(HA_LEFT, VA_TOP)
 	status_text:SetPosition(8, 8)
+	-- **The HUD's text under every screen** ([TOUCH_CHAT_CLUTTER]): a
+	-- screen on uistack.main is a root child of priority 0, and Urho3D's
+	-- sort of equals is not stable -- the pause menu was drawn under the
+	-- chat
+	status_text.priority = -1
 	status_text.color = magic.Color(1.0, 1.0, 1.0)
 	-- Hidden until F5 asks for it; see show_debug below
 	status_text.visible = false
@@ -392,6 +397,7 @@ local function show_client(host, port, name, password, mode, origin)
 	chat_text:SetPosition(8, 8)
 	chat_text:SetWordwrap(true)
 	chat_text.color = magic.Color(1.0, 1.0, 0.9)
+	chat_text.priority = -1
 
 	-- Until the game's definitions and its media are in, the world is a field
 	-- of placeholders and there is nothing worth showing: an opaque panel over
@@ -440,6 +446,7 @@ local function show_client(host, port, name, password, mode, origin)
 	info_text:SetAlignment(HA_LEFT, VA_TOP)
 	info_text:SetPosition(100, 8)
 	info_text.color = magic.Color(1.0, 1.0, 1.0)
+	info_text.priority = -1
 
 	-- The crosshair, which is what says where the middle of the screen is
 	-- when the mouse is captured. Two bars rather than a texture: it is two
@@ -1387,12 +1394,52 @@ local function show_client(host, port, name, password, mode, origin)
 		-- A line in the chat log, which is where the player looks. What
 		-- this client has to say for itself goes here rather than into the
 		-- debug lines in the corner, because those start hidden.
+		-- **Decluttered** ([TOUCH_CHAT_CLUTTER], a touchscreen's More and
+		-- the chat dialog): only the DECLUTTER_LINES newest, each cut to
+		-- DECLUTTER_CHARS characters, as drawn; the log stays whole.
+		-- simplified: not saved, off at each join
+		local DECLUTTER_LINES, DECLUTTER_CHARS = 3, 50
+		local declutter = false
+		-- s cut to n UTF-8 characters (the web's Lua 5.1 has no utf8)
+		local function cut_chars(s, n)
+			local count = 0
+			for i = 1, #s do
+				local b = s:byte(i)
+				if b < 0x80 or b >= 0xC0 then
+					count = count + 1
+					if count > n then
+						return s:sub(1, i - 1)
+					end
+				end
+			end
+			return s
+		end
+		local function show_chat_lines()
+			if not declutter then
+				chat_text.text = table.concat(chat, "\n")
+				return
+			end
+			local shown = {}
+			for i = math.max(1, #chat - DECLUTTER_LINES + 1), #chat do
+				shown[#shown + 1] = cut_chars(chat[i], DECLUTTER_CHARS)
+			end
+			chat_text.text = table.concat(shown, "\n")
+		end
+		local function set_declutter(on)
+			declutter = on
+			log:info("chat: declutter " .. (on and "on" or "off"))
+			show_chat_lines()
+			if settings.touch and settings.touch.show_clutter then
+				settings.touch.show_clutter(on)
+			end
+		end
+
 		local function add_chat(line)
 			chat[#chat + 1] = line
 			while #chat > CHAT_LINES do
 				table.remove(chat, 1)
 			end
-			chat_text.text = table.concat(chat, "\n")
+			show_chat_lines()
 		end
 
 		client.on_chat = function(text, sender)
@@ -3092,8 +3139,13 @@ local function show_client(host, port, name, password, mode, origin)
 			local h = 96
 			local ox = math.floor((ui_root.width - w) / 2)
 			-- Above the hotbar and the chat log, which are what is at the
-			-- bottom of the screen
+			-- bottom of the screen; on a touchscreen at the top, out from
+			-- under the on-screen keyboard, over the chat
+			-- ([TOUCH_CHAT_CLUTTER])
 			local oy = ui_root.height - h - 180
+			if settings.touch then
+				oy = 8
+			end
 
 			chat_window = ui_root:CreateChild("BorderImage")
 			-- The style is inherited by everything under it, which is what
@@ -3104,6 +3156,8 @@ local function show_client(host, port, name, password, mode, origin)
 			chat_window.color = magic.Color(0.10, 0.10, 0.13, 0.95)
 			chat_window.size = magic.IntVector2(w, h)
 			chat_window:SetPosition(ox, oy)
+			-- Over the chat and the touch controls (50)
+			chat_window.priority = 60
 			-- An element Urho3D has not been told is enabled is not hit by a
 			-- click, and then no click event carries a position at all
 			chat_window.enabled = true
@@ -3145,7 +3199,17 @@ local function show_client(host, port, name, password, mode, origin)
 			local by = h - bh - 10
 			local labels = {{"Send", w - 12 - bw * 2 - 8, send_chat},
 					{"Cancel", w - 12 - bw, close_chat}}
+			-- The Declutter checkbox, a touchscreen's, at the left
+			if settings.touch then
+				labels[#labels + 1] = {(declutter and "[x]" or "[ ]") ..
+						" Declutter", 12, function()
+					set_declutter(not declutter)
+					local t = chat_buttons.declutter
+					t.text = (declutter and "[x]" or "[ ]") .. " Declutter"
+				end, 110}
+			end
 			for _, b in ipairs(labels) do
+				local bw = b[4] or bw
 				local box = chat_window:CreateChild("BorderImage")
 				box.texture = magic.cache:GetResource("Texture2D",
 						"luanti_client/res/white.png")
@@ -3159,6 +3223,9 @@ local function show_client(host, port, name, password, mode, origin)
 				t.text = b[1]
 				t:SetFontSize(13)
 				t:SetAlignment(HA_CENTER, VA_CENTER)
+				if b[4] then
+					chat_buttons.declutter = t
+				end
 				chat_buttons.items[#chat_buttons.items + 1] =
 						{x = b[2], y = by, w = bw, h = bh, action = b[3]}
 			end
@@ -3551,8 +3618,20 @@ local function show_client(host, port, name, password, mode, origin)
 							luanti_hud.PARAM_HOTBAR_ITEMCOUNT] or
 							HOTBAR_SLOTS, slot, margin
 				end,
-				form_open = form_on,
-				form_click = function(x, y) session:click(x, y, "left") end,
+				-- The chat line is a form to the fingers: a tap on its
+				-- boxes (Send, Cancel, Declutter), no look and no place
+				form_open = function() return form_on() or chat_input ~= nil end,
+				form_click = function(x, y)
+					if chat_input then
+						chat_click(x, y)
+					else
+						session:click(x, y, "left")
+					end
+				end,
+				clutter = function()
+					set_declutter(not declutter)
+					return declutter
+				end,
 			})
 			-- And Luanti's Android autojump
 			avatar.autojump = true

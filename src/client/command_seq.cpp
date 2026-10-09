@@ -292,6 +292,10 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 					return fail(*error);
 				c.n = 1;
 			}
+		} else if(cmd == "tap"){
+			c.type = Type::Tap;
+			if(!parse_xy(rest, &c.x, &c.y, error))
+				return fail(*error);
 		} else if(cmd == "mouse_wheel"){
 			c.type = Type::MouseWheel;
 			if(!parse_i64(rest, &c.n))
@@ -496,6 +500,8 @@ ss_ dump_command(const Command &c)
 		return "mouse_click "+button_name(c.x);
 	case Type::MouseWheel:
 		return "mouse_wheel "+itos(c.n);
+	case Type::Tap:
+		return "tap "+itos(c.x)+" "+itos(c.y);
 	case Type::Text:
 		return "text "+c.s;
 	case Type::Quit:
@@ -889,6 +895,33 @@ bool inject_mouse_wheel(magic::Input *input, int delta, ss_ *error)
 	if(SDL_PushEvent(&e) != 1){
 		*error = "SDL_PushEvent failed";
 		return false;
+	}
+	return true;
+}
+
+// A touchscreen's tap ([TOUCH_CHAT_CLUTTER]): the finger down and up in one
+// push, which Urho3D makes TouchBegin and TouchEnd. SDL's fingers are in
+// fractions of the window.
+bool inject_tap(magic::Input *input, int x, int y, ss_ *error)
+{
+	magic::Graphics *g = input->GetSubsystem<magic::Graphics>();
+	if(!g || g->GetWidth() <= 0 || g->GetHeight() <= 0){
+		*error = "tap: no window";
+		return false;
+	}
+	for(Uint32 type : {(Uint32)SDL_FINGERDOWN, (Uint32)SDL_FINGERUP}){
+		SDL_Event e;
+		memset(&e, 0, sizeof(e));
+		e.type = type;
+		e.tfinger.touchId = 1;
+		e.tfinger.fingerId = 1;
+		e.tfinger.x = (float)x / g->GetWidth();
+		e.tfinger.y = (float)y / g->GetHeight();
+		e.tfinger.pressure = 1.f;
+		if(SDL_PushEvent(&e) != 1){
+			*error = "SDL_PushEvent failed";
+			return false;
+		}
 	}
 	return true;
 }
