@@ -60,6 +60,10 @@ namespace interface
 			// [FRONT_PAGES]: a host or a key does not widen a phone's page
 			".box{overflow-wrap:anywhere}"
 			".box img.icon{float:left;margin:.3em .8em .3em 0}"
+			// [HEARTH_ATTACHMENTS]: a message's images and its files
+			".box img{max-width:100%;height:auto}"
+			"ul.files{list-style:none;padding:0}"
+			"ul.files img{vertical-align:middle;margin:.2em .5em .2em 0}"
 			".box::after{content:\"\";display:block;clear:both}";
 
 		static const char *logo = "<img src=\"/brand/logo.png\" alt=\"\">";

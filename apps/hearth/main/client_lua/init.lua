@@ -257,10 +257,20 @@ magic.SubscribeToEvent("Update", function()
 		return string.format("%02x", c:byte())
 	end)
 	req("upload", {name = name, data = hex}, function(r)
+		-- [HEARTH_ATTACHMENTS]: at the text's end, an image as its
+		-- thumbnail linked to the whole of it, another file as a link
+		local label = name:gsub("[%[%]]", "")
+		local link = "/f/" .. r.id .. "/" .. name:gsub("[^%w%.%-_]", "_")
+		local md = r.image and "[![" .. label .. "](/f/" .. r.id ..
+				"/thumb)](" .. link .. ")" or "[" .. label .. "](" .. link .. ")"
 		-- A page left meanwhile: e is held, detached, and nothing shows
-		pcall(insert_at_cursor, e, (r.image and "!" or "") .. "[" ..
-				name:gsub("[%[%]]", "") .. "](/f/" .. r.id .. "/" ..
-				name:gsub("[^%w%.%-_]", "_") .. ")")
+		pcall(function()
+			local all = e:GetText()
+			local sep = all == "" and "" or all:sub(-1) == "\n" and "\n" or "\n\n"
+			e:SetText(all .. sep .. md)
+			e.cursorPosition = #(all .. sep .. md)
+			e:SetFocus(true)
+		end)
 	end, fail)
 end)
 
@@ -505,6 +515,65 @@ end
 -- A text row of the list, wrapped (an empty state, a note)
 local function add_text(v, s, color)
 	return text(v.list, s, color or DIM, W - 24)
+end
+
+-- [HEARTH_ATTACHMENTS] An image's thumbnail as a picture, the server's
+-- /f/<id>/thumb; it takes its size once fetched, and `v`, the list it is
+-- in, is fitted again to it
+-- simplified: kept for the session in memory: a server's client Lua may
+-- not write the client's cache (api.lua, cache_path), so a new run asks
+-- again. The server keeps the thumbnail made, so that is a read
+local thumbs = {}
+local function thumb_picture(parent, id, v)
+	local b = parent:CreateChild("BorderImage")
+	b:SetFixedSize(0, 0)
+	local function show(tex)
+		pcall(function()
+			local s = math.min(1, (W - 40) / tex.width)
+			b.texture = tex
+			b:SetFixedSize(math.floor(tex.width * s), math.floor(tex.height * s))
+			v:fit()
+		end)
+	end
+	local t = thumbs[id]
+	if type(t) == "table" then
+		t[#t + 1] = show
+		return b
+	elseif t then
+		show(t)
+		return b
+	end
+	thumbs[id] = {show}
+	req("thumb", {file = id}, function(r)
+		local waiting = thumbs[id]
+		local img = magic.Image:new()
+		local bytes = tostring(r.data):gsub("%x%x", function(x)
+			return string.char(tonumber(x, 16))
+		end)
+		if not magic.image_load_data(img, bytes) then
+			log:warning("hearth: the thumbnail of file " .. id ..
+					" could not be read (" .. #bytes .. " bytes)")
+			thumbs[id] = nil
+			return
+		end
+		local tex = magic.Texture2D:new()
+		tex:SetData(img)
+		thumbs[id] = tex
+		for _, f in ipairs(waiting) do
+			f(tex)
+		end
+	end, function(why)
+		log:warning("hearth: the thumbnail of file " .. id .. ": " .. tostring(why))
+		thumbs[id] = nil
+	end)
+	return b
+end
+
+-- "12 KiB", as the page says a file's size
+local function size_text(b)
+	return b < 1024 and b .. " bytes" or b < 1024 * 1024 and
+			math.floor((b + 512) / 1024) .. " KiB" or
+			math.floor((b + 512 * 1024) / (1024 * 1024)) .. " MiB"
 end
 
 -- A box of the list: a button holding a head line and a wrapped body,
@@ -1041,8 +1110,24 @@ show_thread = function(id, at, missing)
 			for _, p in ipairs(m.patches or {}) do
 				body = body .. "\n\n" .. p.name .. "\n" .. p.text
 			end
-			local holder, _, head_text = add_box(v, "m" .. m.id, head, body,
+			local holder, box, head_text = add_box(v, "m" .. m.id, head, body,
 					is_answer and MAIN or nil)
+			-- [HEARTH_ATTACHMENTS]: the images the text draws, in its order,
+			-- then its files, an image the text does not draw with its
+			-- thumbnail
+			for _, f in ipairs(m.files or {}) do
+				if f.drawn then
+					thumb_picture(box, f.id, v)
+				end
+			end
+			for _, f in ipairs(m.files or {}) do
+				if f.image and not f.drawn then
+					thumb_picture(box, f.id, v)
+				end
+				text(box, f.name .. " -- " .. (f.type == "image/png" and
+						"PNG image" or f.type == "image/jpeg" and "JPEG image" or
+						"file") .. ", " .. size_text(f.bytes), DIM, W - 32)
+			end
 			-- [HEARTH_THANKS]: the count at the top right, as dim as the
 			-- author's name
 			if (m.thanks or 0) > 0 then

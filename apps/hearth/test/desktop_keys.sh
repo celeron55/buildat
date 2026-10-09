@@ -52,7 +52,7 @@ answer "$t/admin2.log" 1001 | grep -q '"ok":true' || fail "the trust: $(answer "
 
 # The shot the user took, where the client puts its own
 mkdir -p "$t/cl_reader/screenshots"
-cp "$here/3rdparty/Urho3D/bin/CoreData/Textures/Ramp.png" \
+cp "$here/3rdparty/Urho3D/bin/Data/Textures/LogoLarge.png" \
 	"$t/cl_reader/screenshots/screenshot_lamp.png"
 # A game's export, so that the picker opens on a file
 mkdir -p "$t/cl_reader/exports"

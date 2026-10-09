@@ -434,6 +434,10 @@ static const char *const COLUMNS_ADDED[][3] = {
 	// [HEARTH_NEW_MARKS]: Home's "Mark all read"; first_seen when 0.
 	// Not first_seen itself, which trust grows from
 	{"members", "since", "INTEGER NOT NULL DEFAULT 0"},
+	// [HEARTH_ATTACHMENTS]: an image's thumbnail, at most 320x240; empty
+	// for a file that is not an image, or one uploaded before thumbnails
+	// until its first is asked for
+	{"files", "thumb", "BLOB NOT NULL DEFAULT x''"},
 };
 // What a poster picks a thread to be ([PACKAGE_SUBJECT]); "release" is
 // Hearth's own
@@ -824,6 +828,84 @@ struct Module: public interface::Module
 			const int64_t id = atoll(body.substr(at + 3, e - at - 3).c_str());
 			if(e != at + 3 && seen.insert(id).second)
 				out.push_back(id);
+		}
+		return out;
+	}
+
+	// Whether /f/<id> is served: named only by hidden (or held) messages,
+	// or in hidden threads, it is not ([SEC_HEARTH_FILES]). Named by none,
+	// it is its uploader's yet, by an id nobody guesses.
+	bool file_served(int64_t id)
+	{
+		Q l(m_db, "SELECT count(*), ifnull(sum(m.hidden = 0 AND "
+				"t.hidden = 0), 0) FROM file_links k JOIN messages m ON "
+				"m.id = k.message JOIN threads t ON t.id = m.thread "
+				"WHERE k.file = ?");
+		l.b(id).step();
+		return !(l.i(0) > 0 && l.i(1) == 0);
+	}
+
+	// [HEARTH_ATTACHMENTS] An image's thumbnail, at most 320x240, from
+	// the image as it is kept; the same read and resize as the upload's
+	static ss_ make_thumb(const ss_ &data, const ss_ &type)
+	{
+		return crush(data, type == "image/jpeg", 320, 240, 80);
+	}
+
+	// A file's bytes and type, or with `thumb` an image's thumbnail (made
+	// and kept on its first ask for one uploaded before thumbnails, and
+	// the file itself for one that is not an image); false for none.
+	// Fetched is a use, the thumbnail too: it is what a reader sees
+	bool file_data(int64_t id, bool thumb, ss_ &type, ss_ &data)
+	{
+		Q f(m_db, "SELECT type, data, lod, thumb FROM files WHERE id = ?");
+		f.b(id);
+		if(!f.step())
+			return false;
+		type = f.s(0);
+		data = thumb && f.i(2) > 0 ? f.s(3) : f.s(1);
+		if(thumb && f.i(2) > 0 && data.empty()){
+			try {
+				data = make_thumb(f.s(1), type);
+			} catch(std::exception &e){
+				log_w(MODULE, "Hearth: file %lld: no thumbnail: %s",
+						(long long)id, e.what());
+				data = f.s(1);
+			}
+			Q t(m_db, "UPDATE files SET thumb = ? WHERE id = ?");
+			t.blob(data).b(id).step();
+		}
+		Q u(m_db, "UPDATE files SET used = ? WHERE id = ?");
+		u.b(now_s()).b(id).step();
+		return true;
+	}
+
+	// [HEARTH_ATTACHMENTS] The files a message names, in its order: id,
+	// name, type, bytes, and drawn when its text draws it (an image span
+	// of /f/<id>, as the thumbnail or in full). A patch is left out: it
+	// is shown whole under the message already. Gone ones are left out.
+	json::Value files_of(const ss_ &body)
+	{
+		json::Value out = json::array();
+		const std::vector<int64_t> ids = file_ids(body);
+		if(ids.empty())
+			return out;
+		const ss_ h = interface::markup::to_html(body);
+		for(int64_t id : ids){
+			Q f(m_db, "SELECT name, type, length(data), lod FROM files "
+					"WHERE id = ?");
+			f.b(id);
+			if(!f.step() || f.s(1) == PATCH_TYPE)
+				continue;
+			json::Value v = json::object();
+			v.set("id", id);
+			v.set("name", f.s(0));
+			v.set("type", f.s(1));
+			v.set("bytes", f.i(2));
+			v.set("image", f.i(3) > 0);
+			v.set("drawn", h.find("<img src=\"/f/"+itos(id)+"/") != ss_::npos ||
+					h.find("<img src=\"/f/"+itos(id)+"\"") != ss_::npos);
+			out.append(v);
 		}
 		return out;
 	}
@@ -1395,6 +1477,7 @@ struct Module: public interface::Module
 			if(hidden)
 				v.set("hidden_text", hidden_text(m.i(5), m.s(6)));
 			v.set("patches", patches_in(jstr(v, "body")));
+			v.set("files", files_of(jstr(v, "body")));
 			// A message's own bytes besides its body: many short ones fill
 			// a part too
 			bytes += 256 + jstr(v, "body").size();
@@ -1753,7 +1836,7 @@ struct Module: public interface::Module
 				time_text(jint(m, "created"))+"</a>"+(jint(m, "edited") ?
 				" (edited "+time_text(jint(m, "edited"))+")" : "")+"</p>"+
 				interface::markup::to_html(jstr(m, "body"))+patches_html(m)+
-				"</div>\n";
+				files_html(m)+"</div>\n";
 	}
 
 	// A message's patches inline, the review being in the thread
@@ -1768,6 +1851,54 @@ struct Module: public interface::Module
 					"</a></p><pre><code>"+html(jstr(ps.at(i), "text"))+
 					"</code></pre>";
 		return out;
+	}
+
+	// A file's name as its link ends: what is not a letter, a digit, "."
+	// "-" or "_" made "_", as the client writes it; the server reads only
+	// the id
+	static ss_ url_name(ss_ n)
+	{
+		for(char &c : n)
+			if(!isalnum((unsigned char)c) && c != '.' && c != '-' && c != '_')
+				c = '_';
+		return n;
+	}
+	static ss_ file_kind(const ss_ &type)
+	{
+		return type == "image/png" ? "PNG image" : type == "image/jpeg" ?
+				"JPEG image" : "file";
+	}
+	static ss_ size_text(int64_t b)
+	{
+		return b < 1024 ? itos(b)+" bytes" : b < 1024 * 1024 ?
+				itos((b + 512) / 1024)+" KiB" :
+				itos((b + 512 * 1024) / (1024 * 1024))+" MiB";
+	}
+
+	// [HEARTH_ATTACHMENTS] A message's files at its end: each a link with
+	// its kind and size, and an image the text does not draw its
+	// thumbnail beside it
+	ss_ files_html(const json::Value &m)
+	{
+		const json::Value fs = m.get("files").is_array() ? m.get("files") :
+				files_of(jstr(m, "body"));
+		if(fs.size() == 0)
+			return "";
+		ss_ out = "<ul class=\"files\">";
+		for(unsigned i = 0; i < fs.size(); i++){
+			const json::Value &f = fs.at(i);
+			const ss_ href = "/f/"+itos(jint(f, "id"))+"/"+
+					url_name(jstr(f, "name"));
+			out += "<li>";
+			if(f.get("image").is_true() && !f.get("drawn").is_true())
+				out += "<a href=\""+href+"\"><img src=\"/f/"+
+						itos(jint(f, "id"))+"/thumb\" alt=\"\" "
+						"loading=\"lazy\"></a> ";
+			out += "<a href=\""+href+"\">"+html(jstr(f, "name"))+
+					"</a> <span class=\"meta\">"+html(file_kind(jstr(f, "type")))+
+					", "+size_text(jint(f, "bytes"))+"</span></li>";
+		}
+		return out+"</ul>";
 	}
 
 	// The id after a prefix, or -1
@@ -1840,21 +1971,14 @@ struct Module: public interface::Module
 			// /f/<id>, and anything after another / is the name it is saved as
 			const int64_t id = path_id(r.path.substr(0, r.path.find('/', 3)),
 					"/f/");
-			// Named only by hidden (or held) messages, or in hidden
-			// threads: not served ([SEC_HEARTH_FILES]). Named by none, it is
-			// its uploader's yet, by an id nobody guesses.
-			Q l(m_db, "SELECT count(*), ifnull(sum(m.hidden = 0 AND "
-					"t.hidden = 0), 0) FROM file_links k JOIN messages m ON "
-					"m.id = k.message JOIN threads t ON t.id = m.thread "
-					"WHERE k.file = ?");
-			l.b(id).step();
-			Q f(m_db, "SELECT type, data FROM files WHERE id = ?");
-			f.b(id);
-			if(id >= 0 && !(l.i(0) > 0 && l.i(1) == 0) && f.step()){
-				Q u(m_db, "UPDATE files SET used = ? WHERE id = ?");
-				u.b(now_s()).b(id).step();
-				return respond(r, 200, f.s(1), f.s(0));
-			}
+			// [HEARTH_ATTACHMENTS]: /f/<id>/thumb is an image's thumbnail;
+			// a file that is not an image, named "thumb", is itself
+			const bool thumb = r.path.size() > 6 &&
+					r.path.compare(r.path.size() - 6, 6, "/thumb") == 0 &&
+					r.path.find('/', 3) == r.path.size() - 6;
+			ss_ type, data;
+			if(id >= 0 && file_served(id) && file_data(id, thumb, type, data))
+				return respond(r, 200, data, type);
 		}
 		ss_ title, body;
 		if(r.method == "GET")
@@ -2944,15 +3068,28 @@ struct Module: public interface::Module
 			const ss_ rb = interface::bignum::random_bytes(8);
 			memcpy(&r, rb.data(), sizeof r);
 			const int64_t file_id = (int64_t)(r & ((1ULL << 46) - 1)) + 1;
+			const ss_ thumb = lod == 1 ? make_thumb(data, type) : ss_();
 			Q i(m_db, "INSERT INTO files(id, name, type, data, lod, uploader, "
-					"created, used) VALUES(?, ?, ?, ?, ?, ?, ?, ?)");
+					"created, used, thumb) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)");
 			i.b(file_id).b(file_name).b(type).blob(data).b(lod).b(name)
-					.b(now_s()).b(now_s()).step();
+					.b(now_s()).b(now_s()).blob(thumb).step();
 			json::Value v = json::object();
 			v.set("id", file_id);
 			v.set("image", lod == 1);
 			v.set("patch", patch);
 			v.set("bytes", (int64_t)data.size());
+			return v;
+		}
+		if(cmd == "thumb"){
+			// [HEARTH_ATTACHMENTS] {file} -> {type, data (hex)}: an image's
+			// thumbnail for the client, served as /f/<id>/thumb is
+			const int64_t id = jint(q, "file");
+			ss_ type, data;
+			if(id <= 0 || !file_served(id) || !file_data(id, true, type, data))
+				throw Exception("no such file");
+			json::Value v = json::object();
+			v.set("type", type);
+			v.set("data", interface::sha256::hex(data));
 			return v;
 		}
 		if(cmd == "file_settings"){

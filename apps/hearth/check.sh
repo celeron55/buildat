@@ -345,11 +345,38 @@ im = Image.open(sys.argv[1]); print(im.format, "%dx%d" % im.size, "EXIF" if b"SE
 [ "$(get /f/$FO)" = 200 ] && [ "$(cat "$t/page")" = hello ] || fail "the other file"
 [ "$(get /robots.txt)" = 200 ] && grep -q "Disallow: /f/" "$t/page" ||
 	fail "robots.txt: $(cat "$t/page")"
+# [HEARTH_ATTACHMENTS]: an image's thumbnail at /f/<id>/thumb, within
+# 320x240; a message's own images drawn, one from elsewhere a link; its
+# files listed at its end, an image the text does not draw with its
+# thumbnail there; the same to the client, and the thumbnail by request
+[ "$(get /f/$FJ/thumb)" = 200 ] && [ "$(image)" = "JPEG 320x80 " ] ||
+	fail "the JPEG's thumbnail: $(image)"
+client admin checkpass12 "$t/admin_att.log" "{\"cmd\":\"new_thread\",\"topic\":1,\"title\":\"Shots\",\"body\":\"See [![far.jpg](/f/$FJ/thumb)](/f/$FJ/far.jpg) and [dot.png](/f/$FP/dot.png), ![away](https://example.com/x.png) [notes](/f/$FO/notes.txt)\"}"
+TA=$(res "$t/admin_att.log" 1001 'r["result"]')
+MS=4000 client admin checkpass12 "$t/admin_att2.log" "{\"cmd\":\"thread\",\"thread\":$TA}
+{\"cmd\":\"thumb\",\"file\":$FP}"
+[ "$(get /t/$TA)" = 200 ] || fail "the thread with files: $TA"
+grep -q "<a href=\"/f/$FJ/far.jpg\" rel=\"nofollow ugc\"><img src=\"/f/$FJ/thumb\" alt=\"far.jpg\" loading=\"lazy\"></a>" "$t/page" ||
+	fail "the drawn thumbnail: $(grep -o '<p>See.*' "$t/page" | head -c 600)"
+grep -q '<img src="https' "$t/page" || ! grep -q '<a href="https://example.com/x.png" rel="nofollow ugc">\[image: away\]</a>' "$t/page" &&
+	fail "an image from elsewhere: $(grep -o '<p>See.*' "$t/page" | head -c 600)"
+files=$(grep -o '<ul class="files">.*</ul>' "$t/page")
+echo "$files" | grep -q "far.jpg</a> <span class=\"meta\">JPEG image, " &&
+	echo "$files" | grep -q "<img src=\"/f/$FP/thumb\"" &&
+	! echo "$files" | grep -q "<img src=\"/f/$FJ/thumb\"" &&
+	echo "$files" | grep -q "notes.txt</a> <span class=\"meta\">file, 5 bytes" ||
+	fail "the files' list: $files"
+[ "$(res "$t/admin_att2.log" 1001 '[(f["name"], f["image"], f["drawn"]) for f in r["result"]["list"][0]["files"]]')" = "[('far.jpg', True, True), ('dot.png', True, False), ('notes.txt', False, False)]" ] ||
+	fail "the files to the client: $(answer "$t/admin_att2.log" 1001 | head -c 600)"
+[ "$(res "$t/admin_att2.log" 1002 'r["result"]["data"][:16]')" = 89504e470d0a1a0a ] ||
+	fail "the thumbnail by request: $(answer "$t/admin_att2.log" 1002 | head -c 300)"
 MS=4000 client admin checkpass12 "$t/admin_files2.log" '{"cmd":"file_settings","budget":0,"lod2_after":0}'
 answer "$t/admin_files2.log" 1001 | grep -q '"ok":true' ||
 	fail "the budget: $(answer "$t/admin_files2.log" 1001)"
 [ "$(get /f/$FJ)" = 200 ] && [ "$(image)" = "JPEG 960x240 " ] ||
 	fail "the JPEG over the budget: $(image)"
+[ "$(get /f/$FJ/thumb)" = 200 ] && [ "$(image)" = "JPEG 320x80 " ] ||
+	fail "the thumbnail after the crush: $(image)"
 [ "$(get /f/$FO)" = 404 ] || fail "the other file over the budget was kept"
 MS=4000 client admin checkpass12 "$t/admin_files3.log" '{"cmd":"file_settings","delete_after":0}'
 [ "$(get /f/$FJ)" = 404 ] && [ "$(get /f/$FP)" = 404 ] ||
@@ -537,4 +564,4 @@ grep -aq "admin result: erin is a Guest" "$t/dave12b.log" || fail "a Steward too
 echo "ok: a Steward's Accounts page"
 
 [ $n429 -gt 0 ] || fail "no page limit per address"
-echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; files crushed, served and swept; a patch ticket by a new account applied with git am; a long thread read in parts; read positions, following, an account page, a topic edited; a held link approved by a helper, reports weighed by network, a Steward's Accounts page; pages limited"
+echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; files crushed, served and swept, thumbnails drawn and listed; a patch ticket by a new account applied with git am; a long thread read in parts; read positions, following, an account page, a topic edited; a held link approved by a helper, reports weighed by network, a Steward's Accounts page; pages limited"

@@ -1,15 +1,16 @@
 #!/bin/bash
 # tier: long
 # cost: ~150 s (2026-10-09)
-# covers: apps/hearth/main/client_lua/init.lua builtin/accounts/client_lua/accounts.lua util/web_drive.js
+# covers: apps/hearth/main/client_lua/init.lua builtin/accounts/client_lua/accounts.lua util/web_drive.js client/extensions/network/json.lua
 # [HEARTH_USABILITY] 1, **phone**: the same post as desktop_mouse.sh, from
 # the web client in headless Chrome as a phone (390x844 at 3 device pixels,
 # touch), held upright and then turned (844x390). Each time by taps: log in,
 # Help, New thread..., a title and a message, File... (the browser's picker,
 # given the shot) and Start the thread. The two threads carry the uploaded
-# image's link, and the image is served. What a phone does and Chrome here
-# does not (the on-screen keyboard over the page, the real picker) is for a
-# test by hand. Needs web/ from util/build_web.sh.
+# image's link and draw its thumbnail ([HEARTH_ATTACHMENTS]), and the image
+# is served. What a phone does and Chrome here does not (the on-screen
+# keyboard over the page, the real picker) is for a test by hand. Needs
+# web/ from util/build_web.sh.
 #   apps/hearth/test/phone.sh
 set -u
 . "$(dirname "$0")/../../../util/check_paths.sh"
@@ -47,7 +48,7 @@ printf 'delay 6000\nquit\n' > "$t/wait"
 admin "$t/admin.log" '{"cmd":"new_topic","name":"Help","about":"Questions"}' \
 	"BUILDAT_HEARTH_ADMIN=add reader readerpass12"
 admin "$t/admin2.log" '{"cmd":"trust","name":"reader","on":true}'
-cp "$here/3rdparty/Urho3D/bin/CoreData/Textures/Ramp.png" "$t/screenshot_lamp.png"
+cp "$here/3rdparty/Urho3D/bin/Data/Textures/LogoLarge.png" "$t/screenshot_lamp.png"
 
 # The taps are in CSS pixels, where the page puts the buttons at that size
 drive(){ # name viewport join help new message file start title
@@ -79,6 +80,10 @@ J
 	WEB_DRIVE_URL=$U/ WEB_DRIVE_VIEWPORT=$vp TOUCH=1 timeout 300 \
 		"$here/util/web_drive.sh" chrome hearth "$t/$n.json" "$t/$n" > "$t/$n.txt" 2>&1 ||
 		fail "$n: the drive: $(tail -3 "$t/$n.txt")"
+	# [HEARTH_ATTACHMENTS]: the thumbnail fetched and read by the page
+	# (the web's JSON once cut a file id to 32 bits, and asked for another)
+	! grep -a "the thumbnail of file" "$t/$n/page.log" ||
+		fail "$n: a thumbnail not shown"
 }
 drive upright 390x844@3 "195, 548" "194, 184" "80, 159" "194, 304" "197, 417" \
 	"92, 382" "Upright lamp"
@@ -90,6 +95,8 @@ for n in 1 2; do
 	grep -q "My lamp shows black in the corner" "$t/page$n" || fail "thread $n: no message"
 	img=$(grep -o '/f/[0-9]*/screenshot_lamp.png' "$t/page$n" | head -1)
 	[ -n "$img" ] || fail "thread $n has no image link"
+	grep -q "<img src=\"/f/$(echo "$img" | cut -d/ -f3)/thumb\"" "$t/page$n" ||
+		fail "thread $n draws no thumbnail"
 	[ "$(curl -s -o "$t/img" -w '%{http_code}' "$U$img")" = 200 ] &&
 		[ "$(head -c 4 "$t/img" | tail -c 3)" = PNG ] || fail "$img is not served as a PNG"
 done

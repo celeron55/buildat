@@ -7,7 +7,8 @@
 # types a title and a message, opens File... and lets it go with Escape
 # (the picker closes, the draft stays), opens it again, goes to the
 # client's Screenshots, picks the shot, and starts the thread. The thread's
-# page carries the uploaded image's link, and the image is served.
+# page draws the uploaded image's thumbnail and lists the file
+# ([HEARTH_ATTACHMENTS]), and the image is served.
 # The reader is trusted by the admin first: a new account uploads no files
 # ([TRUST_LADDER]).
 #   apps/hearth/test/desktop_mouse.sh
@@ -52,7 +53,7 @@ answer "$t/admin2.log" 1001 | grep -q '"ok":true' || fail "the trust: $(answer "
 
 # The shot the user took, where the client puts its own
 mkdir -p "$t/cl_reader/screenshots"
-cp "$here/3rdparty/Urho3D/bin/CoreData/Textures/Ramp.png" \
+cp "$here/3rdparty/Urho3D/bin/Data/Textures/LogoLarge.png" \
 	"$t/cl_reader/screenshots/screenshot_lamp.png"
 cat > "$t/cmds" <<C
 delay 4000
@@ -96,4 +97,13 @@ img=$(grep -o '/f/[0-9]*/screenshot_lamp.png' "$t/page" | head -1)
 [ -n "$img" ] || fail "the thread has no image link"
 [ "$(curl -s -o "$t/img" -w '%{http_code}' "$U$img")" = 200 ] &&
 	[ "$(head -c 4 "$t/img" | tail -c 3)" = PNG ] || fail "$img is not served as a PNG"
-echo "PASS: by mouse: Escape kept the draft, the screenshot picked from the client's Screenshots, posted, $img served"
+# [HEARTH_ATTACHMENTS]: the upload went in as its thumbnail, drawn, and
+# the file is listed at the message's end
+id=$(echo "$img" | cut -d/ -f3)
+grep -q "<img src=\"/f/$id/thumb\"" "$t/page" &&
+	grep -q '<ul class="files"><li><a href="/f/'"$id"'/screenshot_lamp.png">screenshot_lamp.png</a> <span class="meta">PNG image' "$t/page" ||
+	fail "no thumbnail or no file list on the page"
+[ "$(curl -s -o "$t/thumb" -w '%{http_code}' "$U/f/$id/thumb")" = 200 ] &&
+	[ "$(python3 -c 'import sys; from PIL import Image; print("%dx%d" % Image.open(sys.argv[1]).size)' "$t/thumb")" = 320x160 ] ||
+	fail "the thumbnail is not served at 320x160"
+echo "PASS: by mouse: Escape kept the draft, the screenshot picked from the client's Screenshots, posted, $img served, its thumbnail drawn and the file listed"
