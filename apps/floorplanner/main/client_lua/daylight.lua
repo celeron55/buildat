@@ -161,11 +161,19 @@ function M.sun_irradiance(h)
 	return PHYS.sun_e0 * math.exp(-PHYS.sun_tau / math.max(h, 0.05))
 end
 
+-- The sky ([FP_OVERCAST]): clear, or overcast
+M.SKIES = {{"clear", 0}, {"overcast", 1}}
+-- **An overcast sky's light**: this share of what the clear sky and the
+-- sun put on the ground at the same hour (an overcast noon is some 10 to
+-- 30 klux against a clear one's 100)
+local OVERCAST_SHARE = 0.2
+
 -- Everything the hour's light is, from the sine of the sun's elevation and
 -- the ground's albedo (a colour 0..1): the sun's irradiance and colour,
 -- the sky's zenith and horizon radiance, the ambient a face gets under
--- the open sky, and what lights the clouds
-function M.light(h, ground)
+-- the open sky, and what lights the clouds. `overcast`: no sun, and the
+-- sky the CIE standard overcast dome.
+function M.light(h, ground, overcast)
 	local s = {}
 	s.sun = M.sun_irradiance(h)
 	-- Rayleigh through an air mass of 1 / sin(elevation), luminance one
@@ -213,6 +221,22 @@ function M.light(h, ground)
 			b = al.b * e * s.sun_color.b}
 	s.cloud_sky = {r = al.r * dome_hue.r / math.pi, g = al.g * dome_hue.g / math.pi,
 			b = al.b * dome_hue.b / math.pi}
+	if overcast then
+		-- The CIE overcast dome, Lz (1 + 2 sin elevation) / 3, grey: the
+		-- zenith three times the horizon, and Lz 7/9 pi on the ground
+		local e = OVERCAST_SHARE * (s.sun * math.max(h, 0) + math.pi * mean)
+		local lz = e * 9 / (7 * math.pi)
+		local function grey(v)
+			return {r = v, g = v, b = v}
+		end
+		local d = lz * 7 / 9
+		s.overcast, s.sun = true, 0
+		s.zenith, s.horizon = grey(lz), grey(lz / 3)
+		s.ambient = {r = d + 0.25 * ground.r * d / math.pi,
+				g = d + 0.25 * ground.g * d / math.pi,
+				b = d + 0.25 * ground.b * d / math.pi}
+		s.cloud_sun, s.cloud_sky = grey(0), grey(0)
+	end
 	return s
 end
 
@@ -250,6 +274,23 @@ function M.new_sky(scene)
 		local function v3(c)
 			return V(c.r, c.g, c.b)
 		end
+		-- Overcast: no sun drawn, nor the band it paints on the horizon
+		-- (the sun overhead), and no clouds -- the dome is the cloud
+		-- layer's underside. Its gradient unphysical: the square root's is
+		-- nearer the CIE dome's (straight in sin elevation) than the
+		-- clear sky's, which is all zenith from 22 degrees up.
+		-- simplified: the shader's gradient, not CIE's exactly (at 30
+		-- degrees 0.71 of the way to the zenith, not 0.5); the upgrade is
+		-- the formula in LuantiSky.glsl behind a parameter
+		local oc = light.overcast
+		-- The cube again by the real sun: an overcast dome brightens with it
+		self.want = string.format("%.3f %.3f %.3f %s", tx, ty, tz, tostring(oc))
+		if oc then
+			tx, ty, tz = 0, 1, 0
+		end
+		mat:SetShaderParameter("SunSize", oc and 0 or SUN_HALF)
+		mat:SetShaderParameter("CloudCoverage", oc and 0 or 0.35)
+		mat:SetShaderParameter("SkyPhysical", oc and 0 or 1)
 		mat:SetShaderParameter("SunDirection", V(tx, ty, tz))
 		mat:SetShaderParameter("SkyTop", v3(light.zenith))
 		mat:SetShaderParameter("SkyHorizon", v3(light.horizon))
@@ -261,7 +302,6 @@ function M.new_sky(scene)
 		mat:SetShaderParameter("CloudSky", v3(light.cloud_sky))
 		-- The cube again when the sun has moved, four times a second at
 		-- most: it is six renders, and a time-lapse moves it every frame
-		self.want = string.format("%.3f %.3f %.3f", tx, ty, tz)
 		self:flush()
 	end
 	-- The cube's render, when it is due; called each frame too, so the
@@ -352,6 +392,13 @@ do
 	assert(M.ground(65, 196, 0) == GROUND_RGB[1], "July green at 65 N")
 	assert(M.ground(65, 290, 0) == GROUND_RGB[2], "October yellow at 65 N")
 	assert(M.ground(20, 15, 0) == GROUND_RGB[1], "the tropics' green")
+	-- Overcast: no sun, the zenith three times the horizon, grey, and
+	-- darker than the clear noon
+	local g = {r = 0.1, g = 0.1, b = 0.1}
+	local c, o = M.light(0.8, g), M.light(0.8, g, true)
+	assert(o.sun == 0 and math.abs(o.zenith.g - 3 * o.horizon.g) < 1e-9 and
+			o.zenith.r == o.zenith.b and lum(o.ambient) < lum(c.ambient) +
+			c.sun * 0.8 / math.pi, "overcast")
 end
 
 return M

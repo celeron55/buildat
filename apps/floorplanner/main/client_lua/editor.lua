@@ -7004,7 +7004,7 @@ function M.refdump_tick(dt)
 	local tx, h, tz = M.daylight.sun_toward(st.latitude, st.north,
 			M.plan_day(), M.plan_minute())
 	local ground = lin(M.ground_rgb())
-	local light = M.daylight.light(h, ground)
+	local light = M.daylight.light(h, ground, M.sun().sky == 1)
 	local yaw, pitch = math.rad(S.yaw), math.rad(S.pitch)
 	-- Each row the meshes point at: kind 5 is glass, 4 a lamp
 	local rows = {'"0": {"albedo": ' .. c3(lin(0xb0b0b0)) .. ', "kind": 0}',

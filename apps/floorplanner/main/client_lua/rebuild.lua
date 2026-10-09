@@ -2032,8 +2032,8 @@ function M.apply_daylight()
 			ground_node.position = magic.Vector3(S.pos.x, y, S.pos.z)
 		end
 	end
-	local key = string.format("%s %.1f %d %d %d %d %d", tostring(pbr), minute,
-			st.north, st.latitude, day, M.sun().ground, st.treeline)
+	local key = string.format("%s %.1f %d %d %d %d %d %d", tostring(pbr), minute,
+			st.north, st.latitude, day, M.sun().ground, st.treeline, M.sun().sky or 0)
 	if key == S.daylight_key then
 		if pbr and M.sky then
 			M.sky:flush()
@@ -2061,8 +2061,9 @@ function M.apply_daylight()
 		return (v / 255) ^ 2.2
 	end
 	local light = M.daylight.light(h, {r = lin(math.floor(rgb / 65536)),
-			g = lin(math.floor(rgb / 256) % 256), b = lin(rgb % 256)})
-	sun.enabled, fill.enabled = h > 0, false
+			g = lin(math.floor(rgb / 256) % 256), b = lin(rgb % 256)},
+			M.sun().sky == 1)
+	sun.enabled, fill.enabled = light.sun > 0, false
 	sun_node.direction = magic.Vector3(-tx, -h, -tz)
 	-- The shader's Lambert has no 1/pi, which the irradiance carries here
 	sun.brightness = light.sun / math.pi

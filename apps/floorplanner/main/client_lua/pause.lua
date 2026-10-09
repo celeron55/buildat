@@ -141,7 +141,7 @@ do
 				if v then
 					S.sun_temp = {plan = E.doc.plan_name, day = M.plan_day(),
 							minute = math.floor(M.plan_minute()),
-							lapse = st.lapse, ground = st.ground}
+							lapse = st.lapse, ground = st.ground, sky = st.sky}
 				else
 					S.sun_temp = nil
 				end
@@ -193,8 +193,12 @@ do
 				choose({lapse = v, minute = math.floor(M.plan_minute()),
 						day = M.plan_day()})
 			end)
-			panel.dropdown(w, "Ground", dl.GROUNDS, sun.ground, function(v)
+			local gr = panel.row(w)
+			panel.dropdown(gr, "Ground", dl.GROUNDS, sun.ground, function(v)
 				choose({ground = v})
+			end)
+			panel.dropdown(gr, "Sky", dl.SKIES, sun.sky or 0, function(v)
+				choose({sky = v})
 			end)
 			panel.view_only = not edit
 			-- **The branch point** ([FP_GHOST]): the plan as it was, or
