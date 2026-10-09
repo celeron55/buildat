@@ -118,7 +118,9 @@ beside the program, in `cache/` and `user/`. That is what development wants.
 (`$XDG_DATA_HOME/buildat` and `$XDG_CACHE_HOME/buildat` on Linux,
 `%APPDATA%\buildat` and `%LOCALAPPDATA%\buildat\cache` on Windows,
 `~/Library/Application Support/buildat` and `~/Library/Caches/buildat` on
-macOS), which is what an installed copy wants. `-C` and `-D` override either.
+macOS), which is what an installed copy wants. A portable build does the
+same when a file named `installed` is beside its executable, as the Windows
+installer puts it. `-C` and `-D` override either.
 
 Optional: `-DURHO3D_LUAJIT=TRUE` builds the bundled LuaJIT instead of Lua.
 `URHO3D_HOME` still overrides the bundled tree if you need an external build.
@@ -283,3 +285,10 @@ It writes `Build/package/out/buildat-<version>-<hash>-win64.zip`, which
 carries the compiler the server needs at run time. Unpack it and run
 `bin\buildat.exe`. A native build on Windows (MSYS2, Mingw-w64) is not
 tested.
+
+It also writes `buildat-<version>-<hash>-win64-setup.exe` (NSIS,
+`util/installer.nsi`): the same build installed for the user alone, no
+admin, to `%LOCALAPPDATA%\Programs\Buildat`, with a Start menu entry and
+an uninstaller in Add/Remove Programs. The installed copy keeps its data
+in `%APPDATA%\buildat` and `%LOCALAPPDATA%\buildat\cache`; the uninstall
+leaves them. Neither is signed, so Windows names no publisher.

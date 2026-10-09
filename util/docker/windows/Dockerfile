@@ -17,7 +17,7 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources \
 	&& apt-get -o Acquire::Retries=5 update && apt-get install -y --no-install-recommends \
 	build-essential cmake git ca-certificates ccache \
 	mingw-w64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64 \
-	zip tar gzip curl xz-utils \
+	zip tar gzip curl xz-utils nsis \
 	&& rm -rf /var/lib/apt/lists/*
 # The POSIX-threads flavour of the cross compiler, for std::thread
 RUN update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix && \

@@ -65,6 +65,12 @@ jobs:
           name: windows-archive
           path: Build/package/out/*-win64.zip
           if-no-files-found: error
+      # The per-user installer of the same build ([WIN_INSTALLER])
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: Build/package/out/*-win64-setup.exe
+          if-no-files-found: error
       # The "Luanti only" archive ([LUANTI_BUILD]): apps/vanilla and no
       # compiler, a third of the full one; the release lists it
       - uses: actions/upload-artifact@v4
@@ -124,6 +130,10 @@ jobs:
         with:
           name: windows-luanti-archive
           path: out
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: out
       - uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
@@ -132,3 +142,4 @@ jobs:
           files: |
             out/*.tar.gz
             out/*.zip
+            out/*.exe

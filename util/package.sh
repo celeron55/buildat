@@ -319,6 +319,37 @@ make_one() {
 	esac
 }
 
+# [WIN_INSTALLER]: the per-user installer out of a Windows archive's stage
+# (util/installer.nsi): its top-level entries but user/ and cache/ as File
+# lines, the same as removals for an upgrade and the uninstall, and the
+# stage's prebuilt modules for the installed copy's cache
+make_installer() {
+	local name="$1"
+	local stage="$root/stage/$name" files="$root/installer-$name"
+	local exe="$out/$name-setup.exe"
+	rm -rf "$files"; mkdir -p "$files"
+	: > "$files/install.nsh"; : > "$files/remove.nsh"
+	local p n
+	for p in "$stage"/*; do
+		n=$(basename "$p")
+		case "$n" in user|cache) continue ;; esac
+		if [ -d "$p" ]; then
+			# Inside it: "File /r <dir>" takes a directory of that name at
+			# any depth (user/apps for apps)
+			printf 'SetOutPath "$INSTDIR\\%s"\nFile /r "%s/*"\n' "$n" "$p" \
+				>> "$files/install.nsh"
+			echo "RMDir /r \"\$INSTDIR\\$n\"" >> "$files/remove.nsh"
+		else
+			printf 'SetOutPath "$INSTDIR"\nFile "%s"\n' "$p" >> "$files/install.nsh"
+			echo "Delete \"\$INSTDIR\\$n\"" >> "$files/remove.nsh"
+		fi
+	done
+	makensis -V2 -DVERSION="$version" -DSTAGE="$stage" -DFILES="$files" \
+		-DOUT="$exe" "$here/util/installer.nsi" > "$files/makensis.log" 2>&1 || {
+		echo "makensis failed; see $files/makensis.log" >&2; return 1; }
+	echo "$exe"
+}
+
 # The Luanti-only archive out of the full one's build tree and stage:
 # a reconfigure with BUILDAT_LUANTI_ONLY, an install to its own stage,
 # and the full stage's compiled modules copied in
@@ -795,6 +826,8 @@ windows)
 	echo "archive: $a"
 	check_imports "$a"
 	smoke_test_wine "$a"
+	i=$(make_installer "buildat-$version-win64") || exit 1
+	echo "installer: $i"
 	# The runtime variant beside it, until it answers the desktop's
 	# 0xc0000142 and becomes the packaging ([WIN_DLL_INIT]): the three
 	# runtime DLLs from the cross toolchain that built the binaries

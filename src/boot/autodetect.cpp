@@ -122,6 +122,20 @@ ss_ platform_cache_path()
 // whether there is a writable cache beside share/ says nothing about where
 // buildat's data belongs. A value that is already there came from -C or -D and
 // wins over both.
+// Whether the data goes where the platform says: a system build, or an
+// installed copy of a portable one ([WIN_INSTALLER]: the installer puts
+// bin/installed beside the exe, as its directory is replaced by an upgrade
+// and emptied by the uninstall)
+static bool platform_data_paths()
+{
+#ifdef BUILDAT_PORTABLE
+	return interface::fs::path_exists(interface::fs::strip_file_name(
+			interface::os::get_current_exe_path())+"/installed");
+#else
+	return true;
+#endif
+}
+
 static void set_platform_data_paths(core::Config &config)
 {
 	// A check's own paths (util/check_paths.sh), so that a run never shares
@@ -133,12 +147,12 @@ static void set_platform_data_paths(core::Config &config)
 		config.set("cache_path", env_cache);
 	if(!env_user.empty() && config.get<ss_>("user_path").empty())
 		config.set("user_path", env_user);
-#ifndef BUILDAT_PORTABLE
-	if(config.get<ss_>("cache_path").empty())
-		config.set("cache_path", platform_cache_path());
-	if(config.get<ss_>("user_path").empty())
-		config.set("user_path", platform_user_path());
-#endif
+	if(platform_data_paths()){
+		if(config.get<ss_>("cache_path").empty())
+			config.set("cache_path", platform_cache_path());
+		if(config.get<ss_>("user_path").empty())
+			config.set("user_path", platform_user_path());
+	}
 	// "a/../b" collapsed: Urho3D's resource cache drops "../" out of a
 	// name, so a cached file under a path given with one is never found and
 	// the world draws black. simplified: only such a path is rewritten, so
@@ -432,12 +446,10 @@ PathDefinition server_paths[] = {
 static bool detect_buildat_server_paths(core::Config &config)
 {
 	set_platform_data_paths(config);
-#ifndef BUILDAT_PORTABLE
 	// The one thing the server keeps in the cache
-	if(config.get<ss_>("rccpp_build_path").empty())
+	if(platform_data_paths() && config.get<ss_>("rccpp_build_path").empty())
 		config.set("rccpp_build_path",
 				config.get<ss_>("cache_path")+"/rccpp_build");
-#endif
 	sv_<ss_> roots;
 	generate_buildat_root_alternatives(roots);
 	return detect_paths(config, roots, server_paths, "Buildat server root");
