@@ -5,8 +5,9 @@
 # [TAP_BACK]: a click on nothing is Back. launch_menu's Settings stays up
 # for a click in its window, goes for a click beside it, and Home, the
 # first screen, stays as it is for one (no Quit dialog). Escape's Quit
-# dialog then goes by the arrows: Left, Right, Enter is Cancel, and Down,
-# Down, Up, Enter is Quit (a playtest found only Tab there). A screen
+# dialog then goes by the arrows from Quit, which has the focus: Right,
+# Left, Right, Enter is Cancel, and Down, Up, Enter is Quit (a playtest
+# found only Tab there). A screen
 # left by Escape gives its parent back the selection it was opened from:
 # Down after it goes on from there, not from the top. A row the mouse
 # selected is let go when the mouse leaves it, and Down brings it back; one
@@ -72,13 +73,13 @@ delay 300
 event scan
 keypress Escape
 delay 500
+keypress Right
 keypress Left
 keypress Right
 keypress Return
 delay 600
 keypress Escape
 delay 500
-keypress Down
 keypress Down
 keypress Up
 keypress Return

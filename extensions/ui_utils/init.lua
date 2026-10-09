@@ -1751,7 +1751,10 @@ end
 -- yes_label is the first button's, "Yes" when absent ([DELETE_WORDING]:
 -- it was "Force kill", its first user's, and a deletion asked that);
 -- no_label the second's, "Cancel" when absent
-function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label, no_label)
+-- options: yes_focused (yes has the focus, not Cancel), yes_key (a key that
+-- answers yes, as the quit dialog's Q)
+function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label, no_label, options)
+	options = options or {}
 	local root = uistack.main:push({desc="show_confirm_dialog"})
 
 	local style = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
@@ -1802,8 +1805,17 @@ function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label, no_label)
 	M.safe.bind_button_menu(root, {
 		{yes_button, function() finish(true) end},
 		{no_button, function() finish(false) end},
-	})
-	no_button:SetFocus(true)
+	}, function(key)
+		if options.yes_key and key == options.yes_key then
+			finish(true)
+			return true
+		end
+	end)
+	if options.yes_focused then
+		yes_button:SetFocus(true)
+	else
+		no_button:SetFocus(true)
+	end
 end
 
 -- A small non-modal notice in the top right corner. It does not take focus and

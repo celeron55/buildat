@@ -585,7 +585,8 @@ local function home(query)
 			-- launcher, and a browser tab has its own close
 			if not web then
 				ui_utils.show_confirm_dialog("Quit Buildat?",
-						function() api.quit() end, nil, "Quit")
+						function() api.quit() end, nil, "Quit", nil,
+						{yes_focused = true, yes_key = magic.KEY_Q})
 			end
 			return true
 		end

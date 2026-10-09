@@ -1052,9 +1052,10 @@ show_message_dialog(message [, on_close [, copy]])
 - A modal dialog with an Ok button; a second call while one is up appends to
   it. Escape closes it. With copy, a Copy button above Ok puts copy on the
   clipboard ([LOG_REACH]: a caught error's full text).
-show_confirm_dialog(message, on_yes, on_no[, yes_label])
-- Two buttons, yes_label ("Force kill" when absent), the main one, and
-  Cancel, which has the focus.
+show_confirm_dialog(message, on_yes, on_no[, yes_label[, no_label[, options]]])
+- Two buttons, yes_label ("Yes" when absent), the main one, and no_label
+  ("Cancel"), which has the focus; Escape is no. options.yes_focused gives
+  yes the focus, options.yes_key is a key that answers yes.
 show_notice(text [, copy])
 - A line at the top of the screen for six seconds, taking neither the mouse
   nor the focus: what a caught error is shown as in an app ([MENU_ERRORS]).
