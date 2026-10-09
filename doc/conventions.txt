@@ -133,10 +133,17 @@ Directory structure
 Checks
 ------
 A check is one shell script that runs the thing and decides for itself.
-builtin/luanti/test/lib.sh carries the contract: exit 0 passed, 1 failed, 77
-could not run, and the last line is "PASS: ", "FAIL: " or "SKIP: " with what
-was actually measured in it. A check that prints a failure and exits 0 is the
-fault this contract exists for.
+util/check_paths.sh carries the contract ([CHECK_KIT]; lib.sh sources it):
+exit 0 passed, 1 failed, 77 could not run, and the last line is "PASS: ",
+"FAIL: " or "SKIP: " with what was actually measured in it. A check that
+prints a failure and exits 0 is the fault this contract exists for. The
+kit besides: fail and skip, check_tmp (a temp directory removed at exit
+with its pids stopped; KEEP_TMP keeps it), wait_for_log, start_server
+<log> <ready-regex> <timeout_s> <port|auto> <command...> (a port already
+taken fails at once, naming its owner; auto picks one in 29700-29999),
+and check_pgrep / check_pkill, which match only processes run with the
+checks' user path, so a check never touches a playtest's. util/uidrive.py
+is the scan parser and a fifo-driven client for a UI drive.
 
 Four header lines say the rest, and only the first is required:
 
@@ -153,7 +160,8 @@ Four header lines say the rest, and only the first is required:
                        second), which would otherwise push the deep runners
                        out of the pick by costing less than all of them
 
-builtin/luanti/test/run_all.sh <tier> runs a tier; --changed [range] runs the
+builtin/luanti/test/run_all.sh <tier> runs a tier, every script git knows
+with a "# tier:" line (a runner under apps/<a>/ covers apps/<a>/**); --changed [range] runs the
 cheapest runners that cover what git says changed, which is the regular check.
 A runner is never retried: a check run three times and taken at its best is
 how a real fault becomes a known flake.
@@ -225,6 +233,14 @@ Content authored elsewhere generally is not in this convention. glTF is
 right-handed, and Blender is right-handed and Z up. The glTF loader converts
 (3rdparty/Urho3D/Source/Urho3D/Graphics/GLTFLoader.cpp); anything else that
 imports geometry has to.
+
+Client-side Lua
+---------------
+Everything the client runs (client/, extensions/, every client_lua/) parses
+as Lua 5.1, the web client's PUC Lua: no goto, and no LuaJIT-only string
+escapes ("\u{...}", "\x41", "\z"; write the UTF-8 character or a decimal
+byte escape). A native build checks both (luac51 -p and
+util/lua51_escapes.cmake) and fails at the file and line.
 
 Urho3D
 ------

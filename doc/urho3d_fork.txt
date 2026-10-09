@@ -290,6 +290,26 @@ the field's width, the cursor and the scroll follow its row, and Up, Down,
 Home and End move by rows (GetCharIndexOnRow). Hearth's message fields are
 multi-line.
 
+A multi-line LineEdit scrolls by the wheel ([TEXTAREA_WHEEL], fae9bd57)
+----------------------------------------------------------------------
+UI/LineEdit.{cpp,h}, UI/UI.cpp, LuaScript/pkgs/UI/LineEdit.pkg
+
+LineEdit::OnWheel scrolls a multi-line edit's text three rows a wheel
+click, clamped to the text, the cursor left where it is; WheelScrolls(delta)
+(also in Lua) says whether there is more to show that way. A key brings
+the cursor back into view; a layout update does not (UpdateCursor(follow =
+false)). The UI's wheel for the element under the mouse, not focused,
+stops at a multi-line LineEdit as at a ScrollView.
+
+Text rows summed as floats ([TEXT_WRAP_FLOAT], 0ef16631)
+--------------------------------------------------------
+UI/Text.cpp
+
+Text::UpdateText sums a row's advances and kerning as a float and rounds
+the width up. At a fractional UI scale the advances are fractions
+(FontFaceFreeType divides them by the scale); summed as int, a line was
+wrapped up to a pixel a glyph narrower than it is drawn.
+
 The common editor keys ([TEXT_KEYS])
 ------------------------------------
 UI/LineEdit.{cpp,h}
@@ -381,9 +401,23 @@ stb_vorbis v1.22 ([SECURITY_RUN_1], ad570799)
 ---------------------------------------------
 Source/ThirdParty/STB/stb_vorbis.h
 
-Upstream v1.22, unmodified, in place of v1.09, whose compute_codewords
-wrote past a 32-entry stack array on a crafted .ogg -- a file a server can
-hand the client as a sound.
+Upstream v1.22 in place of v1.09, whose compute_codewords wrote past a
+32-entry stack array on a crafted .ogg -- a file a server can hand the
+client as a sound. One local patch over it (c295a71e): start_decoder
+refuses a vendor or comment length outside 0..16 MiB and a comment count
+outside 0..2^20 before allocating, zeroes the comment list, and leaves its
+count 0 after a failed allocation (vorbis_deinit freed the list's
+uninitialized entries). util/fuzz/fuzz.sh sound.
+
+A model file a server can hand the client (d3eddd34)
+----------------------------------------------------
+Graphics/Model.cpp, Graphics/Geometry.cpp, Graphics/IndexBuffer.cpp
+
+Model::BeginLoad refuses a vertex element type or semantic past its enum
+and a primitive type past TRIANGLE_FAN (each indexed a table sized by its
+enum), and Geometry and IndexBuffer check an index draw range without the
+start + count sum, which could wrap past the check. util/fuzz/fuzz.sh
+model.
 
 Many collision shapes on one node ([VOXEL_PHYSICS_LAG])
 -------------------------------------------------------

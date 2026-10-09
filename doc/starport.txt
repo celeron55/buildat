@@ -24,6 +24,16 @@ run their own. The official one is https://starport.buildat.org.
 - The client asks before it contacts a host, a Starport included. Its
   Starport settings say which Starports it uses; with none left there, it
   uses none.
+- A token is made only for a verified listing that is not banned: an
+  announce naming another server's address never verifies.
+- On the web the ID signs in on the Starport's own page, `/authorize`,
+  in a window of its own; the token goes to the opener by postMessage,
+  only to the listing's own origin or one in `web_clients`. `/id` is
+  the ID's page: its sessions and last 20 logins with "Log out everywhere
+  else", TOTP, the e-mail, the password and the age, and making an ID.
+  The age asks "18 or over?" first, the birth year only on a No, kept
+  until the ID turns 18. With TOTP on, changing the password or the
+  e-mail takes a current code.
 - A Starport ID holds a name, a password hash and, if given, a recovery
   e-mail. It is deleted from its own settings. Mail goes through the
   server's SMTP server, set on the Server window's Health page; the old
@@ -41,6 +51,18 @@ run their own. The official one is https://starport.buildat.org.
   client with no game of its own, as `apps/play` does
   (`https://play.buildat.org`), is listed there to let its players sign
   in with an ID.
+- `/` is a read-only page ([FRONT_PAGES]): the listings by fleet with
+  kind and audience filters, the transparency numbers and a privacy
+  line; only what suits a teen (no yes to sexual content, drugs or
+  gambling, no unmoderated chat or content, no open report, no adult
+  audience) and claimed at least `page_delay` (3600 s) ago, the busiest
+  first. The web client is at /index.html.
+- Reports, their weights, the queue, decisions, statements of reasons and
+  appeals are builtin/moderation's (doc/server_api.txt); a statement has
+  one open appeal. A blocklist takes only an offered listing or fleet; an
+  account makes 20 at most, none when banned. Moderators are accounts at
+  the Steward level ([TRUST_LADDER]), set by the "level" request as
+  Hearth's are.
 - `recommended_hearth` (an http(s) address) and `recommended_aittas` (a
   list of them) come to clients in `/api/list` and an ID's "me". A
   logged-in ID's line in the launcher's overlay gets "Discuss", which

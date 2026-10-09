@@ -236,7 +236,12 @@ see doc/client_api.txt.
 What is where
 -------------
 serialize.lua   Luanti's big-endian numbers and length-prefixed strings
-connection.lua  The UDP transport: channels, reliable packets, acks, splits
+connection.lua  The UDP transport: channels, reliable packets, acks, splits.
+                A reliable packet is acked as it arrives, off the frame (a
+                thread natively, the WebSocket's handler on the web), and
+                one the queue cannot take is left unacked for a resend; a
+                send that would block waits for the next update. The
+                client's UDP sockets ask for 4 MiB buffers
 srp.lua         The client half of the SRP-6a login, on buildat.bignum
 client.lua      The commands: the login, the map blocks, and dispatch for the
                 rest
@@ -251,6 +256,9 @@ surface.lua     What a node's surface is made of, guessed from its definition:
                 the six numbers per texture segment the atlas turns into
                 normal and spec maps
 objmesh.lua     Wavefront .obj, as the quads a voxel's shape is made of
+b3dmesh.lua     Blitz3D .b3d, the same
+nodemeta.lua    A node's metadata: what a chest holds, what a sign says
+light.lua       The light around a node that changed, worked out here
 res/            What the client itself ships: the placeholder textures, and
                 the shaders and techniques this world is drawn with. Urho3D
                 finds them because share_path/extensions is a resource dir,
@@ -277,7 +285,11 @@ res/formspec_ui.lua A formspec on the screen, as Urho3D UI elements; the luanti
 res/texmod.lua  Luanti's texture modifier language, as compose_image()
                 operations; the luanti module serves the same file
 world.lua       The scene: a node per map block, with buildat's voxel mesher
-                on it, and the voxel registry the node definitions build
+                on it, and the voxel registry the node definitions build;
+                world_particles.lua, world_sounds.lua, world_pointing.lua
+                (what the camera points at, its box and the crack) and
+                world_object_meshes.lua (what an object is drawn with) are
+                parts of its M.new, called with what they need
 engine_test.lua Checks of the engine primitives, run at boot
 settings.lua    The client's own settings in <user>/luanti_client/settings.json
                 (render mode, view range, view bobbing, name, address, the
@@ -288,7 +300,13 @@ res/*.lua       The Lua both Luanti clients share, run here and served
                 half: camera_motion.lua (view bobbing and the hand's
                 motion), key_editor.lua (the key bindings screen),
                 minimap.lua (official's minimap and its V modes over the
-                scene)
+                scene), hotbar.lua, hud_draw.lua (the one HUD renderer),
+                sky_model.lua (when the sun and moon are up, where, when the
+                light goes red; vanilla's luanti_sky.lua and pbr's light
+                read it), form_session.lua (the form on the screen and what
+                the player does to it: one form session), item_shape.lua (a
+                node's inventory picture by its shape), touch.lua (official's
+                touch controls)
 init.lua        The connect dialog and the status screen
 
 The engine side of this is nothing Luanti-specific: sockets (extension/network),

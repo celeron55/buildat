@@ -144,8 +144,9 @@ when the launcher next fetches that Aitta's list.
                                               release, for a browser
     GET  /p/<author>/<name>                   a package's listed releases
 
-The web client of an Aitta server is at /app (/play and /index.html
-work too).
+The HTTP requests are limited per network (an IPv4 /24, an IPv6 /64):
+240 reads and 30 uploads a minute. The web client of an Aitta server is
+at /app (/play and /index.html work too).
 
 Browsing and installing in the client
 -------------------------------------

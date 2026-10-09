@@ -252,6 +252,15 @@ buildat.get_voxel_data(node) -> string or nil
 buildat.column_heights(volume_data, voxel_reg) -> string
 - The local y of each column's highest solid non-cutout voxel, w*d int16 in
   [z][x] order; what a horizon map is built from
+buildat.set_mesh_bounce([r, g, b])
+- The light the unpacked mesher bakes into every face the sky does not
+  reach, each channel 0...1, for meshes made after it, process-wide; no
+  arguments restores 0.055, 0.050, 0.045 (src/interface/mesh.h
+  set_bounce_color()).
+buildat.set_mesh_alpha_nibbles(on)
+- The unpacked mesher's vertex alpha as the sky in the high nibble and the
+  shade in the low one, for meshes made after it ([CAVE_EXPOSURE_FLOOR];
+  luanti_client's pbr reads a sealed cave's corners from it).
 buildat.cast_voxel_rays(args) -> results
 - Marches rays through voxel data. args.directions is a flat array of
   numbers, three to a ray. With args.rays_per_cell set, consecutive rays are
@@ -370,6 +379,19 @@ buildat.launch_ui_sandboxed(name) -> bool
 buildat.menu_extension() -> the launch UI's module, or the interface it gave
 - Whom the client and an app's own menu call for entered_app, leave_app,
   in_app and show_dead_server ([MENU_CONTEXT]).
+buildat.set_feedback({address, subject, package, version, engine,
+    platform[, place]})
+- "Feedback..." on an installed app and "Discuss" on an Aitta release
+  ([PACKAGE_SUBJECT]): the launch grid sets what the user is about to tell
+  the app's home Hearth, then connects there; the Hearth's client takes it
+  once with feedback(). A connect to another address drops it.
+buildat.set_back_depth(n)
+- [TAP_BACK] How many screens the main UI stack holds (uistack sets it),
+  plus an app's set_back_depth_extra; the web page's Back reads it: above 1
+  Back is Escape, at 1 it leaves the page. Nothing natively.
+buildat.press_back()
+- [TAP_BACK] Escape pressed and let go, as the keyboard would: every
+  screen's own Escape handling is what Back does.
 
 
 The sandbox environment
@@ -398,6 +420,20 @@ buildat.disconnect()
 buildat.leave()
 - Back to the launcher's grid when there is one under the app
   ([MENU_CONTEXT]), else what disconnect() does
+buildat.set_leave_reason(text)
+- [LEAVE_WITH_REASON] Why the server is about to drop this client (a
+  kick's text, builtin/accounts): the dialog over the launcher says "Left
+  the server: <text>" and the client does not rejoin. Cleared by leave()
+  and the other ways out (discuss, a playtest).
+buildat.set_back_depth_extra(n)
+- Screens of the app's own inside one of the main stack's (Hearth's
+  pages), so the web page's Back is Escape while there is one to go back
+  from ([TAP_BACK]). Cleared when the app is left for the launcher.
+buildat.feedback() -> {subject, package, version, engine, platform, place}
+    or nil
+- The Hearth's side of set_feedback(), once; place is true for "Discuss"
+  (open the package's threads, not the composer). A server's or a game's
+  is discussed()'s, and this answers nil for it.
 buildat.offer_playtest{release = "author/name/version", ticket, sha256}
     -> true, or false and why
 - [AITTA_REVIEW]: an Aitta's review page hands the launcher a playtest
@@ -598,6 +634,11 @@ buildat.safe.launch_ui_name() -> the launch UI that holds the screen
   and hands the input back.
 buildat.safe.launch_ui_fell_back() -> the launch UI that was asked for and did
   not load, or nil -- what the one that did load tells the user.
+buildat.safe.crash_dump_untold() -> path or nil
+- [WIN_MINIDUMP] A crash's minidump in the cache (crash-<exe>-<time>.dmp,
+  the client's or the local server's) that no start has told about yet,
+  for the launcher to tell; the first call marks it. Windows only writes
+  them; elsewhere nil. Not for a server's code (nil).
 buildat.safe.compose_launch_ui(name, action) -> true, or false and why
 - One launch UI running another over it ([TWO_AUDIENCES]): the composed one
   boots as the client boots a launch UI, and action is the string its boot()

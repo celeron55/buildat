@@ -23,12 +23,26 @@ made on the first start; a file from before a column gets it added. Tables:
 topics (a parent topic, 0 at the top), threads, messages, edits (what
 an edit replaced, when and by whom), follows, notifications, members
 (when an account first came), reads (the threads an account has
-opened), reports, and search, an FTS5 index over every message (a
-thread's title on its first message). Every statement binds its
-values.
+opened), topic_reads, thanks, reports, release_threads, and search, an
+FTS5 index over every message (a thread's title on its first message).
+Every statement binds its values.
 
-A thread's subject (a package's "author/name" and key, [PACKAGE_SUBJECT])
-is stored when given and read by nothing yet.
+A thread's subject ([PACKAGE_SUBJECT]) is a package's "author/name" and
+key, "server:<host>:<port>" or "game:<source>". A package's threads are its
+place, /p/<author>/<name> (a second key under the name noted); a thread
+about no package is linked to one afterwards ("About a package..."; the
+link command) by whoever started it or a moderator, only to a package
+with a release here. A thread about an app or a ContentDB game lists up
+to three servers its Starports list running it that their play page can
+join, most players first ([HEARTH_VISITOR_FLOW]).
+
+Releases: the admin's release_sources names the Aittas to read and this
+Hearth's own addresses; a poller reads each Aitta's list once a minute,
+and a release whose home_hearth is one of the addresses becomes a thread
+in the "Releases" topic by "author (Aitta)", with its description and
+changelog. Its thread lists the problems marked fixed in its version
+(same package and key), whose reporters and followers are told it is
+out.
 
 Accounts and admins
 -------------------
@@ -49,12 +63,17 @@ Claimed from builtin/network (claim_http_path); /app (also /play and
     /topic/<id>      a topic's threads, answered ones first, then by the
                      latest message, 200 at most
     /t/<id>          a thread: the question, the reply that answered it,
-                     then the rest in order; every message at #m<id>
+                     then the rest in order; every message at #m<id>;
+                     in parts of 256 kB of bodies, ?after=<id> the next
     /m/<id>          one message and a link to it in its thread
     /search?q=...    50 best matches, titles weighed 5 to a body's 1, an
                      answer counted twice
+    /p/<a>/<name>    a package's place: the threads about it
+    /u/<name>        an account's page
     /f/<id>[/<name>] an uploaded file (below); the name is only what a
-                     browser saves it as
+                     browser saves it as; /f/<id>/thumb an image's
+                     thumbnail
+    /brand/<file>    the pages' font and logo ([HTML_BRAND])
     /robots.txt      keeps crawlers off /f/
 
 Each page's foot links to the web client, "in the browser"
@@ -76,7 +95,11 @@ autolinks, and ||spoilers|| (interface::markup::to_html, md4c); a single
 newline breaks the line (<br>, as GitHub's comments do): raw HTML is
 text, a link or an image to anything but http, https, mailto or a
 relative path is its text alone, an image is a link to it and never
-loaded, and every link is rel="nofollow ugc". A search's words are each
+loaded but for the Hearth's own /f/<id> (an <img>, lazily loaded), and
+every link is rel="nofollow ugc". "#1234" links to thread 1234, "@name"
+to /u/name. An uploaded image's thumbnail (320x240 at most) goes at the
+message's end linked to the image, and a message's files are listed
+under it. A message shows its thanks count. A search's words are each
 quoted, so nothing typed is FTS5's query language; the last word is a
 prefix. A hidden message shows "Hidden by a moderator: <statement>" and
 not its text; a thread whose first message is hidden is hidden with it,
@@ -100,7 +123,14 @@ localhost).
 
 Taking part: the client
 -----------------------
-The client's pages: the topics and the latest threads, a topic (its
+The client ([HEARTH_UI]) is a sidebar of topics beside a page, one
+scroll view, by the arrow keys between the two; Escape at the top opens
+My account, and on the web Back steps through the pages, a draft and the
+place kept over a restart ([HEARTH_RESUME]). A thread or topic row carries
+a ● for a message within a day and a • within a week, amber while
+unread ([HEARTH_NEW_MARKS]); home's "Waiting for you" lists the unread
+threads, followed first. The client's pages: the topics and the latest
+threads, a topic (its
 threads, and a new thread's title and first message), a thread (its
 messages, a reply, Follow, "This answered it", Report or Appeal),
 notifications, and for an admin the moderation queue and a new topic
@@ -110,8 +140,10 @@ server's HTML of it (a thread's "html"; [HEARTH_LINES_CODE]): its text
 with a link's address after it, a fenced block in the mono font on a
 darker ground (a line past the width cut with "..."), a picture of the
 Hearth's own under the text rather than its Markdown. A message's field
-is multi-line: Enter breaks the line, Ctrl+Enter sends; "Code block"
-puts in a fenced block.
+is multi-line: Enter breaks the line, Ctrl+Enter sends; Bold, List, Link,
+Image and "Code block" put their Markdown in at the cursor, and Preview
+shows the message as the HTML face will. A member thanks a message
+("+N" at its top right; the author told once while unseen).
 
 Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
 "hr:res" {id, ok, result | error}. The commands and who may use them:
@@ -126,8 +158,19 @@ Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
     subject                subject=<text>: its threads; a package's
                            name alone, every key's ([HEARTH_OPEN_HERE])
     search                 30 a minute per account
+    preview                body: the HTML face's rendering of it
+    following              the threads followed, the unread first
+    mark_read              topic (and its subtopics), or 0 for all
+    subjects               the packages with a release here
+    link                   thread, subject: one of those, by the thread's
+                           starter or a moderator
+    thank                  a member: message, on; 60 an hour, not one's
+                           own; the count back
+    upload                 name, data in hex -> {id, image} (Files)
+    thumb                  file -> {type, data in hex}: its thumbnail
     new_topic              a moderator; name, about, parent (0, or a
                            top-level topic)
+    edit_topic             a moderator: topic, name, about
     new_thread             anyone; topic, title, body, subject, kind
                            ("", question, problem, idea, or patch in a
                            tracker topic), version; or server=true and
@@ -188,6 +231,8 @@ Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
                            helpers, the admin moderators
     staff                  a helper and up: name and level of each
                            helper and up
+    public_url, file_settings, delete_file, release_sources
+                           the admin's; described where they belong
     account                name: its level, its messages; to its owner
                            its trust counts; to a helper and up who
                            trusted it and whom it trusted
@@ -235,13 +280,17 @@ File... under a message's field picks a file (the browser's picker; on
 native the client's list of <user>/exports) and uploads it as the
 request "upload" {name, data in hex}; its link goes in at the cursor,
 ![name](/f/<id>/name) for an image. A file is 16 MiB at most, 20 an hour
-(an admin any number), and a new account uploads none but a patch
-(Tickets, above). A PNG or JPEG is
+(an admin any number). A new account uploads a patch (Tickets, above)
+or an image, one a thread; a below-member's image is drawn only for
+helpers until one shows it to everyone (vet_file) or its account becomes
+a member ([HEARTH_NEW_IMAGES]). A PNG or JPEG is
 read (stb_image, those two only, 40 million pixels at most) and written
 again within 1920x1080 (the short side 1080), a JPEG at quality 85:
 nothing else of the upload is kept, its metadata with it. Any other
 file is kept as it came and served as application/octet-stream.
 
+A file's id is random (under 2^46), and /f/ refuses a file all of whose
+messages are hidden, held or in a hidden thread ([SEC_HEARTH_FILES]).
 A file's use is a fetch of /f/<id>, which robots.txt asks crawlers not
 to make. The admin's request "file_settings" {budget, lod2_after,
 delete_after} (bytes and seconds; 1 GiB, 182 and 365 days) says what is
@@ -292,7 +341,8 @@ message hidden by reports it made. The reports of one network (an IPv4
 is hidden, "Reported; hidden until a moderator looks", unless its author
 is a helper or up; the moderator hides it (with a statement) or
 dismisses the report, which shows it again. Search on the HTML face is
-30 a minute per address (429 after).
+30 a minute per address (429 after), and every page 120 a minute per
+address.
 
 The environment
 ---------------

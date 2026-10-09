@@ -112,8 +112,9 @@ sandbox: a Continue list and a search over the apps, saves and servers, which
 lists a local app, a remote server, and whatever the tree's launcher files
 offer. Its screens.lua is where every launch UI's app starts
 end: the local app list, connecting, and the screens a local server starts
-behind, run in the sandbox by client/launch_grid.lua. When disconnecting from
-a server, the whole client window is closed and reopened.
+behind, run in the sandbox by client/launch_grid.lua. Leaving an app
+(leave(), leave_to_menu()) goes back to the launch UI in the same process;
+disconnect() shuts the client down.
 
 The launch grid
 ---------------
@@ -167,7 +168,10 @@ level as key=value lines through the server's -u, kept as
 packet -- never the environment. A builtin module is not a target yet.
 
 `buildat -a kind/name/id` runs one action on boot, with the grid
-underneath it. The grid's order: explicit order first, then by kind -- the menu's own,
+underneath it: app/<name>/<id> (game/ is read as app/), builtin/...,
+extension/..., dev/<name>/<id> for an app in <user>/dev_apps,
+installed/<author>.<name>@<version>/<id> for an Aitta install; <id> is
+the one the launcher file gives its tile. The grid's order: explicit order first, then by kind -- the menu's own,
 apps and installed apps, builtins, extensions -- then label.
 The sandbox's refusal checks are not on the grid: they run in the packaging
 smoke test and the weekly hunt (extensions/sandbox_test/tests/), never at a

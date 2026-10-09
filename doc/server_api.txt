@@ -21,7 +21,13 @@ the hash of its sources), an optional api.h other modules include to talk
 to it, and by convention client_lua/ and client_data/ that builtin/client_lua
 and builtin/client_data ship to the client. Modules under builtin/ are the
 engine's own; an app's are under apps/<app>/. The engine loads
-builtin/loader first, and it reads the rest.
+builtin/loader first, and it reads the rest. Once the load order is
+known, the modules whose build is not current are compiled side by side,
+the largest first, on at most half the usable cores, each further
+compiler only while free memory covers 1 GiB for each running one plus a
+1 GiB reserve (BUILDAT_COMPILE_RESERVE_MB raises it); loading and init()
+stay one at a time, in order. --compile-only compiles and loads them,
+then exits (1 naming the module that failed).
 
 <module>.cpp defines a struct deriving from interface::Module and exports
 one function:
@@ -102,7 +108,11 @@ ModuleDependency (module, optional)
 
 interface/server_config.h -- interface::ServerConfig, the typedef of
 server::Config: get<T>(name) for the keys server/config.cpp sets
-(network_port, rccpp_build_path, share_path, user_path, ...)
+(network_port, rccpp_build_path, share_path, user_path, ...).
+launch_param(u, key, &refused): one key of the untrusted -u lines, a
+directory name's shape (1 to 64 letters, digits, '_', '-') or "", refused
+set when the key was there and its value was not ([SHARED_HELPERS]: one
+for vanilla, floorplanner and accounts).
 
 interface/event.h -- interface::Event: a Type (an integer from
 Event::t("name"), the global registry's) and an optional Private, the
@@ -110,7 +120,10 @@ payload struct deriving from Event::Private. EventRegistry names types
 (find(name) answers 0 for a name with no type yet, without making one, for
 a name off the network); getGlobalEventRegistry(). The EVENT_VOID /
 EVENT_TYPE / EVENT_VOIDN / EVENT_TYPEN macros are the dispatch inside
-event().
+event(): the N forms look their type up once (a static per site), and a
+match returns from event() after its handler ([EVENT_DISPATCH]), so work
+for every event goes in a caller of a function that holds only the list;
+an event with no payload or the wrong one throws.
 
 interface/magic_event.h, interface/magic_event_handler.h -- Urho3D events on
 the server side: MagicEvent carries an Urho3D StringHash and VariantMap as
@@ -164,13 +177,18 @@ every user-given path goes through), path_exists, copy_file, remove_all,
 file_size, directory_tree_size, check_file_extension,
 strip_file_extension, strip_file_name.
 
-interface/os.h -- interface::os: time_us (monotonic), sleep_us,
-get_current_exe_path, get_sibling_exe_path (buildat_server beside buildat).
+interface/os.h -- interface::os: time_us (monotonic), wall_us (the
+calendar; see "Simulated time" in developer_notes.txt), sleep_us,
+utc_tm(seconds) (a UTC struct tm), get_current_exe_path,
+get_sibling_exe_path (buildat_server beside buildat).
 
 interface/process.h -- interface::process: start(exe, args, ExecOptions) ->
 Handle, is_running, request_terminate, terminate, kill_force, shell_exec,
 get_environment_variable. A child gets the parent's environment with
 opts.env over it; is_running reaps a child that has exited.
+open_with_system(target): a link or a folder handed to the desk
+(ShellExecute on Windows, open on macOS, xdg-open elsewhere), not waited
+for; a target with a quote in it is refused.
 
 interface/debug.h -- backtraces: log_current_backtrace,
 get_current_backtrace / get_exception_backtrace (StoredBacktrace),
@@ -179,13 +197,19 @@ that called into this one), init_signal_handlers(SigConfig) -- the SIGSEGV
 and SIGABRT handlers that write "Crash: ..." and the trace to stderr, which
 log_set_file() sends into the log file. watchdog_on_freeze(f): what a
 30 s freeze runs on the frozen thread besides the log (Linux only).
+set_crash_dump_dir(dir, exe) ([WIN_MINIDUMP], Windows; nothing elsewhere):
+a crash also writes <dir>/crash-<exe>-<time>.dmp, the newest five kept;
+crash_dump_untold(dir), the newest not told about yet, then marked told.
+BUILDAT_DEBUG_CRASH=<exe> crashes that exe on purpose, for the test.
 
 interface/compress.h -- compress_zlib / decompress_zlib,
 compress_deflate_raw / decompress_deflate_raw, compress_zstd /
 decompress_zstd, on strings. A decompressor writes DECOMPRESS_MAX (256 MB)
 at most unless the caller passes its own max_out; past it is an exception.
 interface/sha1.h, interface/sha256.h -- calculate(data) -> the digest,
-hex(digest).
+hex(digest); sha256's unhex(h) (throws on an odd length or a non-hex
+digit) and is_hex(s, len). core/json.h's jstr(v, key, def) and jint(v,
+key, def) read an object's string or integer, def for anything else.
 interface/bignum.h -- big-endian byte-string integers: add, mul, mod,
 sub_mod, mul_mod, mod_exp; random_bytes(n) from the platform's source.
 interface/http.h -- http_get(url) -> body, http_post(url, body,
@@ -208,7 +232,25 @@ a page ([HEARTH_MVP]), through the bundled md4c (3rdparty/md4c): CommonMark
 with GitHub's tables, strikethrough, task lists and autolinks, and
 ||spoilers||. Raw HTML is text, a link or image that is not http, https,
 mailto or relative is its text alone, and an image is a link, never
-loaded.
+loaded, but for the Hearth's own ("/f/<id>...", relative), an <img>.
+"#1234" is a link to /t/1234 (class "ref"), "@name" one to /u/name.
+interface/address.h -- host, port and URL parsing in one place
+([REWORK_FIXES]): split_host_port(a, &host, &port, def) takes "host",
+"host:port", "[v6]", "[v6]:port" and a bare v6 (no port), def when there
+is no port, false for an empty host, an unclosed bracket or a port not 1
+to 65535; join_host_port(host, port) brackets a v6 host; parse_url(u,
+&Url, def_port) splits "scheme://hostport[/path]" into Url {scheme (lower
+case), host, port, path, port_given}, http and ws defaulting to 80, https
+and wss to 443. util/address_check.sh.
+interface/web_brand.h -- web_brand ([HTML_BRAND]): Buildat's look on the
+HTML an app serves (Hearth's pages, the Starport's): css, logo (an <img>
+of /brand/logo.png); html(s), text escaped for HTML and attributes;
+cut(s, n) at a UTF-8 character's start with "..."; page(title, name,
+content), a read-only page with the header and the link into the web
+client ([FRONT_PAGES]; content already escaped); file(share_path, name,
+&data, &type), what /brand/<name> serves (overpass.ttf,
+overpass_mono.ttf, logo.png from the share's client/data), so a page
+loads nothing from another origin.
 interface/zip.h -- zip_list(path) -> ZipEntry list, zip_extract(path, dir).
 interface/noise.h -- Luanti's noise as it is: PseudoRandom, NoiseParams,
 Noise (perlin, fbm, the 2D and 3D maps), easeCurve; builtin/luanti_mapgen's.
@@ -220,7 +262,8 @@ interface/voxel.h -- the voxel data model. VoxelDefinition (name: a
 VoxelName of block name and segment; textures, six AtlasSegmentDefinitions;
 edge_material_id, face_draw_type, physically_solid, the shape's VoxelQuads,
 tile_turns, variants (VoxelVariant: what a param does), tint_ramp,
-sag_extent), VoxelRegistry (createVoxelRegistry(): add_voxel, get_by_id /
+sag_extent, collision_boxes: what stops the player in a solid voxel that
+is not the whole cube, a variant's turned with it, [VL_STAIRS]), VoxelRegistry (createVoxelRegistry(): add_voxel, get_by_id /
 get_by_name, get_all, get_count; set_format / get_format; set_look_selector
 / get_look_selector; serialize, and a cache of CachedVoxelDefinition per
 id), VoxelFormat (the planes and the roles: VoxelField {plane, shift,
@@ -311,7 +354,13 @@ port: a request under /api/, or under a prefix the module claimed with
 claim_http_path(prefix) ([HEARTH_MVP]: Hearth's pages), comes as
 "network:http_request" (HttpRequest: peer, method, path, query, body of 64
 KiB at most, address) and is answered with http_respond(peer, status,
-content_type, body). The web client's files are never claimed: it is at
+content_type, body); HttpRequest::param(key) and query_value(query, key)
+read a query's value, '+' and %XX decoded. serve_brand(server, r)
+answers /brand/<name> (web_brand.h's fonts and logo). RateTable
+([SHARED_HELPERS], Starport's, Aitta's and Hearth's): ok(what, who, max,
+per) says whether one more fits in per seconds, bounded (a long key
+hashed, passed windows swept, a new key refused past a ceiling). The
+web client's files are never claimed: it is at
 /play and /app ([PLAY_PATH]: a link picks by the listing's kind, world
 or arena -> /play), /index.html, and / unless "/" is claimed. /health
 (JSON: app, version, uptime_s, players, tick_gap_ms_avg and _max over
@@ -378,7 +427,8 @@ linked_count (the Starport's side, 10d and 10g). level(name) and
 set_level(name, lv, by) ([TRUST_LADDER]): an account's trust level, a
 number saved with it (LV_NEW 0, LV_MEMBER 10, LV_HELPER 20,
 LV_MODERATOR 30; the admin is LV_ADMIN 40), named by level_name() (Guest,
-Resident, Keeper, Steward, Host). LV_MEMBER and up is trusted: open
+Resident, Keeper, Steward, Host); accounts::level(server, name) is the
+same from another module, for an app's admin and moderator tests. LV_MEMBER and up is trusted: open
 registration takes at most 5 untrusted accounts made in 30 days from one
 network, address_bin(), and 50 a day in all. With `by`, one sets only
 below one's own level, from LV_MODERATOR; a moderator has the Server
@@ -427,11 +477,15 @@ create(name) (split on purpose: a typo cannot start a new game) -> Save*,
 close, list() -> SaveInfo (name, modified_us), remove, valid_name. A Save
 has path() and store(name) -> Store, a sqlite object store with get / set /
 remove / list / batch, that modules keep their data in under
-<user>/apps/<app_id>/saves/<name>.
+<user>/apps/<app_id>/saves/<name>. storage::pack(value) / unpack(data,
+value): a value as a store holds it, cereal's portable binary; unpack is
+false for data that does not read as the type.
 
 builtin/voxelworld/api.h -- voxelworld::Instance, one per scene
 (access(server, scene, cb)): the voxel world. get_voxel_reg(); set_save /
-save; the geometry of it (get_section_size_voxels, get_chunk_size_voxels
+save; set_name_aliases(old -> new), before set_save: a saved name the game
+no longer registers is read as the voxel its alias names and written back
+under the new name, rather than kept unknown; the geometry of it (get_section_size_voxels, get_chunk_size_voxels
 and their regions); sections (load_or_generate_section,
 load_section_no_generate, set_load_points (LoadPoint), set_stream_budget,
 unload_section, is_section_loaded / is_section_generated /
@@ -498,7 +552,7 @@ builtin/network/api.h: PeerId, address_bin, address_key, PeerInfo, Id, Packet, T
 builtin/replicate/api.h: SceneReference, PeerId, PeerJoinedScene, PeerLeftScene, Interface, assign_scene_to_peer, find_peers_on_scene, find_peers_that_know_node, set_node_filter, refresh_peer_nodes, emit_after_next_sync, sync_node_immediate, access
 builtin/starport_announce/api.h: IdLogin, Interface, accepts_ids, ids_mode, starports, set_game, set_ids_mode, is_blocked, announce_soon, verify_id_token, access
 builtin/storage/api.h: Store, ~Store, get, set, remove, list, batch, Save, ~Save, store, path, SaveInfo, Interface, open, create, close, valid_name, access, pack, os, ar, unpack, is
-builtin/voxelworld/api.h: SceneReference, GenerationRequest, SectionLoaded, SectionUnloaded, NodeVolumeUpdated, LoadPoint, CommitHook, ~CommitHook, in_thread, in_scene, Instance, get_voxel_reg, set_save, save, get_unknown_voxels, add_commit_hook, get_section_size_voxels, get_section_region_voxels, get_chunk_size_voxels, get_chunk_region_voxels, load_or_generate_section, load_section_no_generate, set_load_points, get_loaded_sections, set_stream_budget, unload_section, is_section_loaded, is_section_generated, set_section_generated, set_voxel, get_volume, set_volume, merge_volume, set_light_maintained, set_skylight_enabled, relight_region, relight_region_later, relight_stale, set_light_deferred, num_buffers_loaded, commit, get_voxel, set_sample, get_sample, Interface, create_instance, delete_instance, get_instance, access
+builtin/voxelworld/api.h: SceneReference, GenerationRequest, SectionLoaded, SectionUnloaded, NodeVolumeUpdated, LoadPoint, CommitHook, ~CommitHook, in_thread, in_scene, Instance, get_voxel_reg, set_save, set_name_aliases, save, get_unknown_voxels, add_commit_hook, get_section_size_voxels, get_section_region_voxels, get_chunk_size_voxels, get_chunk_region_voxels, load_or_generate_section, load_section_no_generate, set_load_points, get_loaded_sections, set_stream_budget, unload_section, is_section_loaded, is_section_generated, set_section_generated, set_voxel, get_volume, set_volume, merge_volume, set_light_maintained, set_skylight_enabled, relight_region, relight_region_later, relight_stale, set_light_deferred, num_buffers_loaded, commit, get_voxel, set_sample, get_sample, Interface, create_instance, delete_instance, get_instance, access
 builtin/worldgen/api.h: SceneReference, QueueModifiedEvent, SectionGenerated, GeneratorInterface, ~GeneratorInterface, get_padding_voxels, generate, Instance, set_generator, enable, get_num_sections_queued, Interface, create_instance, delete_instance, get_instance, access
 interface/address.h: split_host_port, join_host_port, Url, parse_url
 interface/aitta.h: keygen, public_of, sign, verify, verify_hash, check_manifest, kind_of, package_files, pack, install

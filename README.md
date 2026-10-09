@@ -122,6 +122,9 @@ macOS), which is what an installed copy wants. A portable build does the
 same when a file named `installed` is beside its executable, as the Windows
 installer puts it. `-C` and `-D` override either.
 
+The build compiles through ccache when it finds one (not the web build);
+`-DBUILDAT_CCACHE=OFF` goes without.
+
 Optional: `-DURHO3D_LUAJIT=TRUE` builds the bundled LuaJIT instead of Lua.
 `URHO3D_HOME` still overrides the bundled tree if you need an external build.
 
@@ -293,3 +296,7 @@ admin, to `%LOCALAPPDATA%\Programs\Buildat`, with a Start menu entry and
 an uninstaller in Add/Remove Programs. The installed copy keeps its data
 in `%APPDATA%\buildat` and `%LOCALAPPDATA%\buildat\cache`; the uninstall
 leaves them. Neither is signed, so Windows names no publisher.
+
+A crash on Windows writes a minidump into the cache,
+`crash-<exe>-<time>.dmp` (the newest five kept, the sandboxed server's
+too), and the launcher says so at the next start.

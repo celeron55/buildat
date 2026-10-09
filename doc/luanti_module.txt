@@ -126,7 +126,14 @@ Luanti with buildat bolted to the side.
     luanti.cpp          The module. A Lua state, four functions Lua 5.1 does
                         not have of its own -- a directory listing, the log,
                         the clock, a PNG encoder -- and the order things are
-                        loaded in.
+                        loaded in. It includes the rest of the C++:
+                        lua_bindings.h (most of the C functions the Lua
+                        calls), requests.h (the client's requests, the node
+                        searches), media.h (the game's media served),
+                        registry.h (the voxel registry from the node
+                        definitions), shapes.h (the node shapes as quads),
+                        mapgen_params.h (what a vendored mapgen is told),
+                        import.h (the world importer), mapblock.h.
     lua/bootstrap.lua   What the vendored builtin expects to find already
                         registered: the core table, paths, settings, the
                         content id allocator, mod storage, and the stub list.
@@ -138,6 +145,12 @@ Luanti with buildat bolted to the side.
                         Luanti does and devtest checks for.
     lua/modlist.lua     What a mod is and what order mods load in.
     lua/modloader.lua   Finding the game's mods and running them.
+    lua/stubs.lua       The stub list; lua/mapgen.lua what a mapgen is
+                        told, lua/dig.lua the digging, lua/sky_hud.lua a
+                        player's sky and HUD; entity.lua, craft.lua and the
+                        rest one subject each.
+    client_lua/         The client half: module.lua, and bodies.lua (the
+                        objects' bodies).
     lua/test.lua        The parts that are arithmetic rather than
                         arrangement. Runs under plain lua, no engine:
                         `lua builtin/luanti/lua/test.lua`.
@@ -157,7 +170,7 @@ respawn, forms and HUD run under this module, and a scripted player
 (builtin/luanti/test/drive.py) climbs its survival ladder from wood to
 an iron ingot and torches on its own. The remaining stubs -- what a mod
 calls that is not written yet answers as a stub that logs once and returns
-nothing -- are listed at the bottom of lua/bootstrap.lua, and are what the
+nothing -- are listed in lua/stubs.lua, and are what the
 plan says is not in this at all: IPC, the async environment, SSCSM; HTTP is
 a stub until [HTTP_API].
 
@@ -193,6 +206,23 @@ bans.
 The plain game around it is apps/vanilla: a launch grid tile per
 installed game, worlds, imports from the import folder, ContentDB, settings.
 
+A world's server presets ([SERVER_PRESETS]): world.mt's buildat_preset --
+"VPS / Raspberry Pi", "Dedicated server", "Desktop" or "Custom" -- sets
+max_block_send_distance, max_block_generate_distance,
+active_object_send_range_blocks, liquid_loop_max and item_entity_ttl. A
+world with no preset gets its context's as it starts: headless is the VPS
+one, a world the client starts Desktop; one with values of its own and no
+preset is Custom. "Server performance..." in the world menu (for a running
+server's admin, the pause menu's "Worlds...") is the form. Each client is
+sent the objects within active_object_send_range_blocks of its player (in
+64-node sections, 1 to 16), and their looks as they come into range.
+
+Fly, fast and noclip are kept in the player's meta per save and handed
+back on join. Distant terrain is drawn at full detail by default (the
+settings' distant_detail; the old lod_detail key is not read). A media
+name two mods share is served from the mod loaded later, a directory
+before its subfolders, "_" and "." subfolders skipped, as Luanti does.
+
 What it is checked by: the fixtures in builtin/luanti/test/*.lua (one
 feature each, run against a server with BUILDAT_LUANTI_LUA), the fuzz run
 (test/fuzz.sh: a seeded random walk with invariants asserted on the server),
@@ -203,10 +233,9 @@ Luanti and the path trace, read by probes.sh), and util/bench_worldgen.sh.
 
 Environment variables the module and its runners read: BUILDAT_LUANTI_GAME,
 _SAVE, _LUA (a fixture file), _PBR (the render mode), _LINEAR, _TONEMAP,
-_CLOUD_N, _TRANSLUCENCY, _JIT, _LUAPROF, _ABLATE (diagnostics),
-_DAWN_GLOW, _DAWN_AMBIENT, _DUSK_BAND, _DUSK_AWAY, _DUSK_SKY, _DUSK_CLOUD (the pbr sky's dawn and
-dusk glow, apps/vanilla/main/client_lua/luanti_sky.lua), and
-LUANTI_EXTRA_IMPORT_PATH; a player never sets any of them -- the settings
+_CLOUD_N, _TRANSLUCENCY, _JIT, _LUAPROF, _ABLATE (diagnostics), and
+LUANTI_EXTRA_IMPORT_PATH (the pbr sky's dawn and dusk knobs are fixed at
+their picks in apps/vanilla/main/client_lua/luanti_sky.lua); a player never sets any of them -- the settings
 menu holds what a player changes.
 
 The interface
@@ -224,6 +253,12 @@ read for which game it wants, or imported, and is never written to.
 core.get_worldpath() is <save>/luanti/ rather than the save's own root, so
 that a mod writing through it -- which is normal, and which games depend on
 -- cannot land on save.sqlite.
+
+Aliases resolve as Luanti's do: a node name list (an ABM's, an LBM's,
+find_nodes_*) matches the node an alias in it names, and a node the save
+holds under a name that is now an alias -- unregistered, or replaced by
+register_alias_force -- is read as the new node and written back under its
+name (voxelworld's set_name_aliases()). builtin/luanti/test/alias.sh.
 
 load_lua() is the whole extension story: a buildat module hands Lua into the
 Luanti environment and that Lua does whatever the Luanti API allows.
