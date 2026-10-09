@@ -523,7 +523,7 @@ end
 -- simplified: kept for the session in memory: a server's client Lua may
 -- not write the client's cache (api.lua, cache_path), so a new run asks
 -- again. The server keeps the thumbnail made, so that is a read
-local thumbs = {}
+local thumbs, thumbs_waiting = {}, {}
 local function thumb_picture(parent, id, v)
 	local b = parent:CreateChild("BorderImage")
 	b:SetFixedSize(0, 0)
@@ -535,17 +535,19 @@ local function thumb_picture(parent, id, v)
 			v:fit()
 		end)
 	end
-	local t = thumbs[id]
-	if type(t) == "table" then
-		t[#t + 1] = show
+	-- A texture is a table too (the sandbox's wrapper): the ones waiting
+	-- for theirs are kept apart
+	if thumbs[id] then
+		show(thumbs[id])
 		return b
-	elseif t then
-		show(t)
+	elseif thumbs_waiting[id] then
+		table.insert(thumbs_waiting[id], show)
 		return b
 	end
-	thumbs[id] = {show}
+	thumbs_waiting[id] = {show}
 	req("thumb", {file = id}, function(r)
-		local waiting = thumbs[id]
+		local waiting = thumbs_waiting[id]
+		thumbs_waiting[id] = nil
 		local img = magic.Image:new()
 		local bytes = tostring(r.data):gsub("%x%x", function(x)
 			return string.char(tonumber(x, 16))
@@ -553,7 +555,6 @@ local function thumb_picture(parent, id, v)
 		if not magic.image_load_data(img, bytes) then
 			log:warning("hearth: the thumbnail of file " .. id ..
 					" could not be read (" .. #bytes .. " bytes)")
-			thumbs[id] = nil
 			return
 		end
 		local tex = magic.Texture2D:new()
@@ -564,7 +565,7 @@ local function thumb_picture(parent, id, v)
 		end
 	end, function(why)
 		log:warning("hearth: the thumbnail of file " .. id .. ": " .. tostring(why))
-		thumbs[id] = nil
+		thumbs_waiting[id] = nil
 	end)
 	return b
 end
@@ -1115,18 +1116,31 @@ show_thread = function(id, at, missing)
 			-- [HEARTH_ATTACHMENTS]: the images the text draws, in its order,
 			-- then its files, an image the text does not draw with its
 			-- thumbnail
+			-- [HEARTH_NEW_IMAGES]: a new account's image not shown yet
+			-- is only its entry, but to a helper, who says whether everyone
+			-- sees it
 			for _, f in ipairs(m.files or {}) do
-				if f.drawn then
+				if f.drawn and f.shown ~= false then
 					thumb_picture(box, f.id, v)
 				end
 			end
 			for _, f in ipairs(m.files or {}) do
-				if f.image and not f.drawn then
+				if f.image and not f.drawn and f.shown ~= false then
 					thumb_picture(box, f.id, v)
 				end
 				text(box, f.name .. " -- " .. (f.type == "image/png" and
 						"PNG image" or f.type == "image/jpeg" and "JPEG image" or
-						"file") .. ", " .. size_text(f.bytes), DIM, W - 32)
+						"file") .. ", " .. size_text(f.bytes) ..
+						(f.vetted == false and "; a new account's image, " ..
+						(f.shown and "not shown to everyone yet" or
+						"not shown until a helper says") or ""), DIM, W - 32)
+				if me.helper and f.image and (f.vetted == false or f.vet == 1) then
+					local r = row(box)
+					button(r, f.vetted and "Take back" or "Show to everyone",
+							function()
+						req("vet_file", {file = f.id, on = not f.vetted}, redraw)
+					end)
+				end
 			end
 			-- [HEARTH_THANKS]: the count at the top right, as dim as the
 			-- author's name

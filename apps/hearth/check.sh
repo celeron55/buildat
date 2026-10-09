@@ -548,6 +548,66 @@ rep carol carolpass1234 carol12d.log
 [ "$(get /m/$B1)" = 200 ] && ! grep -q "Reported; hidden" "$t/page" ||
 	fail "a report weighed after its reporter's was overturned"
 echo "ok: held links approved by a helper, reports by network"
+
+# 13. [HEARTH_NEW_IMAGES]: a new account uploads an image (no other file
+# but a patch), names one of its images a thread; it is not drawn but
+# for a helper, whose "show to everyone" draws it for all, in the log; a
+# helper takes one back; the account trusted, its other images are
+# shown, the one taken back not
+client admin checkpass12 "$t/admin13a.log" '' "BUILDAT_HEARTH_ADMIN=add frank frankpass1234"
+client frank frankpass1234 "$t/frank13.log" "{\"cmd\":\"upload\",\"name\":\"one.png\",\"data\":\"$(cat "$t/up_png")\"}
+{\"cmd\":\"upload\",\"name\":\"two.png\",\"data\":\"$(cat "$t/up_png")\"}
+{\"cmd\":\"upload\",\"name\":\"three.png\",\"data\":\"$(cat "$t/up_png")\"}
+{\"cmd\":\"upload\",\"name\":\"a.txt\",\"data\":\"68690a\"}"
+I1=$(res "$t/frank13.log" 1001 'r["result"]["id"]')
+I2=$(res "$t/frank13.log" 1002 'r["result"]["id"]')
+I3=$(res "$t/frank13.log" 1003 'r["result"]["id"]')
+[ "$I1" -gt 0 ] && [ "$I2" -gt 0 ] && [ "$I3" -gt 0 ] ||
+	fail "a new account's images: $(answer "$t/frank13.log" 1001 | head -c 300)"
+answer "$t/frank13.log" 1004 | grep -q "no files yet but a patch or an image" ||
+	fail "a new account's other file: $(answer "$t/frank13.log" 1004)"
+img(){ echo "[![$1](/f/$2/thumb)](/f/$2/$1)"; }
+client frank frankpass1234 "$t/frank13b.log" "{\"cmd\":\"new_thread\",\"topic\":1,\"title\":\"My lamp\",\"body\":\"$(img one.png $I1)\"}"
+TN=$(num "$t/frank13b.log" 1001)
+[ -n "$TN" ] || fail "a new account's image in a thread: $(answer "$t/frank13b.log" 1001)"
+client frank frankpass1234 "$t/frank13c.log" "{\"cmd\":\"reply\",\"thread\":$TN,\"body\":\"$(img two.png $I2)\"}
+{\"cmd\":\"reply\",\"thread\":$TN,\"body\":\"again $(img one.png $I1)\"}
+{\"cmd\":\"new_thread\",\"topic\":1,\"title\":\"Other lamp\",\"body\":\"$(img two.png $I2)\"}
+{\"cmd\":\"reply\",\"thread\":1,\"body\":\"$(img three.png $I3)\"}"
+answer "$t/frank13c.log" 1001 | grep -q "one image a thread" ||
+	fail "a second image in the thread: $(answer "$t/frank13c.log" 1001)"
+for i in 1002 1003 1004; do
+	answer "$t/frank13c.log" $i | grep -q '"ok":true' ||
+		fail "frank's post $i: $(answer "$t/frank13c.log" $i)"
+done
+TN2=$(num "$t/frank13c.log" 1003)
+M3=$(num "$t/frank13c.log" 1004)
+shown(){ # log id: the first message's files' shown
+	res "$1" $2 '[f["shown"] for f in r["result"]["list"][0]["files"]]'
+}
+[ "$(get /t/$TN)" = 200 ] && ! grep -q "<img src=\"/f/$I1/" "$t/page" &&
+	grep -q "a new account's image, not shown until a helper says" "$t/page" ||
+	fail "a new account's image drawn on the page"
+client erin erinpass1234 "$t/erin13.log" "{\"cmd\":\"thread\",\"thread\":$TN}"
+client carol carolpass1234 "$t/carol13.log" "{\"cmd\":\"thread\",\"thread\":$TN}
+{\"cmd\":\"vet_file\",\"file\":$I1,\"on\":true}
+{\"cmd\":\"vet_file\",\"file\":$I2,\"on\":false}"
+client erin erinpass1234 "$t/erin13b.log" "{\"cmd\":\"thread\",\"thread\":$TN}
+{\"cmd\":\"vet_file\",\"file\":$I3,\"on\":true}"
+[ "$(shown "$t/erin13.log" 1001)" = "[False]" ] && [ "$(shown "$t/carol13.log" 1001)" = "[True]" ] &&
+	[ "$(shown "$t/erin13b.log" 1001)" = "[True]" ] ||
+	fail "shown to a member, a helper, then the member: $(shown "$t/erin13.log" 1001) $(shown "$t/carol13.log" 1001) $(shown "$t/erin13b.log" 1001)"
+answer "$t/erin13b.log" 1002 | grep -q "says whether everyone sees" || fail "a member vetted an image"
+grep -aq "carol showed everyone image $I1" "$t/srv2.log" || fail "the log has no vetting"
+grep -aq "carol took back image $I2" "$t/srv2.log" || fail "the log has no taking back"
+[ "$(get /t/$TN)" = 200 ] && grep -q "<img src=\"/f/$I1/thumb\"" "$t/page" ||
+	fail "the vetted image not drawn on the page"
+client admin checkpass12 "$t/admin13b.log" '{"cmd":"trust","name":"frank","on":true}'
+[ "$(get /m/$M3)" = 200 ] && grep -q "<img src=\"/f/$I3/thumb\"" "$t/page" ||
+	fail "a trusted account's earlier image not shown"
+[ "$(get /t/$TN2)" = 200 ] && ! grep -q "<img src=\"/f/$I2/" "$t/page" ||
+	fail "an image taken back shown once its account is trusted"
+echo "ok: a new account's one image a thread, shown once a helper says or it is trusted"
 # A Steward (a moderator): in the Server window's Accounts page, levels
 # below its own and kicks and bans, but no password reset
 client admin checkpass12 "$t/admin12c.log" '{"cmd":"level","name":"dave","level":30}'
@@ -564,4 +624,4 @@ grep -aq "admin result: erin is a Guest" "$t/dave12b.log" || fail "a Steward too
 echo "ok: a Steward's Accounts page"
 
 [ $n429 -gt 0 ] || fail "no page limit per address"
-echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; files crushed, served and swept, thumbnails drawn and listed; a patch ticket by a new account applied with git am; a long thread read in parts; read positions, following, an account page, a topic edited; a held link approved by a helper, reports weighed by network, a Steward's Accounts page; pages limited"
+echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; files crushed, served and swept, thumbnails drawn and listed; a new account's one image a thread, vetted by a helper; a patch ticket by a new account applied with git am; a long thread read in parts; read positions, following, an account page, a topic edited; a held link approved by a helper, reports weighed by network, a Steward's Accounts page; pages limited"

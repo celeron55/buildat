@@ -438,6 +438,10 @@ static const char *const COLUMNS_ADDED[][3] = {
 	// for a file that is not an image, or one uploaded before thumbnails
 	// until its first is asked for
 	{"files", "thumb", "BLOB NOT NULL DEFAULT x''"},
+	// [HEARTH_NEW_IMAGES]: 1 shown to everyone (a member's upload, or a
+	// helper said), 0 as its uploader's level is (a new account's, shown
+	// once it is a member), -1 taken back by a helper
+	{"files", "vetted", "INTEGER NOT NULL DEFAULT 1"},
 };
 // What a poster picks a thread to be ([PACKAGE_SUBJECT]); "release" is
 // Hearth's own
@@ -880,11 +884,21 @@ struct Module: public interface::Module
 		return true;
 	}
 
+	// [HEARTH_NEW_IMAGES] Whether a file is shown to everyone, by its
+	// `vetted` (files) and its uploader's level now: a new account's once
+	// it is a member, unless a helper took it back
+	bool file_vetted(int64_t vetted, const ss_ &uploader)
+	{
+		return vetted > 0 || (vetted == 0 && level(uploader) >= LV_MEMBER);
+	}
+
 	// [HEARTH_ATTACHMENTS] The files a message names, in its order: id,
 	// name, type, bytes, and drawn when its text draws it (an image span
 	// of /f/<id>, as the thumbnail or in full). A patch is left out: it
 	// is shown whole under the message already. Gone ones are left out.
-	json::Value files_of(const ss_ &body)
+	// [HEARTH_NEW_IMAGES]: vet (files.vetted), vetted, and shown: vetted,
+	// or the viewer a helper or above (`helper`)
+	json::Value files_of(const ss_ &body, bool helper = false)
 	{
 		json::Value out = json::array();
 		const std::vector<int64_t> ids = file_ids(body);
@@ -892,8 +906,8 @@ struct Module: public interface::Module
 			return out;
 		const ss_ h = interface::markup::to_html(body);
 		for(int64_t id : ids){
-			Q f(m_db, "SELECT name, type, length(data), lod FROM files "
-					"WHERE id = ?");
+			Q f(m_db, "SELECT name, type, length(data), lod, vetted, uploader "
+					"FROM files WHERE id = ?");
 			f.b(id);
 			if(!f.step() || f.s(1) == PATCH_TYPE)
 				continue;
@@ -903,6 +917,10 @@ struct Module: public interface::Module
 			v.set("type", f.s(1));
 			v.set("bytes", f.i(2));
 			v.set("image", f.i(3) > 0);
+			const bool vetted = file_vetted(f.i(4), f.s(5));
+			v.set("vet", f.i(4));
+			v.set("vetted", vetted);
+			v.set("shown", vetted || helper);
 			v.set("drawn", h.find("<img src=\"/f/"+itos(id)+"/") != ss_::npos ||
 					h.find("<img src=\"/f/"+itos(id)+"\"") != ss_::npos);
 			out.append(v);
@@ -1439,6 +1457,9 @@ struct Module: public interface::Module
 		if(!q.step())
 			return json::Value();
 		json::Value t = thread_row(q);
+		// [HEARTH_NEW_IMAGES]: a new account's images not shown yet are
+		// shown to a helper, who says whether everyone sees them
+		const bool helper = !viewer.empty() && level(viewer) >= LV_HELPER;
 		// The tracker link, where it is shown; the one waiting for its
 		// domain to its setter and the admin
 		Q l(m_db, "SELECT link, link_by FROM threads WHERE id = ?");
@@ -1477,7 +1498,7 @@ struct Module: public interface::Module
 			if(hidden)
 				v.set("hidden_text", hidden_text(m.i(5), m.s(6)));
 			v.set("patches", patches_in(jstr(v, "body")));
-			v.set("files", files_of(jstr(v, "body")));
+			v.set("files", files_of(jstr(v, "body"), helper));
 			// A message's own bytes besides its body: many short ones fill
 			// a part too
 			bytes += 256 + jstr(v, "body").size();
@@ -1835,8 +1856,10 @@ struct Module: public interface::Module
 				html(jstr(m, "author"))+"</a></b>, <a href=\"/m/"+id+"\">"+
 				time_text(jint(m, "created"))+"</a>"+(jint(m, "edited") ?
 				" (edited "+time_text(jint(m, "edited"))+")" : "")+"</p>"+
-				interface::markup::to_html(jstr(m, "body"))+patches_html(m)+
-				files_html(m)+"</div>\n";
+				unshown_images(interface::markup::to_html(jstr(m, "body")),
+				m.get("files").is_array() ? m.get("files") :
+				files_of(jstr(m, "body")))+patches_html(m)+files_html(m)+
+				"</div>\n";
 	}
 
 	// A message's patches inline, the review being in the thread
@@ -1875,6 +1898,32 @@ struct Module: public interface::Module
 				itos((b + 512 * 1024) / (1024 * 1024))+" MiB";
 	}
 
+	// [HEARTH_NEW_IMAGES] What a reader sees for an image not shown yet
+	static constexpr const char *NOT_SHOWN = "a new account's image, not "
+			"shown until a helper says";
+
+	// [HEARTH_NEW_IMAGES] The message's HTML with its images not shown to
+	// this viewer (`files`, files_of's) as a line saying so; the link
+	// round one stays, opening it being the reader's own choice
+	static ss_ unshown_images(ss_ h, const json::Value &files)
+	{
+		for(unsigned i = 0; i < files.size(); i++){
+			const json::Value &f = files.at(i);
+			if(f.get("shown").is_true())
+				continue;
+			const ss_ id = itos(jint(f, "id"));
+			for(const ss_ &start : {"<img src=\"/f/"+id+"/",
+					"<img src=\"/f/"+id+"\""}){
+				for(size_t at; (at = h.find(start)) != ss_::npos;){
+					const size_t e = h.find('>', at);
+					h.replace(at, e - at + 1, "<span class=\"meta\">("+
+							ss_(NOT_SHOWN)+")</span>");
+				}
+			}
+		}
+		return h;
+	}
+
 	// [HEARTH_ATTACHMENTS] A message's files at its end: each a link with
 	// its kind and size, and an image the text does not draw its
 	// thumbnail beside it
@@ -1890,13 +1939,15 @@ struct Module: public interface::Module
 			const ss_ href = "/f/"+itos(jint(f, "id"))+"/"+
 					url_name(jstr(f, "name"));
 			out += "<li>";
-			if(f.get("image").is_true() && !f.get("drawn").is_true())
+			const bool shown = f.get("shown").is_true();
+			if(f.get("image").is_true() && !f.get("drawn").is_true() && shown)
 				out += "<a href=\""+href+"\"><img src=\"/f/"+
 						itos(jint(f, "id"))+"/thumb\" alt=\"\" "
 						"loading=\"lazy\"></a> ";
 			out += "<a href=\""+href+"\">"+html(jstr(f, "name"))+
 					"</a> <span class=\"meta\">"+html(file_kind(jstr(f, "type")))+
-					", "+size_text(jint(f, "bytes"))+"</span></li>";
+					", "+size_text(jint(f, "bytes"))+(shown ? "" :
+					"; "+ss_(NOT_SHOWN))+"</span></li>";
 		}
 		return out+"</ul>";
 	}
@@ -2596,6 +2647,38 @@ struct Module: public interface::Module
 		return held;
 	}
 
+	// [HEARTH_NEW_IMAGES] A new account's images: those of its own uploads
+	// `text` names and those its other messages in the thread named, one
+	// at most. `thread_id` 0 for a new thread; `except` the message being
+	// edited, whose old text does not count
+	void check_images(const ss_ &name, int lv, int64_t thread_id,
+			int64_t except, const ss_ &text)
+	{
+		if(lv >= LV_MEMBER)
+			return;
+		std::set<int64_t> mine;
+		for(int64_t id : file_ids(text)){
+			Q f(m_db, "SELECT 1 FROM files WHERE id = ? AND uploader = ? AND "
+					"lod > 0");
+			f.b(id).b(name);
+			if(f.step())
+				mine.insert(id);
+		}
+		if(mine.empty())
+			return;
+		Q o(m_db, "SELECT DISTINCT k.file FROM file_links k JOIN messages m "
+				"ON m.id = k.message JOIN files f ON f.id = k.file WHERE "
+				"m.thread = ? AND m.author = ? AND m.id != ? AND "
+				"f.uploader = ? AND f.lod > 0");
+		o.b(thread_id).b(name).b(except).b(name);
+		while(o.step())
+			mine.insert(o.i(0));
+		if(mine.size() > 1)
+			throw Exception("one image a thread (a "+level_name(LV_NEW)+
+					"'s limit, until it has been active on five days or a "+
+					level_name(LV_HELPER)+" approves it)");
+	}
+
 	// Hidden or shown again: the message, its thread if it is the first,
 	// and the search index
 	void set_hidden(int64_t message_id, int hidden, const ss_ &reason)
@@ -3033,10 +3116,14 @@ struct Module: public interface::Module
 				throw Exception("a file is "+itos(UPLOAD_MAX >> 20)+
 						" MiB at most");
 			ss_ data = unhex(hex), type = "application/octet-stream";
-			// [HEARTH_TRACKER]: a patch, a new account's too
+			// [HEARTH_TRACKER]: a patch, a new account's too; and
+			// [HEARTH_NEW_IMAGES] an image, one a thread, shown to everyone
+			// once a helper says
 			const bool patch = is_patch(file_name, data);
-			if(!limits(lv).links && !patch)
-				throw Exception("no files yet but a patch (a "+
+			const bool png = data.compare(0, 8, "\x89PNG\r\n\x1a\n") == 0;
+			const bool jpeg = data.compare(0, 3, "\xff\xd8\xff") == 0;
+			if(!limits(lv).links && !patch && !png && !jpeg)
+				throw Exception("no files yet but a patch or an image (a "+
 						level_name(LV_NEW)+"'s limit, until it has been "
 						"active on five days or a "+level_name(LV_HELPER)+
 						" approves it)");
@@ -3051,11 +3138,11 @@ struct Module: public interface::Module
 			int64_t lod = 0;
 			if(patch){
 				type = PATCH_TYPE;
-			} else if(data.compare(0, 8, "\x89PNG\r\n\x1a\n") == 0){
+			} else if(png){
 				data = crush(data, false, 1920, 1080, 0);
 				type = "image/png";
 				lod = 1;
-			} else if(data.compare(0, 3, "\xff\xd8\xff") == 0){
+			} else if(jpeg){
 				data = crush(data, true, 1920, 1080, 85);
 				type = "image/jpeg";
 				lod = 1;
@@ -3070,9 +3157,11 @@ struct Module: public interface::Module
 			const int64_t file_id = (int64_t)(r & ((1ULL << 46) - 1)) + 1;
 			const ss_ thumb = lod == 1 ? make_thumb(data, type) : ss_();
 			Q i(m_db, "INSERT INTO files(id, name, type, data, lod, uploader, "
-					"created, used, thumb) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)");
+					"created, used, thumb, vetted) VALUES(?, ?, ?, ?, ?, ?, ?, "
+					"?, ?, ?)");
 			i.b(file_id).b(file_name).b(type).blob(data).b(lod).b(name)
-					.b(now_s()).b(now_s()).blob(thumb).step();
+					.b(now_s()).b(now_s()).blob(thumb)
+					.b((int64_t)(lv >= LV_MEMBER)).step();
 			json::Value v = json::object();
 			v.set("id", file_id);
 			v.set("image", lod == 1);
@@ -3116,6 +3205,23 @@ struct Module: public interface::Module
 			i.b(v.stringify()).step();
 			m_files_swept = 0;
 			return v;
+		}
+		if(cmd == "vet_file"){
+			// [HEARTH_NEW_IMAGES] {file, on}: a new account's image shown to
+			// everyone, or taken back (then not shown when it is a member
+			// either), by a helper or above
+			if(lv < LV_HELPER)
+				throw Exception("a "+level_name(LV_HELPER)+" says whether "
+						"everyone sees an image");
+			const int64_t id = jint(q, "file");
+			const bool on = q.get("on").is_true();
+			Q u(m_db, "UPDATE files SET vetted = ? WHERE id = ? AND lod > 0");
+			u.b((int64_t)(on ? 1 : -1)).b(id).step();
+			if(sqlite3_changes(m_db) == 0)
+				throw Exception("no such image");
+			log_i(MODULE, "%s %s image %lld", cs(name), on ?
+					"showed everyone" : "took back", (long long)id);
+			return json::Value(true);
 		}
 		if(cmd == "delete_file"){
 			// A claim of copyright or personal data a moderator has upheld:
@@ -3225,6 +3331,7 @@ struct Module: public interface::Module
 			if(!subject.empty())
 				need(text_ok(subject, 400, false, "the subject"));
 			const bool held = check_limits(name, lv, true, title+"\n"+body);
+			check_images(name, lv, 0, 0, body);
 			const int64_t t = now_s();
 			Q i(m_db, "INSERT INTO threads(topic, title, author, created, last, "
 					"subject, kind, status, version) VALUES(?, ?, ?, ?, ?, ?, ?, "
@@ -3285,14 +3392,16 @@ struct Module: public interface::Module
 			if(th.i(0) && !mod)
 				throw Exception("the thread is hidden");
 			const bool held = check_limits(name, lv, false, body);
+			check_images(name, lv, thread_id, 0, body);
 			return json::Value(add_message(thread_id, name, body, "", true,
 					held));
 		}
 		if(cmd == "edit"){
 			const int64_t id = jint(q, "message");
 			const ss_ body = jstr(q, "body");
-			Q m(m_db, "SELECT m.author, m.body, m.hidden, t.hidden FROM "
-					"messages m JOIN threads t ON t.id = m.thread WHERE m.id = ?");
+			Q m(m_db, "SELECT m.author, m.body, m.hidden, t.hidden, m.thread "
+					"FROM messages m JOIN threads t ON t.id = m.thread WHERE "
+					"m.id = ?");
 			m.b(id);
 			if(!m.step())
 				throw Exception("no such message");
@@ -3303,6 +3412,7 @@ struct Module: public interface::Module
 				throw Exception("a hidden message is not edited");
 			need(text_ok(body, BODY_MAX, true, "the message"));
 			const bool held = check_limits(name, lv, false, body);
+			check_images(name, lv, m.i(4), id, body);
 			const int64_t t = now_s();
 			Q h(m_db, "INSERT INTO edits(message, body, time, editor) "
 					"VALUES(?, ?, ?, ?)");
