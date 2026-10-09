@@ -169,7 +169,8 @@ function M.new(env)
 		-- arrives in, which are the root's
 		local root = magic.ui.root
 		local w, h = root.width, root.height
-		local layout = env.formspec.layout(size, real, w, h)
+		local layout = env.formspec.layout(size, real, w, h,
+				h / math.max(1, magic.graphics.height))
 		form.drawn = ui:show(root, elements, layout, w, h, form.state)
 		local typeable = false
 		for _, f in ipairs(form.drawn.fields or {}) do

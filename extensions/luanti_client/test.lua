@@ -1296,6 +1296,15 @@ local elements, size, real = formspec.parse(
 		"list[current_player;craft;3,0;3,3;]listring[]"..
 		"list[current_player;craftpreview;7,1;1,1;]")
 assert(size[1] == 8 and size[2] == 7.5, "formspec: size")
+do
+	local _, ds = formspec.parse("formspec_version[2]size[14.25,7.275,true]")
+	assert(ds[1] == 14.25 and ds[2] == 7.275 and ds.fixed,
+			"formspec: size with fixed_size")
+	-- Luanti's fixed slot, 0.5555 x 96 pixels, whatever the screen
+	local fl = formspec.layout(ds, true, 3000, 3000, 2)
+	assert(math.abs(fl.imgsize - 0.5555 * 96 * 2) < 1e-6,
+			"formspec: a fixed_size form's slot")
+end
 assert(real == false, "formspec: no formspec_version means the old units")
 assert(#elements == 4, "formspec: "..#elements.." elements")
 assert(elements[1].name == "list" and

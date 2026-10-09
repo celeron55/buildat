@@ -36,10 +36,18 @@ local M = {}
 -- says which it is by its formspec_version, or by real_coordinates[].
 M.PADDING = 0.05
 
-function M.layout(size, real_coordinates, screen_w, screen_h)
+-- units_per_px: the screen's units per pixel, for a fixed_size form (size[]'s
+-- third field), whose slot is Luanti's getFixedImgsize(): 0.5555 x 96 DPI
+-- pixels. simplified: Luanti's gui_scaling and display density taken as 1,
+-- and its touch_gui exception (no lock) left out.
+function M.layout(size, real_coordinates, screen_w, screen_h, units_per_px)
 	local pw = screen_w * (1 - M.PADDING * 2)
 	local ph = screen_h * (1 - M.PADDING * 2)
 	local prefer = math.min(screen_w, screen_h) / 15
+	if size.fixed then
+		local fixed = 0.5555 * 96 * (units_per_px or 1)
+		pw, ph, prefer = math.huge, math.huge, fixed
+	end
 	local imgsize
 	if real_coordinates then
 		imgsize = math.min(prefer, pw / size[1], ph / size[2])
@@ -427,8 +435,13 @@ function M.parse(spec)
 		end
 
 		if name == "size" then
-			local v = M.parse_v2(fields[1] or "")
+			-- size[w,h,fixed_size]: Luanti's own death screen has the third
+			-- ([VL_DEATH_FORM]), and true draws the form at a slot size of
+			-- its own whatever the screen (M.layout)
+			local f = fields[1] or ""
+			local v = M.parse_v2((f:gsub(",%s*%a+%s*$", "")))
 			if v then
+				v.fixed = f:match(",%s*true%s*$") ~= nil
 				size = v
 			end
 		elseif name == "formspec_version" then
