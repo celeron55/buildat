@@ -151,6 +151,9 @@ static json::Value default_settings()
 	// [FRONT_PAGES]: seconds a release is listed before the page at /
 	// shows it, so it can be delisted first
 	s.set("page_delay", (int64_t)3600);
+	// [AITTA_SERVE] This Aitta's address as its pages give it in the
+	// commands; "" for the request's own host
+	s.set("public_url", "");
 	// [AITTA_REPORTS] What a report weighs: anonymous, and with the
 	// client's report key (times its record of upheld and rejected ones).
 	// simplified: a Starport ID's standing is not asked; a key is a key
@@ -574,8 +577,7 @@ struct Module: public interface::Module, public moderation::Host
 			b += "<br>"+html(jstr(rel, "description"));
 		b += "<br><span class=\"meta\">Licence: code "+
 				html(jstr(rel, "license_code"))+", media "+
-				html(jstr(rel, "license_media"))+"<br>Signed by the key <code>"+
-				html(jstr(rel, "key"))+"</code></span><br>"
+				html(jstr(rel, "license_media"))+"</span><br>"
 				"<a href=\"/api/aitta/archive/"+html(sha)+".zip\">.zip</a> "
 				"<a href=\"/api/aitta/archive/"+html(sha)+".sig\">.sig</a>";
 		// Its discussion at its home Hearth, as the client's "Discuss"
@@ -636,6 +638,29 @@ struct Module: public interface::Module, public moderation::Host
 				return send(404, html_type, interface::web_brand::page(
 						"Not found", "Aitta", "<p>No package of that name is "
 						"listed here. <a href=\"/\">The list</a>.</p>"));
+			// [AITTA_SERVE] The commands for a dedicated server, filled in
+			// simplified: behind a proxy without public_url set, the
+			// address may read as the proxy's inside one; the setting is
+			// the fix
+			ss_ self = jstr(m_settings, "public_url");
+			if(self.empty())
+				self = "http://"+r.host;
+			ss_ vers;
+			for(const json::Value &rel : rels)
+				if(pkg(rel) == want)
+					vers += "bin/buildat aitta install "+self+" "+want+"@"+
+							jstr(rel, "version")+" <user dir>\n";
+			c = "<div class=\"box\"><b>On a dedicated server</b> <span "
+					"class=\"meta\">in the directory of a Buildat release; "
+					"the newest listed, or a version</span><pre>"
+					"bin/buildat aitta install "+html(self)+" "+html(want)+
+					" &lt;user dir&gt;\n"
+					"util/serve_latest_release.sh "+html(want)+
+					" &lt;port&gt; &lt;user dir&gt;\n"
+					"# following its releases here:\n"
+					"AITTA="+html(self)+" util/serve_latest_release.sh "+
+					html(want)+" &lt;port&gt; &lt;user dir&gt;</pre><pre>"+
+					html(vers)+"</pre></div>\n"+c;
 			// [AITTA_REPORTS] A report from the web: anonymous, so it
 			// weighs little alone
 			ss_ f = "<h2>Report</h2><form method=\"post\" action=\""
@@ -669,7 +694,8 @@ struct Module: public interface::Module, public moderation::Host
 				"runs in the server's box, where it reaches only its own "
 				"saves.</p><p>To install one, open the Buildat client and "
 				"pick <b>Apps from Aitta</b>; it checks the signature before "
-				"it installs.</p>\n";
+				"it installs. A dedicated server's admin finds the commands "
+				"on each package's page.</p>\n";
 		body += c.empty() ? "<p>Nothing is published here yet.</p>\n" :
 				"<h2>Packages</h2>\n"+c;
 		send(200, html_type, interface::web_brand::page("Aitta", "Aitta",

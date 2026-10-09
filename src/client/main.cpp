@@ -128,6 +128,87 @@ static int aitta_main(int argc, char *argv[])
 					v.get("result").as_cstring() : "?");
 			return 0;
 		}
+		if(verb == "install" && argc == 4){
+			// [AITTA_SERVE] By name, from an Aitta: the list read, the
+			// release picked (the version asked, else the newest listed),
+			// its .zip and .sig fetched beside the user dir and installed as
+			// a file is; one installed already is only said
+			ss_ base = argv[1];
+			if(base.find("://") == ss_::npos)
+				base = "http://"+base;
+			while(!base.empty() && base.back() == '/')
+				base.pop_back();
+			const ss_ want = argv[2], user = argv[3];
+			const size_t at = want.find('@');
+			const ss_ pkg = want.substr(0, at),
+					version = at == ss_::npos ? "" : want.substr(at + 1);
+			json::json_error_t e;
+			const json::Value list = json::load_string(interface::http_get(
+					base+"/api/aitta/list").c_str(), &e).get("releases");
+			json::Value pick;
+			bool found = false;
+			ss_ versions;
+			for(unsigned i = 0; list.is_array() && i < list.size(); i++){
+				const json::Value &r = list.at(i);
+				if(r.get("author").as_string()+"/"+r.get("name").as_string()
+						!= pkg)
+					continue;
+				versions += (versions.empty() ? "" : ", ")+
+						r.get("version").as_string();
+				if(version.empty() ? !found ||
+						r.get("time").as_number() >= pick.get("time").as_number() :
+						r.get("version").as_string() == version){
+					pick = r;
+					found = true;
+				}
+			}
+			if(!found)
+				throw Exception(versions.empty() ? base+" lists no "+pkg :
+						base+" lists no "+want+"; its versions of "+pkg+": "+
+						versions);
+			// From the network: only a name's characters go into a path
+			auto plain = [](const ss_ &s){
+				if(s.empty() || s == "." || s == "..")
+					return false;
+				for(char c : s)
+					if(!isalnum((unsigned char)c) && !strchr("._+-", c))
+						return false;
+				return true;
+			};
+			const ss_ a = pick.get("author").as_string(),
+					n = pick.get("name").as_string(),
+					v = pick.get("version").as_string(),
+					sha = pick.get("sha256").as_string();
+			if(!plain(a) || !plain(n) || !plain(v) || !plain(sha))
+				throw Exception("the list's release has a name not taken");
+			const ss_ dir = user+"/installed/"+a+"/"+n+"/"+v;
+			if(interface::fs::path_exists(dir)){
+				fprintf(stderr, "%s/%s %s is installed already\n", a.c_str(),
+						n.c_str(), v.c_str());
+				printf("%s\n", dir.c_str());
+				return 0;
+			}
+			interface::fs::create_directories(user);
+			const ss_ tmp = user+"/.aitta-"+sha;
+			for(const char *ext : {".zip", ".sig"}){
+				std::ofstream f(tmp+ext, std::ios::binary);
+				f<<interface::http_get(base+"/api/aitta/archive/"+sha+ext);
+				if(!f.good())
+					throw Exception("cannot write "+tmp+ext);
+			}
+			ss_ out;
+			try {
+				out = interface::aitta::install(tmp+".zip", tmp+".sig", user);
+			} catch(...){
+				std::remove((tmp+".zip").c_str());
+				std::remove((tmp+".sig").c_str());
+				throw;
+			}
+			std::remove((tmp+".zip").c_str());
+			std::remove((tmp+".sig").c_str());
+			printf("%s\n", out.c_str());
+			return 0;
+		}
 		if(verb == "install" && argc == 3){
 			ss_ zip = argv[1];
 			const ss_ sig = interface::fs::strip_file_extension(zip)+".sig";
@@ -143,6 +224,7 @@ static int aitta_main(int argc, char *argv[])
 			"Usage: buildat aitta keygen <key file>\n"
 			"       buildat aitta pack <app dir> <key file> <out dir>\n"
 			"       buildat aitta install <release .zip> <user path>\n"
+			"       buildat aitta install <Aitta> <author>/<name>[@<version>] <user path>\n"
 			"       buildat aitta publish <release .zip> <Aitta's host:port>\n"
 			"An app's meta.json: doc/aitta.txt\n");
 	return 1;
@@ -218,8 +300,9 @@ int main(int argc, char *argv[])
 			"                       action ... is not here\"\n"
 			"\n"
 			"  aitta ...            As the first argument: an app's key, signed\n"
-			"                       release and install; \"aitta\" alone for\n"
-			"                       its usage\n"
+			"                       release and install, from a file or by\n"
+			"                       name from an Aitta (a dedicated server's);\n"
+			"                       \"aitta\" alone for its usage\n"
 			"\n"
 			"Environment:\n"
 			"  BUILDAT_USER_PATH    As -D, where -D is not given\n"

@@ -8,6 +8,19 @@
 #           [-- <game> <port> <user dir> [server options...]]...
 #   util/serve_latest_release.sh floorplanner 29500 ~/buildat-user -T 127.0.0.1
 #   util/serve_latest_release.sh floorplanner 29500 ~/fp-user -- vanilla 30000 ~/vanilla-user
+#   AITTA=https://aitta.example util/serve_latest_release.sh someone/lamps 29500 ~/lamps-user
+#
+# **An app from an Aitta** ([AITTA_SERVE]): a game <author>/<name> (a slash
+# tells it from the release's own apps) runs the newest version installed
+# under <user dir>/installed/<author>/<name>/, which
+#   bin/buildat aitta install <Aitta> <author>/<name> <user dir>
+# (in a release's directory) puts there; the server calls it
+# <author>.<name>, as its saves under <user dir>/apps/. Its version moves
+# only when told: with AITTA=<the Aitta's address>, each update check
+# installs the app's newest listed release there and restarts onto it as
+# for a new engine release, with the same wait and warning; without it the
+# installed version stays. Not installed and no AITTA: the script says how
+# and stops.
 #
 # Each server is a game, a port and a user directory, which holds its
 # saves and accounts. Every version uses it (-D), and it can be one a
@@ -58,7 +71,7 @@
 # saves carry a schema version (the floorplanner) refuses a save that a
 # newer version wrote.
 #
-# Environment: POLL_SECONDS (300), UPDATE_MAX_WAIT (1800),
+# Environment: AITTA (above), POLL_SECONDS (300), UPDATE_MAX_WAIT (1800),
 # GITHUB_REPO (celeron55/buildat),
 # GITHUB_TOKEN (optional; unauthenticated, GitHub allows 60 asks an hour),
 # RELEASES_URL (GitHub's list of the repo's releases; a check serves its
@@ -73,10 +86,12 @@ usage(){
 }
 # The servers, by index: game, port, user directory, and their options as
 # lines
-games=() ports=() users=() opts=()
+games=() ids=() ports=() users=() opts=()
 while [ $# -gt 0 ]; do
 	[ $# -lt 3 ] && usage
 	games+=("$1")
+	# What the server calls it, and its files here and under <user dir>
+	ids+=("${1/\//.}")
 	ports+=("$2")
 	mkdir -p "$3" || exit 1
 	u=$(cd "$3" && pwd -P)
@@ -98,6 +113,24 @@ while [ $# -gt 0 ]; do
 	[ $# -gt 0 ] && shift
 done
 [ ${#games[@]} -eq 0 ] && usage
+
+# An Aitta app's directory: its newest version installed, or nothing
+aitta_dir(){
+	local d="${users[$1]}/installed/${games[$1]}" v
+	# Its versions are directories; the key beside them is a file
+	v=$(cd "$d" 2>/dev/null && ls -1d -- */ | tr -d / | sort -V | tail -n 1)
+	[ -n "$v" ] && echo "$d/$v"
+}
+for i in "${!games[@]}"; do
+	case ${games[$i]} in */*) ;; *) continue ;; esac
+	if [ -z "${AITTA:-}" ] && [ -z "$(aitta_dir "$i")" ]; then
+		echo "${games[$i]} is not installed in ${users[$i]}; in a Buildat" \
+			"release's directory:" >&2
+		echo "  bin/buildat aitta install <Aitta> ${games[$i]} ${users[$i]}" >&2
+		echo "or set AITTA=<the Aitta's address> to install it here" >&2
+		exit 2
+	fi
+done
 
 base=${BUILDAT_SERVE_DIR:-$HOME/buildat-serve}
 poll=${POLL_SECONDS:-300}
@@ -181,6 +214,9 @@ prune(){
 # The servers' process ids, by index; a version a server would not start
 # on is not tried again until another comes
 pids=() broken=()
+# An Aitta app's new version installed and compiled, waiting as a release
+# does, by index: its directory
+app_new=()
 # A release some server's app would not compile on: not tried again
 bad_release=""
 # A release compiled and waiting for a quiet moment: its name, when it
@@ -228,7 +264,7 @@ standin_start(){
 	command -v python3 >/dev/null || return
 	python3 -c "$STANDIN_PY" "${ports[$i]}" 2>/dev/null &
 	standins[$i]=$!
-	standin_from[$i]=$(wc -l < "$base/server-${games[$i]}-${ports[$i]}.log" 2>/dev/null || echo 0)
+	standin_from[$i]=$(wc -l < "$base/server-${ids[$i]}-${ports[$i]}.log" 2>/dev/null || echo 0)
 	say "a stand-in answers on port ${ports[$i]} until ${games[$i]} is back"
 }
 
@@ -246,7 +282,7 @@ standin_check(){
 	local i=$1
 	[ -z "${standins[$i]:-}" ] && return
 	if tail -n +"$((standin_from[$i] + 1))" \
-			"$base/server-${games[$i]}-${ports[$i]}.log" 2>/dev/null |
+			"$base/server-${ids[$i]}-${ports[$i]}.log" 2>/dev/null |
 			grep -q "Listening at\|Failed to bind" ||
 			! kill -0 "${pids[$i]:-0}" 2>/dev/null; then
 		standin_stop "$i"
@@ -254,14 +290,41 @@ standin_check(){
 	fi
 }
 
+# The app's directory for server i on version v: the release's apps/<game>
+# (games/ before apps were called apps), or an Aitta app's newest installed,
+# installed first where AITTA is set and it is not; nothing when there is
+# none
+app_path(){
+	local i=$1 dir="$base/versions/$2"
+	case ${games[$i]} in
+	*/*)
+		local a
+		a=$(aitta_dir "$i")
+		if [ -z "$a" ] && [ -n "${AITTA:-}" ]; then
+			say "installing ${games[$i]} from $AITTA" >&2
+			"$dir/bin/buildat" aitta install "$AITTA" "${games[$i]}" \
+					"${users[$i]}" >&2
+			a=$(aitta_dir "$i")
+		fi
+		echo "$a"
+		;;
+	*)
+		local apps=apps
+		[ -d "$dir/apps" ] || apps=games
+		[ -d "$dir/$apps/${games[$i]}" ] && echo "$dir/$apps/${games[$i]}"
+		;;
+	esac
+}
+
+# The Aitta app's directory each server runs, by index
+running=()
+
 start(){
-	local i=$1 game=${games[$1]} port=${ports[$1]}
-	local dir="$base/versions/$current"
-	# apps/, or games/ in a release from before apps were called apps
-	local apps=apps
-	[ -d "$dir/apps" ] || apps=games
-	if [ ! -d "$dir/$apps/$game" ]; then
-		say "$current has no $apps/$game"
+	local i=$1 game=${games[$1]} id=${ids[$1]} port=${ports[$1]}
+	local dir="$base/versions/$current" app
+	app=$(app_path "$i" "$current")
+	if [ -z "$app" ]; then
+		say "$current has no $game"
 		broken[$i]=$current
 		return 1
 	fi
@@ -269,11 +332,12 @@ start(){
 	[ -n "${opts[$i]}" ] && mapfile -t args <<< "${opts[$i]%$'\n'}"
 	say "starting $game on port $port on $current, user ${users[$i]}"
 	echo "$current" > "$base/current"
+	running[$i]=$app
 	(cd "$dir" && BUILDAT_SHARE_PORT=1 exec bin/buildat_server \
-			-m "$apps/$game" -P "$port" \
+			-m "$app" -P "$port" \
 			-D "${users[$i]}" "${args[@]}") \
-			> >(sed -u "s/^/[$game:$port] /" |
-				tee -a "$base/server-$game-$port.log") 2>&1 &
+			> >(sed -u "s/^/[$id:$port] /" |
+				tee -a "$base/server-$id-$port.log") 2>&1 &
 	pids[$i]=$!
 }
 
@@ -301,14 +365,16 @@ stop(){
 # the old one serves: the modules land in the version's own cache, which
 # the start then finds. True when it compiled.
 compile(){
-	local i=$1 game=${games[$1]} port=${ports[$1]} v=$2
+	local i=$1 game=${games[$1]} id=${ids[$1]} port=${ports[$1]} v=$2 app
 	local args=()
 	[ -n "${opts[$i]}" ] && mapfile -t args <<< "${opts[$i]%$'\n'}"
+	app=$(app_path "$i" "$v")
+	[ -z "$app" ] && return 1
 	say "compiling $game on $v"
-	(cd "$base/versions/$v" && exec bin/buildat_server -m "apps/$game" \
+	(cd "$base/versions/$v" && exec bin/buildat_server -m "$app" \
 			-P "$port" -D "${users[$i]}" "${args[@]}" --compile-only) 2>&1 |
-		sed -u "s/^/[$game:$port compile] /" |
-		tee -a "$base/server-$game-$port.log"
+		sed -u "s/^/[$id:$port compile] /" |
+		tee -a "$base/server-$id-$port.log"
 	return "${PIPESTATUS[0]}"
 }
 
@@ -317,12 +383,12 @@ compile(){
 restart(){
 	local i=$1 why=$2
 	if [ -n "${pids[$i]:-}" ] && kill -0 "${pids[$i]}" 2>/dev/null; then
-		mkdir -p "${users[$i]}/apps/${games[$i]}"
-		printf '%s\n' "$why" > "${users[$i]}/apps/${games[$i]}/shutdown_reason"
+		mkdir -p "${users[$i]}/apps/${ids[$i]}"
+		printf '%s\n' "$why" > "${users[$i]}/apps/${ids[$i]}/shutdown_reason"
 	fi
 	stop "$i"
-	rm -f "${users[$i]}/apps/${games[$i]}/shutdown_reason"
-	local log="$base/server-${games[$i]}-${ports[$i]}.log" from n
+	rm -f "${users[$i]}/apps/${ids[$i]}/shutdown_reason"
+	local log="$base/server-${ids[$i]}-${ports[$i]}.log" from n
 	from=$(wc -l < "$log" 2>/dev/null || echo 0)
 	standin_start "$i"
 	if start "$i"; then
@@ -339,7 +405,7 @@ restart(){
 
 # Who is on server i, by its /health; 0 when it does not answer
 players(){
-	local i=$1 tok="${users[$1]}/apps/${games[$1]}/health_token.txt" auth=()
+	local i=$1 tok="${users[$1]}/apps/${ids[$1]}/health_token.txt" auth=()
 	[ -f "$tok" ] && auth=(-H "Authorization: Bearer $(head -n 1 "$tok")")
 	local n
 	n=$(curl -s -m 5 "${auth[@]}" "http://127.0.0.1:${ports[$i]}/health" |
@@ -347,23 +413,32 @@ players(){
 	echo "${n:-0}"
 }
 
-# The pending release onto every server, one at a time
+# The pending release onto every server, one at a time; else each Aitta
+# app's new version onto its own
 update(){
 	local old=$current i
-	current=$pending
-	# buildat-<version>-<hash>-linux-... said as its version
-	local v=${pending#buildat-}
-	for i in "${!games[@]}"; do
-		restart "$i" "updating to ${v%%-*}"
-	done
+	if [ -n "$pending" ]; then
+		current=$pending
+		# buildat-<version>-<hash>-linux-... said as its version
+		local v=${pending#buildat-}
+		for i in "${!games[@]}"; do
+			restart "$i" "updating to ${v%%-*}"
+		done
+	else
+		for i in "${!games[@]}"; do
+			[ -n "${app_new[$i]:-}" ] &&
+				restart "$i" "updating to ${games[$i]} ${app_new[$i]##*/}"
+		done
+	fi
+	app_new=()
 	pending="" pending_at=0 warned_at=0
-	[ -n "$old" ] && prune
+	[ -n "$old" ] && [ "$old" != "$current" ] && prune
 }
 
 # Updated once nobody is on, or at the latest max_wait after it was
 # ready; whoever is on warned a minute before that
 update_when_quiet(){
-	[ -z "$pending" ] && return
+	[ -z "$pending" ] && [ -z "${app_new[*]:-}" ] && return
 	local i n on=() now
 	now=$(date +%s)
 	for i in "${!games[@]}"; do
@@ -380,11 +455,12 @@ update_when_quiet(){
 		warned_at=$now
 		local v=${pending#buildat-}
 		v=${v%%-*}
+		[ -z "$pending" ] && v="a new version"
 		for i in "${on[@]}"; do
 			say "warning ${games[$i]} on port ${ports[$i]}: updating to $v in 60 s"
-			mkdir -p "${users[$i]}/apps/${games[$i]}"
-			echo "The server updates to $v in 60 s" > "${users[$i]}/apps/${games[$i]}/notice"
-			echo "updating to $v" > "${users[$i]}/apps/${games[$i]}/shutdown_reason"
+			mkdir -p "${users[$i]}/apps/${ids[$i]}"
+			echo "The server updates to $v in 60 s" > "${users[$i]}/apps/${ids[$i]}/notice"
+			echo "updating to $v" > "${users[$i]}/apps/${ids[$i]}/shutdown_reason"
 		done
 	fi
 }
@@ -398,6 +474,34 @@ stop_all(){
 	for i in "${!games[@]}"; do
 		stop "$i"
 		standin_stop "$i"
+	done
+}
+
+# [AITTA_SERVE] Each Aitta app's newest listed release, installed and
+# compiled on the running version; one that does not compile is removed
+# again (tried again at the next check)
+follow_aitta(){
+	local i d
+	for i in "${!games[@]}"; do
+		case ${games[$i]} in */*) ;; *) continue ;; esac
+		[ -z "${running[$i]:-}" ] && continue
+		if ! d=$("$base/versions/$current/bin/buildat" aitta install \
+				"$AITTA" "${games[$i]}" "${users[$i]}" 2>/dev/null); then
+			say "could not read ${games[$i]}'s releases from $AITTA"
+			continue
+		fi
+		[ -z "$d" ] || [ "$d" = "${running[$i]}" ] ||
+			[ "$d" = "${app_new[$i]:-}" ] && continue
+		if compile "$i" "$current"; then
+			say "${games[$i]} ${d##*/} is ready; updating once nobody is on," \
+				"in $max_wait s at the latest"
+			app_new[$i]=$d
+			[ "$pending_at" = 0 ] && pending_at=$(date +%s)
+		else
+			say "${games[$i]} ${d##*/} does not compile on $current; removed," \
+				"staying on ${running[$i]##*/}"
+			rm -rf "$d"
+		fi
 	done
 }
 
@@ -444,6 +548,7 @@ while true; do
 				fi
 			fi
 		fi
+		[ -n "${AITTA:-}" ] && [ -n "$current" ] && follow_aitta
 	fi
 	update_when_quiet
 	for i in "${!games[@]}"; do

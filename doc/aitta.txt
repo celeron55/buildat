@@ -55,6 +55,12 @@ The commands
         later version signed by another key is refused. A version already
         there is not replaced: an update is a new directory beside it.
 
+    bin/buildat aitta install <Aitta> <author>/<name>[@<version>] <user path>
+        The same, fetched from an Aitta's list by name: the version asked,
+        else the newest listed. A version not listed is refused with the
+        versions there are; one installed already is only said. Prints the
+        version's directory.
+
     bin/buildat aitta publish <release .zip> <Aitta's host:port>
         Uploads a release to an Aitta (apps/aitta). Its key has to be bound
         to its author name there first.
@@ -169,6 +175,20 @@ installed, each has a second tile, "<label> <version>: move saves here",
 which plays that version and moves the saves another version made to it
 (the launch parameter aitta_move_saves=1).
 
+On a dedicated server [AITTA_SERVE]
+-----------------------------------
+util/serve_latest_release.sh takes <author>/<name> as a game: it runs the
+newest version installed in that server's user directory, as the server
+<author>.<name> (its saves under <user>/apps/<author>.<name>/). Install it
+first with the command above, or set AITTA=<the Aitta's address>: then
+the script installs it, and at each update check installs the newest
+listed release, compiles it and restarts onto it as it does for a new
+engine release (the same wait for players, the same warning). Without
+AITTA the installed version stays until one is installed by hand. A
+package's page on the Aitta shows these commands with its name filled in.
+
+    AITTA=https://aitta.example util/serve_latest_release.sh someone/lamps 29500 ~/lamps-user
+
 The key is ECDSA P-256 (Mbed TLS, in the tree); signing is deterministic
 (RFC 6979), so a release packed twice is the same .sig. util/aitta_check.sh,
-util/aitta_pin_check.sh and apps/aitta/check.sh are the checks.
+util/aitta_pin_check.sh, util/aitta_serve_check.sh and apps/aitta/check.sh are the checks.
