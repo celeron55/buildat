@@ -530,6 +530,27 @@
 		return luaL_error(L, "aitta_dev: no op \"%s\"", op.c_str());
 	}
 
+	// open_url(url) -> true, or nil and why: the system's opener on a link,
+	// trusted only ([VERSION_CHECK]: a new version's, from a Starport)
+	static int l_open_url(lua_State *L)
+	{
+		const ss_ url = lua_bindings::lua_tocppstring(L, 1);
+		if(!open_url_ok(url)){
+			lua_pushnil(L);
+			lua_pushstring(L, "not a link this client opens");
+			return 2;
+		}
+#ifdef _WIN32
+		interface::process::shell_exec("start \"\" \""+url+"\"");
+#elif defined(__APPLE__)
+		interface::process::shell_exec("open '"+url+"'");
+#else
+		interface::process::shell_exec("xdg-open '"+url+"' >/dev/null 2>&1 &");
+#endif
+		lua_pushboolean(L, true);
+		return 1;
+	}
+
 	// aitta_install(zip, sig) -> the directory, or nil and why: a release
 	// fetched from an Aitta, checked and installed under <user>/installed
 	// ([AITTA_MVP]). Trusted only: client/extensions/starport.

@@ -514,6 +514,33 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 
 }
 
+// [VERSION_CHECK]: a link a server gave that the system's opener may be
+// handed through a shell: https only, and only characters no shell or
+// cmd.exe reads in quotes. simplified: no '%' (cmd expands it), so a
+// percent-encoded link is shown and not opened; ShellExecute and an
+// exec without a shell are the upgrade
+static bool open_url_ok(const ss_ &u)
+{
+	if(u.compare(0, 8, "https://") != 0 || u.size() <= 8 || u.size() > 500)
+		return false;
+	for(char c : u)
+		if(!isalnum((unsigned char)c) && !strchr("-._~:/?#@=&+,", c))
+			return false;
+	return true;
+}
+
+static void check_open_url_ok()
+{
+	if(!open_url_ok("https://github.com/buildat-org/buildat/releases/tag/v0.6.90") ||
+			open_url_ok("http://example.org/") ||
+			open_url_ok("https://") ||
+			open_url_ok("https://x/'; rm -rf ~") ||
+			open_url_ok("https://x/\"&calc") ||
+			open_url_ok("https://x/%PATH%") ||
+			open_url_ok("file:///etc/passwd"))
+		throw Exception("open_url_ok: wrong answer");
+}
+
 static void check_parse_preference_options()
 {
 	app::Options o;
@@ -1452,6 +1479,7 @@ struct CApp: public App, public magic::Application
 			lan_listen();
 		check_pick_default_window_size();
 		check_parse_preference_options();
+		check_open_url_ok();
 		check_scaled_viewport_size();
 		// A -c run is on the built-in defaults, and muted: nothing captures
 		// audio, and a driven run playing a game's music through the
@@ -2331,6 +2359,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(list_apps)
 		DEF_BUILDAT_FUNC(aitta_install)
 		DEF_BUILDAT_FUNC(aitta_dev)
+		DEF_BUILDAT_FUNC(open_url)
 		DEF_BUILDAT_FUNC(start_local_server)
 		DEF_BUILDAT_FUNC(list_launchers)
 		DEF_BUILDAT_FUNC(list_installed_games)

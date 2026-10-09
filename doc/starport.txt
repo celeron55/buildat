@@ -46,6 +46,17 @@ run their own. The official one is https://starport.buildat.org.
   ignored list are offered in one dialog on the launcher's screen, never
   under the PIN or the managed file; what is not added is ignored, and
   the client's Starport settings list both.
+- A new client version ([VERSION_CHECK]): an executable the admin puts at
+  `<user>/apps/starport/version_adapter` -- a file, never a setting, so
+  that an admin's web login cannot run commands -- is run at the start
+  and hourly, given 60 s, and prints one JSON object:
+  `{"version": "0.6.90", "url": "https://...", "platforms": {"linux":
+  {"url": ...}, "win64": {"url": ...}}}`. `/api/list` carries it as
+  "version", https links only; a failed run keeps the last good answer
+  and logs why. `util/starport_version_github.py` is the one for GitHub
+  releases. A native client newer than its own shows a notice on the
+  launcher's screen with its platform's link, "Open" and "Not now",
+  which is kept until a newer version.
 - `play_url` (`https://play.buildat.org`; "" for none) is a play page:
   a server serving the web client with no game of its own. The page at /
   links each TLS server to `<play_url>/?server=host:port`; the page joins

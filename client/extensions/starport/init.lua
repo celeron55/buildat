@@ -272,6 +272,7 @@ end
 -- [STARPORT_RECOMMENDS]: what a Starport answered in /api/list or an ID's
 -- "me", kept; set below, with the dialog that offers it
 local note_recommends
+local note_version
 
 local function hex(bytes)
 	return (bytes:gsub(".", function(c)
@@ -619,6 +620,7 @@ function M.safe.fetch(cb, ask, extra)
 			local v = body and network.parse_json(body)
 			if type(v) == "table" and v.ok and type(v.servers) == "table" then
 				note_recommends(url, v.recommends)
+				note_version(url, v.version)
 				results[url] = v.servers
 				kept[url] = {ts = os.time(), servers = v.servers}
 				fetch_icons(url, v.servers)
@@ -992,6 +994,85 @@ function M.offer_aittas()
 	local r = add_row(w)
 	add_button(r, "Add", function() close(true) end, nil, true)
 	add_button(r, "Not now", function() close(false) end)
+end
+
+-- **A newer client** ([VERSION_CHECK]): what the Starports' version
+-- adapters say, the newest kept for this run, {version, url, starport};
+-- the version the user said "Not now" to is in the state
+local newer = nil
+
+-- Version strings compared by their numbers: -1, 0 or 1
+local function version_cmp(a, b)
+	local pa, pb = {}, {}
+	for n in tostring(a):gmatch("%d+") do pa[#pa + 1] = tonumber(n) end
+	for n in tostring(b):gmatch("%d+") do pb[#pb + 1] = tonumber(n) end
+	for i = 1, math.max(#pa, #pb) do
+		local x, y = pa[i] or 0, pb[i] or 0
+		if x ~= y then
+			return x < y and -1 or 1
+		end
+	end
+	return 0
+end
+assert(version_cmp("0.6.10", "0.6.9") == 1 and version_cmp("0.6", "0.6.0") == 0
+		and version_cmp("0.6.89", "1.0.0") == -1)
+
+note_version = function(url, v)
+	if type(v) ~= "table" or type(v.version) ~= "string" or
+			not v.version:match("^%d[%d%.]*$") or
+			version_cmp(v.version, buildat.version()) <= 0 or
+			(newer and version_cmp(v.version, newer.version) <= 0) then
+		return
+	end
+	-- This platform's link when the adapter gave one
+	local platforms = type(v.platforms) == "table" and v.platforms or {}
+	local p = platforms[({Windows = "win64", Linux = "linux"})[GetPlatform()]
+			or ""]
+	local link = type(p) == "table" and p.url or v.url
+	newer = {version = v.version, url = tostring(link), starport = url}
+end
+
+-- The notice, on the launcher's screen (the trusted overlay calls it as it
+-- does offer_aittas): never on the web, whose version is its server's, nor
+-- in a scripted run unless BUILDAT_STARPORT_OFFER=1
+local version_root = nil
+local version_shown = nil
+function M.offer_version()
+	local s = load_state()
+	if not newer or version_root or version_shown == newer.version or
+			s.version_not_now == newer.version or GetPlatform() == "Web" or
+			(__buildat_is_scripted() and
+			buildat.get_env("BUILDAT_STARPORT_OFFER") ~= "1") then
+		return
+	end
+	local n = newer
+	version_shown = n.version
+	local function close(not_now, popped)
+		if not popped then
+			uistack.main:pop(version_root)
+		end
+		version_root = nil
+		if not_now then
+			s.version_not_now = n.version
+			save_state()
+		end
+	end
+	local root, w = open_window("starport version", 620, function()
+		close(false, true)
+	end)
+	version_root = root
+	log:info("Offering version " .. n.version .. " (" .. n.url .. ", from " ..
+			n.starport .. ")")
+	add_text(w, "Buildat " .. n.version .. " is out; this is " ..
+			tostring(buildat.version()) .. ".")
+	add_text(w, n.url, DIM)
+	local r = add_row(w)
+	add_button(r, "Open", function()
+		local ok, err = __buildat_open_url(n.url)
+		log:info("Version link: " .. (ok and "opened" or tostring(err)))
+		close(false)
+	end, n.url:match("^https://") ~= nil, true)
+	add_button(r, "Not now", function() close(true) end)
 end
 
 note_recommends = function(url, r)

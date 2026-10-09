@@ -41,6 +41,7 @@
 #include "interface/http.h"
 #include "interface/sha256.h"
 #include "interface/fs.h"
+#include "interface/process.h"
 #include "interface/bignum.h"
 #include "interface/web_brand.h"
 #include "client_file/api.h"
@@ -51,6 +52,8 @@
 #include <cmath>
 #include <ctime>
 #include <deque>
+#include <fstream>
+#include <sstream>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -336,6 +339,60 @@ static json::Value effective(const json::Value &l)
 
 // ---------------------------------------------------------------------------
 
+// [VERSION_CHECK]: a link in the version adapter's answer, as the client
+// gets it: https, short, nothing a line or a shell reads specially
+static bool version_link(const json::Value &v)
+{
+	if(!v.is_string())
+		return false;
+	const ss_ u = v.as_string();
+	if(u.compare(0, 8, "https://") != 0 || u.size() <= 8 || u.size() > 500)
+		return false;
+	for(char c : u)
+		if((unsigned char)c <= ' ' || c == 127 || c == '\'' || c == '"' ||
+				c == '\\')
+			return false;
+	return true;
+}
+
+// The adapter's answer as /api/list carries it, or undefined and why:
+// {version = "0.6.89", url, platforms = {linux = {url}, ...}}, no other
+// keys; a platform that is not a short name or has no good url is left out
+static json::Value version_answer(const json::Value &a, ss_ *why)
+{
+	const ss_ v = a.get("version").is_string() ? a.get("version").as_string() : "";
+	bool ok = !v.empty() && v.size() <= 32 && isdigit((unsigned char)v[0]);
+	for(char c : v)
+		ok = ok && (isdigit((unsigned char)c) || c == '.');
+	if(!ok){
+		*why = "no \"version\" of digits and dots";
+		return json::Value();
+	}
+	if(!version_link(a.get("url"))){
+		*why = "no \"url\" starting https://";
+		return json::Value();
+	}
+	json::Value out = json::object();
+	out.set("version", v);
+	out.set("url", a.get("url"));
+	json::Value platforms = json::object();
+	const json::Value &p = a.get("platforms");
+	for(json::Iterator it(p); p.is_object() && it.valid(); it.next()){
+		const ss_ k = it.key();
+		bool name_ok = !k.empty() && k.size() <= 16;
+		for(char c : k)
+			name_ok = name_ok && (isalnum((unsigned char)c) || c == '_');
+		if(name_ok && it.value().is_object() &&
+				version_link(it.value().get("url"))){
+			json::Value e = json::object();
+			e.set("url", it.value().get("url"));
+			platforms.set(k, e);
+		}
+	}
+	out.set("platforms", platforms);
+	return out;
+}
+
 struct VerifyJob {
 	ss_ listing;
 	ss_ url;      // http://host:port/api/starport/challenge?...
@@ -371,6 +428,15 @@ struct Module: public interface::Module
 	struct MailFailures { std::mutex m; sv_<ss_> lines; };
 	std::shared_ptr<MailFailures> m_mail_failures =
 			std::make_shared<MailFailures>();
+
+	// [VERSION_CHECK]: the version adapter's last good answer (undefined
+	// for none), and its run on a thread, which may outlive the module
+	json::Value m_version;
+	int64_t m_next_version_run = 0;
+	struct VersionRun { std::mutex m; bool running = false, done = false;
+			int status = 0; ss_ out; };
+	std::shared_ptr<VersionRun> m_version_run =
+			std::make_shared<VersionRun>();
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -1104,6 +1170,81 @@ struct Module: public interface::Module
 		}
 	}
 
+	// -- 3b. The version adapter ([VERSION_CHECK])
+
+	// <user>/apps/<app>/version_adapter, an executable the admin put there
+	// (never a setting: an admin's web login must not run commands), run
+	// at the start and hourly, given 60 s; it prints one JSON object. A
+	// failed run keeps the last good answer. No file, nothing done.
+	// simplified: through sh and timeout(1), so a Linux Starport only
+	void version_tick(int64_t t)
+	{
+		std::shared_ptr<VersionRun> run = m_version_run;
+		int status = 0;
+		ss_ out;
+		{
+			std::lock_guard<std::mutex> lock(run->m);
+			if(run->running)
+				return;
+			if(run->done){
+				run->done = false;
+				status = run->status;
+				out.swap(run->out);
+				take_version(status, out);
+			}
+		}
+		if(t < m_next_version_run)
+			return;
+		m_next_version_run = t + 3600;
+		const ss_ dir = m_server->get_config().get<ss_>("user_path")+"/apps/"+
+				m_server->get_app_id();
+		const ss_ path = dir+"/version_adapter";
+		if(!interface::fs::path_exists(path))
+			return;
+		if(path.find('\'') != ss_::npos){
+			log_w(MODULE, "Version adapter: a quote in its path; not run");
+			return;
+		}
+		run->running = true;
+		std::thread([run, path, dir](){
+			interface::process::ExecOptions o;
+			o.output_path = dir+"/version_adapter.out";
+			const int status = interface::process::shell_exec(
+					"timeout 60 '"+path+"' 2>/dev/null", o);
+			std::ifstream f(o.output_path, std::ios::binary);
+			std::ostringstream os;
+			os<<f.rdbuf();
+			std::lock_guard<std::mutex> lock(run->m);
+			run->status = status;
+			run->out = os.str().substr(0, 65536);
+			run->running = false;
+			run->done = true;
+		}).detach();
+	}
+
+	void take_version(int status, const ss_ &out)
+	{
+		ss_ why;
+		json::Value v;
+		if(status != 0){
+			why = "it failed (wait status "+itos(status)+")";
+		} else {
+			json::json_error_t err;
+			const json::Value a = json::load_string(out.c_str(), &err);
+			v = a.is_object() ? version_answer(a, &why) : json::Value();
+			if(!a.is_object())
+				why = "not a JSON object";
+		}
+		if(!v.is_object()){
+			log_w(MODULE, "Version adapter: %s; %s", cs(why),
+					m_version.is_object() ? "the last answer kept" : "no answer");
+			return;
+		}
+		if(!m_version.is_object() || m_version.stringify() != v.stringify())
+			log_i(MODULE, "Version adapter: %s", cs(v.stringify()));
+		m_version = v;
+	}
+
 	// -- 4. List
 
 	void api_list(const network::HttpRequest &r, const json::Value &b)
@@ -1121,6 +1262,8 @@ struct Module: public interface::Module
 		v.set("servers", listed_servers());
 		v.set("recommends", recommends());
 		v.set("play", play_url());
+		if(m_version.is_object())
+			v.set("version", m_version);
 		respond(r, 200, v);
 	}
 
@@ -2523,6 +2666,7 @@ struct Module: public interface::Module
 		if(!m_save)
 			return;
 		apply_verify_results();
+		version_tick(now_s());
 		sv_<ss_> failed;
 		{
 			std::lock_guard<std::mutex> lock(m_mail_failures->m);

@@ -1357,7 +1357,7 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 	end
 	local show = trust_shown
 	-- [STARPORT_RECOMMENDS]: new Aittas are offered on the launcher's
-	-- screen only, never over a game
+	-- screen only, never over a game; a newer version too ([VERSION_CHECK])
 	if not trust_in_game then
 		offer_timer = offer_timer + (event_data and
 				event_data:GetFloat("TimeStep") or 0)
@@ -1366,6 +1366,9 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 			local sp = starport_module()
 			if sp and sp.offer_aittas then
 				sp.offer_aittas()
+			end
+			if sp and sp.offer_version then
+				sp.offer_version()
 			end
 		end
 	end
