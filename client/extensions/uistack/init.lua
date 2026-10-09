@@ -236,7 +236,14 @@ function M.UIStack(root)
 		end
 		-- This check should keep things better in sync
 		if self.stack[#self.stack] ~= current_top_root then
-			error("UIStack:pop(): Wrong current_top_root")
+			-- Both named: which window is in the way says how it got there
+			local function name(e)
+				local ok, n = pcall(function() return e:GetName() end)
+				return ok and tostring(n) or tostring(e)
+			end
+			error("UIStack:pop(): Wrong current_top_root: asked to pop \"" ..
+					name(current_top_root) .. "\", the top is \"" ..
+					name(self.stack[#self.stack]) .. "\"")
 		end
 		-- **An entry whose element has gone is dropped, not raised on**
 		-- ([LEAVE_POP], 2026-09-25): a sandbox reset removes the
