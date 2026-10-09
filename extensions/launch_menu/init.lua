@@ -457,6 +457,11 @@ local function screen(desc, width, heading, query)
 	text(window, "Buildat " .. version .. " " .. hash, 11, "dim")
 	text(window, query == "" and heading or "Search: " .. query .. "_", 20,
 			query == "" and "dim" or "text")
+	-- The ×, but on the first screen, which has nothing under it
+	-- ([2], not #: a sandbox's read-only view has no # on Lua 5.1)
+	if uistack.main.stack[2] ~= nil then
+		ui_utils.close_glyph(root, window)
+	end
 	return root, window
 end
 

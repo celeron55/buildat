@@ -3766,7 +3766,7 @@ show_connect_dialog = function(address, name)
 		return b
 	end
 	menu:add(button("Join", true), connect)
-	menu:add(button("Cancel"), cancel)
+	ui_utils.close_glyph(root, outer, cancel)
 
 	-- Enter in a field is the field's ([ONE_FOCUS]): on to the next one,
 	-- and the password's connects

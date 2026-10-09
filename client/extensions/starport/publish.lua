@@ -120,7 +120,8 @@ local page_package, page_publish
 
 -- "New app..." and "New extension...": the name, then the folder
 local function ask_new(kind, back)
-	local root, w = open_window("aitta new", 560, back)
+	local root, w = open_window("aitta new", 560, back,
+			{close_glyph = false})
 	add_text(w, "A new " .. kind .. " in " .. USER .. "/dev_apps/. Its name: " ..
 			"a-z, 0-9 and _, 40 at most.")
 	local e = add_edit(w, "")
@@ -207,7 +208,6 @@ page_package = function(message)
 	if not entry then
 		add_text(w, "Choose a package, or make a new one: an app is on " ..
 				"the grid at once, to play before it is published.", DIM)
-		add_button(w, "Close", function() uistack.main:pop(root) end)
 		return
 	end
 	local m = read_meta(entry.name)
@@ -289,7 +289,6 @@ page_package = function(message)
 		uistack.main:pop(root)
 		page_publish()
 	end, nil, true)
-	add_button(r, "Close", function() uistack.main:pop(root) end)
 end
 
 -- What the chosen Aitta says of the key: its licences and whom the key is
@@ -514,7 +513,6 @@ page_publish = function(message)
 			page_publish()
 		end)
 	end
-	add_button(pr, "Close", function() uistack.main:pop(root) end)
 end
 
 function M.safe.open_publish()

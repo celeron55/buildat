@@ -443,21 +443,27 @@ function draw(saves, save_games)
 			ask_for_imports("worlds")
 		end)
 	end
-	if public == "public_running" then
-		under:add("< back to the world", function()
+	-- Back, by Escape or the × ([CLOSE_GLYPH]): to the world, or to the
+	-- launcher's grid ([MENU_CONTEXT]); a client that came straight to this
+	-- server leaves it instead
+	local function back()
+		if public == "public_running" then
 			done = true
 			close()
 			if M.back then
 				M.back()
 			end
-		end)
-	else
-		-- Back to the launcher's grid ([MENU_CONTEXT]); a client that came
-		-- straight to this server leaves it instead
-		under:add("< back to the launcher", function()
+		else
 			buildat.leave()
-		end)
+		end
 	end
+	menu:on_key(function(key)
+		if key == magic.KEY_ESCAPE and magic.input:GetKeyPress(key) then
+			back()
+			return true
+		end
+	end)
+	ui_utils.close_glyph(root, menu.window, back)
 
 	-- The right column: the glance, the flags, Play and Delete
 	panel = {lines = {}, flags = {}}

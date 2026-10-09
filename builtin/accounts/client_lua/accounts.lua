@@ -2269,7 +2269,8 @@ draw_sidebar = function()
 			end)
 		end
 	end
-	if sw.on_close then
+	-- A client before [CLOSE_GLYPH] has no ×: the sidebar's Close
+	if sw.on_close and not (ui_utils.safe or ui_utils).close_glyph then
 		side_button("Close", nil, function() server_close() end)
 	end
 	-- [SERVER_VERSION]: the server's Buildat and this client's, read-only
@@ -2356,6 +2357,11 @@ local function build_frame()
 	end
 	if sw.narrow then
 		sw.view.visible = false
+	end
+	-- Not on the stack, so its own on_close ([CLOSE_GLYPH])
+	local glyph = (ui_utils.safe or ui_utils).close_glyph
+	if sw.on_close and glyph then
+		glyph(root, f, function() server_close() end)
 	end
 end
 

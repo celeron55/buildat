@@ -468,8 +468,8 @@ function M.show_game(o, app_key, extra)
 		end, {label = label, label_width = math.floor(inner * 0.45),
 			width = math.floor(inner * 0.5)})
 	end
-	local close_button = button(top, "Close", function() game_close() end)
-	close_button:SetFixedWidth(90)
+	-- Not on the stack, so its own on_close ([CLOSE_GLYPH])
+	ui_utils.close_glyph(root, win, function() game_close() end)
 
 	local shown = {}
 	local function section(t, draw)

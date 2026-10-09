@@ -1552,6 +1552,58 @@ end
 -- button beside the line, which takes no focus and only a click where the
 -- pointer is free; the line then stays 20 s, and while the pointer is on it
 -- color: a name for rgb(), "error" when absent
+-- **A screen's ×** ([CLOSE_GLYPH]): a dim "×" at the window's top right,
+-- for a touchscreen with nothing to tap off a screen that fills it. A
+-- Button with no style, so no border or background, 40x40 for a finger;
+-- a child of `parent`, the window's (a sandbox has no GetParent), as the
+-- window's layout would place it; kept at the window's corner and over it
+-- each frame. Not in the keyboard's walk. Does on_close, or what a tap on
+-- nothing does: Escape.
+function M.safe.close_glyph(parent, window, on_close)
+	local b = parent:CreateChild("Button")
+	b:SetName("close_glyph")
+	b.color = magic.Color(0, 0, 0, 0)
+	b:SetFixedSize(40, 40)
+	b:SetFocusMode(FM_NOTFOCUSABLE)
+	-- The window's style (its own, or its parent's), for a parent with
+	-- none: the UI's root
+	local style = window.defaultStyle
+	if style then
+		b.defaultStyle = style
+	end
+	local t = b:CreateChild("Text")
+	t:SetStyleAuto()
+	t.text = "×"
+	t:SetFontSize(24)
+	t:SetAlignment(HA_CENTER, VA_CENTER)
+	-- HoverEnd comes after a close removed it
+	local function shade(c)
+		if not gone(t) then t.color = magic.Color(M.safe.rgb(c)) end
+	end
+	shade("dim")
+	magic.SubscribeToEvent(b, "HoverBegin", function() shade("text") end)
+	magic.SubscribeToEvent(b, "HoverEnd", function() shade("dim") end)
+	magic.SubscribeToEvent(b, "Released", function()
+		log:info("close_glyph: closing")
+		if on_close then on_close() else uistack.press_back() end
+	end)
+	local sub
+	local function place()
+		if gone(b) or gone(window) then
+			magic.UnsubscribeFromEvent("Update", sub)
+			if not gone(b) then b:Remove() end
+			return
+		end
+		local w, p = window.screenPosition, parent.screenPosition
+		b:SetPosition(w.x - p.x + window.width - 40, w.y - p.y)
+		b.visible = window.visible
+		b.priority = window.priority + 1
+	end
+	sub = magic.SubscribeToEvent("Update", place)
+	place()
+	return b
+end
+
 function M.safe.show_notice(text, copy, color)
 	local t = magic.ui.root:CreateChild("UIElement")
 	t.defaultStyle = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")

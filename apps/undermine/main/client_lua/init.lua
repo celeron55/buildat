@@ -628,6 +628,7 @@ local function open_structure_menu()
 			close_structure_menu()
 		end)
 	end
+	menu:add("< back", close_structure_menu)
 	structure_menu = {root = root, menu = menu}
 	magic.input:SetMouseVisible(true)
 end

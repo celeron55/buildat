@@ -736,7 +736,10 @@ magic.SubscribeToEvent("Update", function()
 	end
 end)
 
-local function open_window(desc, width, on_escape)
+-- opts.close_glyph = false: no × ([CLOSE_GLYPH]), for a small form with a
+-- Close or Cancel beside its action
+local glyphed = setmetatable({}, {__mode = "k"}) -- windows with the ×
+local function open_window(desc, width, on_escape, opts)
 	local root = uistack.main:push({desc = desc})
 	root.defaultStyle = magic.cache:GetResource("XMLFile", STYLE)
 	local w = root:CreateChild("Window")
@@ -758,6 +761,10 @@ local function open_window(desc, width, on_escape)
 	end)
 	-- By the keyboard ([MENU_KEYS])
 	require("buildat/extension/ui_utils").safe.keyboard_page(w)
+	if not (opts and opts.close_glyph == false) then
+		require("buildat/extension/ui_utils").safe.close_glyph(root, w)
+		glyphed[raw_of(w)] = true
+	end
 	local g = {root = root, raw = raw_of(root), desc = desc}
 	guards[#guards + 1] = g
 	g.seen = picture(g)
@@ -768,9 +775,12 @@ local function add_text(parent, text, color)
 	local t = parent:CreateChild("Text")
 	t:SetStyleAuto()
 	t:SetWordwrap(true)
-	-- A window's text is given its width less its margins (24)
-	if parent.width > 24 then
-		t:SetFixedWidth(parent.width - 24)
+	-- A window's text is given its width less its margins (24), and the
+	-- first one less the × above its end (40)
+	local less = (parent:GetNumChildren(false) == 1 and
+			glyphed[raw_of(parent)]) and 64 or 24
+	if parent.width > less then
+		t:SetFixedWidth(parent.width - less)
 	end
 	t.text = text
 	if color then
@@ -877,7 +887,7 @@ local function ask_pin(on_done)
 		on_done(true)
 		return
 	end
-	local root, w = open_window("starport pin", 420)
+	local root, w = open_window("starport pin", 420, nil, {close_glyph = false})
 	add_text(w, "These settings are locked with a PIN.")
 	local e = add_edit(w, "", true)
 	e:SetFocus(true)
@@ -1188,7 +1198,11 @@ settings_page = function(can, again, message)
 		uistack.main:pop(settings_root)
 	end
 	local s, e = load_state(), effective()
-	local root, w = open_window("starport settings", 900)
+	local root, w = open_window("starport settings", 900, function()
+		if settings_closed then
+			settings_closed()
+		end
+	end)
 	settings_root = root
 	add_text(w, "Starport: the lists of public servers")
 	if message then
@@ -1381,12 +1395,6 @@ settings_page = function(can, again, message)
 					x.state or "sent"), DIM)
 		end
 	end
-	add_button(w, "Back", function()
-		uistack.main:pop(root)
-		if settings_closed then
-			settings_closed()
-		end
-	end)
 end
 
 --
@@ -1541,7 +1549,7 @@ local function is_web()
 	return __buildat_get_env("BUILDAT_PAGE_HTTPS") ~= nil
 end
 local function web_id_page(url)
-	local root, w = open_window("starport id web page", 520)
+	local root, w = open_window("starport id web page", 520, nil, {close_glyph = false})
 	add_text(w, "Your Starport ID at " .. url .. " is on the Starport's own "..
 			"page, which opens in a window of its own.")
 	local st = add_text(w, "")
@@ -1557,7 +1565,7 @@ function M.id_login(url, then_cb, message)
 	if is_web() then
 		return web_id_page(url)
 	end
-	local root, w = open_window("starport id login", 520)
+	local root, w = open_window("starport id login", 520, nil, {close_glyph = false})
 	add_text(w, "Starport ID at " .. url)
 	if message then
 		add_text(w, message, WARN)
@@ -1589,7 +1597,7 @@ function M.id_login(url, then_cb, message)
 					"password is the end of it."
 			if res.remind_email and then_cb then
 				-- Said, and what the login was for goes on
-				local root2, w2 = open_window("starport id remind", 520)
+				local root2, w2 = open_window("starport id remind", 520, nil, {close_glyph = false})
 				add_text(w2, remind, WARN)
 				local rr = add_row(w2)
 				add_button(rr, "Add one...", close_and(root2, function()
@@ -1620,7 +1628,7 @@ function M.id_login(url, then_cb, message)
 end
 
 function M.id_reset(url, name_text)
-	local root, w = open_window("starport id reset", 520)
+	local root, w = open_window("starport id reset", 520, nil, {close_glyph = false})
 	add_text(w, "A new password: a code goes to the ID's recovery e-mail.")
 	local r = add_row(w)
 	add_label(r, "Name", 120)
@@ -1704,7 +1712,7 @@ function M.id_register(url, then_cb)
 		if not can then
 			return
 		end
-		local root, w = open_window("starport id register", 640)
+		local root, w = open_window("starport id register", 640, nil, {close_glyph = false})
 		add_text(w, "A Starport ID at " .. url)
 		-- 10a: what it holds, said where it is made
 		add_text(w, "It holds: a name, a password (as a hash), a recovery "..
@@ -1844,7 +1852,7 @@ function M.id_page(url, message)
 						return again(e2)
 					end
 					uistack.main:pop(root)
-					local root2, w2 = open_window("starport id totp", 620)
+					local root2, w2 = open_window("starport id totp", 620, nil, {close_glyph = false})
 					add_text(w2, "Add this key to an authenticator app, then "..
 							"enter the code it shows:")
 					local k = add_edit(w2, res.secret)
@@ -1882,7 +1890,7 @@ function M.id_page(url, message)
 					return
 				end
 				uistack.main:pop(root)
-				local root2, w2 = open_window("starport id age", 560)
+				local root2, w2 = open_window("starport id age", 560, nil, {close_glyph = false})
 				local get_age = age_rows(w2)
 				local st = add_text(w2, "")
 				local rr = add_row(w2)
@@ -1908,7 +1916,7 @@ function M.id_page(url, message)
 					return again(e2)
 				end
 				uistack.main:pop(root)
-				local root2, w2 = open_window("starport id sessions", 680)
+				local root2, w2 = open_window("starport id sessions", 680, nil, {close_glyph = false})
 				local function line(x)
 					return os.date("!%Y-%m-%d %H:%M UTC", tonumber(x.created)
 							or 0) .. ", " .. tostring(x.how) ..
@@ -1970,7 +1978,7 @@ local function ask_age(url, session, on_done)
 		if not can then
 			return on_done(false)
 		end
-		local root, w = open_window("starport id age", 560)
+		local root, w = open_window("starport id age", 560, nil, {close_glyph = false})
 		add_text(w, "Your Starport ID has no age yet")
 		add_text(w, "Servers on " .. url .. " have age limits, so before "..
 				"your ID joins one, say whether you are 18 or over. That "..
@@ -2038,7 +2046,7 @@ local function web_authorize(url, listing, address, cb, rename_reason)
 	if rename_reason then
 		q = q .. "&rename=1"
 	end
-	local root, w = open_window("starport id web", 520)
+	local root, w = open_window("starport id web", 520, nil, {close_glyph = false})
 	if rename_reason then
 		add_text(w, rename_reason)
 	end
@@ -2135,7 +2143,7 @@ function M.safe.id_token_here(cb, rename_reason)
 				return cb(nil, "The Starport cannot be reached (" .. why ..
 						"), and there is no saved login for this server")
 			end
-			local root, w = open_window("starport id offline", 520)
+			local root, w = open_window("starport id offline", 520, nil, {close_glyph = false})
 			add_text(w, "The Starport cannot be reached. Your saved login "..
 					"for this server is locked with your Starport password:")
 			local e = add_edit(w, "", true)
@@ -2167,7 +2175,7 @@ function M.safe.id_token_here(cb, rename_reason)
 		local ask
 		-- The name to use in the community, the reason first if any
 		local function name_prompt(reason, suggest, rename)
-			local root, w = open_window("starport id name", 520)
+			local root, w = open_window("starport id name", 520, nil, {close_glyph = false})
 			if reason then
 				add_text(w, reason, WARN)
 			end
@@ -2290,7 +2298,7 @@ local AITTA_REASONS = {
 	{"other", "Other"},
 }
 local function aitta_report(aitta, id)
-	local root, w = open_window("aitta report", 620)
+	local root, w = open_window("aitta report", 620, nil, {close_glyph = false})
 	add_text(w, "Report " .. id .. " to " .. aitta)
 	add_text(w, "A moderator of that Aitta decides; the author is told " ..
 			"what was done and why, not who reported it.", DIM)
@@ -2840,7 +2848,7 @@ local function latest_screenshot_evidence()
 end
 
 local function open_report_row(row)
-	local root, w = open_window("starport report", 620)
+	local root, w = open_window("starport report", 620, nil, {close_glyph = false})
 	add_text(w, "Report " .. tostring(row.name) .. " (" .. row.address .. ")")
 	local reason, suggest = nil, nil
 	local rr = add_row(w)
@@ -2996,7 +3004,7 @@ function M.safe.open_report_here()
 			return
 		end
 		-- Which failure it was, and the listings to pick from
-		local root, w = open_window("starport report", 560)
+		local root, w = open_window("starport report", 560, nil, {close_glyph = false})
 		local asked = {}
 		for _, url in ipairs(effective().starports) do
 			asked[#asked + 1] = url

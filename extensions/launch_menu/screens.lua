@@ -693,12 +693,7 @@ function M.show_connect_to_server()
 		end)
 	end
 
-	local back_button = make_button(window, "Back")
-	-- Fixed: the column beside the list would stretch the last button
-	back_button:SetFixedHeight(26)
-	magic.SubscribeToEvent(back_button, "Released", function()
-		uistack.main:pop(root)
-	end)
+	ui_utils.close_glyph(root, outer)
 
 	-- [JOIN_BUILDAT_KEYS]: Up and Down in the list or the column beside
 	-- it, Right and Left between them

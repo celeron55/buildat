@@ -309,6 +309,13 @@ magic.SubscribeToEvent("UIMouseClick", function(event_type, event_data)
 	log:verbose("UIStack: a click on nothing; Back")
 	buildat.press_back()
 end)
+-- The same Back for a screen's × ([CLOSE_GLYPH]), drawn by ui_utils,
+-- which runs sandboxed too: closing the top screen is what a tap beside
+-- it does already
+function M.safe.press_back()
+	buildat.press_back()
+end
+M.press_back = M.safe.press_back
 -- Set by whoever answers `event scan` for the world (vanilla's scan.lua),
 -- so the menu's answer below stands aside once it is there
 -- A key taken for the rest of its frame: ui_utils.dropdown's Escape, which

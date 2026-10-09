@@ -1084,6 +1084,16 @@ show_notice(text [, copy])
   nor the focus: what a caught error is shown as in an app ([MENU_ERRORS]).
   With copy, a Copy button beside it (no focus) puts copy on the clipboard,
   and the line stays 20 seconds, and while the pointer is on the button.
+close_glyph(parent, window [, on_close])
+- A dim "×" at window's top right ([CLOSE_GLYPH]): no border or
+  background, a 40x40 hit area, not in the keyboard's walk. A child of
+  parent, the window's own parent (a sandbox has no GetParent), kept at the
+  window's corner each frame and removed with it. A click or tap does
+  on_close, or Escape, as a tap beside the window does ([TAP_BACK]): for a
+  touchscreen where the window fills the screen. launch_menu's screens and
+  the Starport's windows have it but the first screen; a screen with it has
+  no Back or Close that only closes it, and a vertical menu of buttons
+  keeps its Back and has none.
 copy(text)
 - text on the OS clipboard, on the user's own key or click (the system's
   clipboard turned on, as SetClipboardText alone does not).
@@ -2462,5 +2472,5 @@ extension.launch_console: show
 extension.serverlist: refresh, servers
 extension.skycube: new
 extension.test: f
-extension.ui_utils: add_paged, bind_button_menu, close_dropdowns, copy, db_text, dropdown, dropdown_open, keyboard_columns, keyboard_page, list_view, menu_button, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_message_dialog, show_notice, show_notification, vertical_menu
+extension.ui_utils: add_paged, bind_button_menu, close_dropdowns, close_glyph, copy, db_text, dropdown, dropdown_open, keyboard_columns, keyboard_page, list_view, menu_button, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_message_dialog, show_notice, show_notification, vertical_menu
 ---- end of the generated listing ----

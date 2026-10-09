@@ -61,12 +61,11 @@ echo "$(echo "$names" | wc -w) launch UIs booted, $bad of them badly"
 # [FIRST_RUN]'s twenty minutes was driving it: the menu had no
 # `leave_app` at all, so a game started from the default launcher was
 # a one-way trip (2026-09-24). This boots the menu straight into a
-# game's own screen (-a runs one launch action), clicks that screen's
-# "< back to the launcher", and asks the client to describe itself
+# game's own screen (-a runs one launch action), presses Escape there (its
+# "< back to the launcher"), and asks the client to describe itself
 # afterwards -- a dead client answers nothing.
 { echo "delay 25000"; echo "event scan 8 a"; echo "delay 1500"
-	# The row at the bottom of vanilla's menu panel, at this window size
-	echo "mouse_pos 639 608"; echo "delay 300"; echo "mouse_click left"
+	echo "keypress Escape"
 	echo "delay 6000"; echo "event scan 8 b"
 	echo "delay 2000"; echo "quit"; } > "$out/cmds_back.txt"
 timeout 180 bin/buildat -o launch_ui=launch_menu -a app/vanilla/contentdb 	-w 1280x720 -l 3 -L "$out/back.log" -c @"$out/cmds_back.txt" 	> /dev/null 2>&1

@@ -251,6 +251,10 @@ A click or tap on nothing is Escape, and so is the browser's Back
 Not on the first screen on the stack, where Escape would be Quit; there
 the browser's Back leaves the page. A layer over a world, where a click on
 nothing is the game's, is pushed with {tap_outside = false}.
+A screen also has a "×" at its top right (ui_utils.close_glyph,
+[CLOSE_GLYPH]), for a screen that fills a phone's: it does the same Escape.
+Such a screen has no Back or Close that only closes it; a vertical menu of
+buttons keeps its "< back" and has no ×.
 
 Every menu is by the keyboard without a line of its own ([MENU_KEYS]): a
 page made with ui_utils.keyboard_page (every Accounts page through its
