@@ -5893,6 +5893,18 @@ local function move_camera(dt)
 		S.cz = S.cz + f * k
 		return
 	end
+	-- **The arrow keys turn and tilt the view** ([FP_TURN_KEYS]) while
+	-- held, Shift faster; not with the menu up, whose keys they are
+	local turn, tilt = 0, 0
+	if keys.down("turn_view_right") then turn = turn + 1 end
+	if keys.down("turn_view_left") then turn = turn - 1 end
+	if keys.down("tilt_up") then tilt = tilt + 1 end
+	if keys.down("tilt_down") then tilt = tilt - 1 end
+	if (turn ~= 0 or tilt ~= 0) and not S.paused then
+		local rate = (S.shift and 180 or 60) * dt
+		S.yaw = S.yaw + turn * rate
+		S.pitch = math.max(-89, math.min(89, S.pitch - tilt * rate))
+	end
 	if S.view == "walk" then
 		if S.stick then
 			f, r = f + S.stick.f, r + S.stick.r
