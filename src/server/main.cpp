@@ -182,6 +182,12 @@ int main(int argc, char *argv[])
 			"  --sim-clock          Run the calendar ahead by the seconds\n"
 			"                       in user_path/sim_clock, read every tick\n"
 			"                       (for checks)\n"
+			"\n"
+			"Environment:\n"
+			"  BUILDAT_USER_PATH    As -D, where -D is not given\n"
+			"  BUILDAT_CACHE_PATH   As -C, where -C is not given\n"
+			"  BUILDAT_LOG_CAP_BYTES  Bytes at which the log file is moved to\n"
+			"                       <file>_1 and begun again (512 MB)\n"
 			;
 
 	int c;
