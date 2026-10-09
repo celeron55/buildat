@@ -1,7 +1,9 @@
 #include "interface/process.h"
 #include "core/log.h"
 #include "ports/windows_minimal.h"
+#include <shellapi.h>
 #include <cstring>
+#include <string>
 #define MODULE "__process"
 
 namespace interface {
@@ -117,6 +119,26 @@ int shell_exec(const ss_ &command, const ExecOptions &opts)
 	CloseHandle(pi.hProcess);
 	CloseHandle(pi.hThread);
 	return exit_code;
+}
+
+bool open_with_system(const ss_ &target)
+{
+	if(target.find_first_of("'\"") != ss_::npos)
+		return false;
+	int n = MultiByteToWideChar(CP_UTF8, 0, target.c_str(), -1, nullptr, 0);
+	if(n <= 0)
+		return false;
+	std::wstring w(n, L'\0');
+	MultiByteToWideChar(CP_UTF8, 0, target.c_str(), -1, &w[0], n);
+	// Above 32 is success (the HINSTANCE is an old error code otherwise)
+	INT_PTR r = (INT_PTR)ShellExecuteW(NULL, L"open", w.c_str(), NULL, NULL,
+			SW_SHOWNORMAL);
+	if(r <= 32){
+		log_w(MODULE, "open_with_system(\"%s\"): ShellExecute failed (%d)",
+				cs(target), (int)r);
+		return false;
+	}
+	return true;
 }
 
 bool Handle::valid() const

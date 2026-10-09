@@ -517,10 +517,10 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 }
 
 // [VERSION_CHECK]: a link a server gave that the system's opener may be
-// handed through a shell: https only, and only characters no shell or
-// cmd.exe reads in quotes. simplified: no '%' (cmd expands it), so a
-// percent-encoded link is shown and not opened; ShellExecute and an
-// exec without a shell are the upgrade
+// handed (open_with_system: ShellExecute on Windows, a shell elsewhere):
+// https only, and only characters no shell reads in quotes. simplified:
+// no '%', so a percent-encoded link is shown and not opened; an exec
+// without a shell on every platform is the upgrade
 static bool open_url_ok(const ss_ &u)
 {
 	if(u.compare(0, 8, "https://") != 0 || u.size() <= 8 || u.size() > 500)

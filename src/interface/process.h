@@ -19,6 +19,13 @@ namespace interface
 		int shell_exec(const std::string &command,
 				const ExecOptions &opts = ExecOptions());
 
+		// The system's opener on a link or a folder: ShellExecute on
+		// Windows (no cmd.exe; its "start" is not a program), open on
+		// macOS, xdg-open elsewhere, not waited for. False where it could
+		// not be handed over (logged); a target with a quote in it is
+		// refused, since the POSIX ones go through a shell.
+		bool open_with_system(const std::string &target);
+
 		// Long-running child. Does not wait. path is the executable.
 		struct Handle {
 			intptr_t impl = 0;

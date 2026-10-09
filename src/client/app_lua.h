@@ -507,18 +507,8 @@
 				return 1;
 			}
 			if(op == "open"){
-				// simplified: the system's opener through a shell, with the
-				// path quoted; a path with a quote in it is not opened
-				if(arg.find_first_of("'\"") != ss_::npos)
+				if(!interface::process::open_with_system(arg))
 					throw Exception("cannot open "+arg);
-#ifdef _WIN32
-				interface::process::shell_exec("start \"\" \""+arg+"\"");
-#elif defined(__APPLE__)
-				interface::process::shell_exec("open '"+arg+"'");
-#else
-				interface::process::shell_exec("xdg-open '"+arg+
-						"' >/dev/null 2>&1 &");
-#endif
 				lua_pushboolean(L, true);
 				return 1;
 			}
@@ -540,13 +530,11 @@
 			lua_pushstring(L, "not a link this client opens");
 			return 2;
 		}
-#ifdef _WIN32
-		interface::process::shell_exec("start \"\" \""+url+"\"");
-#elif defined(__APPLE__)
-		interface::process::shell_exec("open '"+url+"'");
-#else
-		interface::process::shell_exec("xdg-open '"+url+"' >/dev/null 2>&1 &");
-#endif
+		if(!interface::process::open_with_system(url)){
+			lua_pushnil(L);
+			lua_pushstring(L, "the system's opener could not be run");
+			return 2;
+		}
 		lua_pushboolean(L, true);
 		return 1;
 	}
@@ -560,9 +548,9 @@
 		ss_ dir = g_client_config.get<ss_>("log_path");
 		const size_t slash = dir.find_last_of("/\\");
 		dir = slash == ss_::npos ? ss_() : dir.substr(0, slash);
-		// simplified: a path with a quote (or, on Windows, a '%') is
-		// refused rather than escaped; ShellExecute is the upgrade
-		if(dir.empty() || dir.find_first_of("'\"%\n") != ss_::npos){
+		// simplified: a path with a quote is refused rather than escaped
+		// (the POSIX openers go through a shell)
+		if(dir.empty() || dir.find_first_of("'\"\n") != ss_::npos){
 			lua_pushnil(L);
 			lua_pushstring(L, dir.empty() ? "no log file" :
 					"the log's folder has a quote in its path");
@@ -570,12 +558,12 @@
 		}
 #ifdef _WIN32
 		std::replace(dir.begin(), dir.end(), '/', '\\');
-		interface::process::shell_exec("start \"\" \""+dir+"\"");
-#elif defined(__APPLE__)
-		interface::process::shell_exec("open '"+dir+"'");
-#else
-		interface::process::shell_exec("xdg-open '"+dir+"' >/dev/null 2>&1 &");
 #endif
+		if(!interface::process::open_with_system(dir)){
+			lua_pushnil(L);
+			lua_pushstring(L, "the system's opener could not be run");
+			return 2;
+		}
 		lua_pushboolean(L, true);
 		return 1;
 	}

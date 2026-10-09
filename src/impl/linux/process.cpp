@@ -44,6 +44,17 @@ int shell_exec(const ss_ &command, const ExecOptions &opts)
 	return exit_status;
 }
 
+bool open_with_system(const ss_ &target)
+{
+	if(target.find_first_of("'\"") != ss_::npos)
+		return false;
+#ifdef __APPLE__
+	return shell_exec("open '"+target+"'") == 0;
+#else
+	return shell_exec("xdg-open '"+target+"' >/dev/null 2>&1 &") == 0;
+#endif
+}
+
 bool Handle::valid() const
 {
 	return impl > 0;
