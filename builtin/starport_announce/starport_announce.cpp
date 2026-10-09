@@ -38,6 +38,7 @@
 #include "starport_announce/api.h"
 #include "accounts/api.h"
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -113,6 +114,8 @@ struct Module: public interface::Module, public Interface
 {
 	interface::Server *m_server;
 	ss_ m_dir;
+	// The server is about to restart for an update; see on_tick()
+	std::atomic<bool> m_updating{false};
 	// starport.json as last read, and its text; under m_mutex (the thread
 	// announces from it)
 	json::Value m_config;
@@ -371,6 +374,13 @@ struct Module: public interface::Module, public Interface
 		if(!m_dir.empty() && now >= m_next_read_us){
 			m_next_read_us = now + 2000000;
 			read_config();
+			// [SERVE_UPDATE_POLITE] 3: util/serve_latest_release.sh writes
+			// shutdown_reason when it warns of an update; the listing says
+			// "updating" from the next announce, which is at once
+			const bool updating = interface::fs::path_exists(
+					m_dir+"/shutdown_reason");
+			if(updating != m_updating.exchange(updating) && updating)
+				announce_soon();
 		}
 		// [SIM_CLOCK]: a calendar moved ahead is announced at once, as
 		// the time between would have been, and the listing does not read
@@ -641,6 +651,8 @@ struct Module: public interface::Module, public Interface
 			return true;
 		}
 		body.set("players", (int64_t)player_count());
+		if(m_updating)
+			body.set("updating", true);
 		// The icon a client gets at a connect, in hex, so the listing
 		// shows it before any connect ([SERVER_ICONS])
 		if(m_server->has_module("client_file"))

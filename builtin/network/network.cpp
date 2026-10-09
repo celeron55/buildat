@@ -706,8 +706,40 @@ struct Module: public interface::Module, public network::Interface
 			lan_announce(name, m_server->has_module("accounts"));
 	}
 
+	// **A notice from the server's admin** ([SERVE_UPDATE_POLITE] 2):
+	// <user>/apps/<app>/notice, looked for once a second, its first line
+	// (200 characters at most) sent to every game peer as network:notice
+	// and the file removed. util/serve_latest_release.sh warns of an
+	// update through it.
+	int64_t m_notice_next_us = 0;
+	void check_notice(int64_t now)
+	{
+		if(now < m_notice_next_us)
+			return;
+		m_notice_next_us = now + 1000000;
+		const ss_ path = m_server->get_config().get<ss_>("user_path")+
+				"/apps/"+m_server->get_app_id()+"/notice";
+		if(!interface::fs::path_exists(path))
+			return;
+		ss_ text;
+		{
+			std::ifstream in(path);
+			std::getline(in, text);
+		}
+		::remove(path.c_str());
+		text = web::trim(text).substr(0, 200);
+		if(text.empty())
+			return;
+		log_i(MODULE, "Notice to every client: %s", cs(text));
+		for(auto &pair : m_peers){
+			if(pair.second.game())
+				send_u(pair.second, "network:notice", text);
+		}
+	}
+
 	void on_tick()
 	{
+		check_notice(interface::os::time_us());
 		{
 			const int64_t now = interface::os::time_us();
 			std::lock_guard<std::mutex> lock(m_health_mutex);

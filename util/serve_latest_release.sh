@@ -22,8 +22,13 @@
 # **A new release** ([SERVE_UPDATE_SMOOTH]) is downloaded and unpacked,
 # and each server's app compiled on it (--compile-only) while the old one
 # serves. A compile that fails keeps every server on the old version, and
-# that release is not tried again; a newer one is. Then one server at a
-# time: <user dir>/apps/<game>/shutdown_reason written ("updating to X"),
+# that release is not tried again; a newer one is. **The restart waits
+# for nobody to be on** ([SERVE_UPDATE_POLITE]): every server's /health
+# says 0 players, or UPDATE_MAX_WAIT seconds (1800) have passed since the
+# release compiled. A minute before that, whoever is on is told
+# ("<user dir>/apps/<game>/notice", which the server shows every client),
+# and a server listed on a Starport is listed as updating. Then one
+# server at a time: <user dir>/apps/<game>/shutdown_reason written ("updating to X"),
 # which the server tells its clients as it goes (they wait and rejoin),
 # stopped with SIGTERM (a game saves on it), started on the new version,
 # a stand-in on its port meanwhile, and the next once it is listening.
@@ -53,7 +58,8 @@
 # saves carry a schema version (the floorplanner) refuses a save that a
 # newer version wrote.
 #
-# Environment: POLL_SECONDS (300), GITHUB_REPO (celeron55/buildat),
+# Environment: POLL_SECONDS (300), UPDATE_MAX_WAIT (1800),
+# GITHUB_REPO (celeron55/buildat),
 # GITHUB_TOKEN (optional; unauthenticated, GitHub allows 60 asks an hour),
 # RELEASES_URL (GitHub's list of the repo's releases; a check serves its
 # own).
@@ -95,6 +101,7 @@ done
 
 base=${BUILDAT_SERVE_DIR:-$HOME/buildat-serve}
 poll=${POLL_SECONDS:-300}
+max_wait=${UPDATE_MAX_WAIT:-1800}
 repo=${GITHUB_REPO:-celeron55/buildat}
 releases_url=${RELEASES_URL:-https://api.github.com/repos/$repo/releases?per_page=10}
 asset_re='linux-x86_64-web-precompiled\.tar\.gz'
@@ -176,6 +183,9 @@ prune(){
 pids=() broken=()
 # A release some server's app would not compile on: not tried again
 bad_release=""
+# A release compiled and waiting for a quiet moment: its name, when it
+# was ready, and when whoever was on was warned
+pending="" pending_at=0 warned_at=0
 # A restarting server's stand-in, by index: its pid, and the log line
 # the server's own "Listening at" is to come after
 standins=() standin_from=()
@@ -327,6 +337,58 @@ restart(){
 	standin_stop "$i"
 }
 
+# Who is on server i, by its /health; 0 when it does not answer
+players(){
+	local i=$1 tok="${users[$1]}/apps/${games[$1]}/health_token.txt" auth=()
+	[ -f "$tok" ] && auth=(-H "Authorization: Bearer $(head -n 1 "$tok")")
+	local n
+	n=$(curl -s -m 5 "${auth[@]}" "http://127.0.0.1:${ports[$i]}/health" |
+		grep -o '"players": *[0-9]*' | grep -o '[0-9]*$')
+	echo "${n:-0}"
+}
+
+# The pending release onto every server, one at a time
+update(){
+	local old=$current i
+	current=$pending
+	# buildat-<version>-<hash>-linux-... said as its version
+	local v=${pending#buildat-}
+	for i in "${!games[@]}"; do
+		restart "$i" "updating to ${v%%-*}"
+	done
+	pending="" pending_at=0 warned_at=0
+	[ -n "$old" ] && prune
+}
+
+# Updated once nobody is on, or at the latest max_wait after it was
+# ready; whoever is on warned a minute before that
+update_when_quiet(){
+	[ -z "$pending" ] && return
+	local i n on=() now
+	now=$(date +%s)
+	for i in "${!games[@]}"; do
+		n=0
+		[ -n "${pids[$i]:-}" ] && n=$(players "$i")
+		[ "$n" -gt 0 ] && on+=("$i")
+	done
+	if [ ${#on[@]} = 0 ] || [ "$now" -ge $((pending_at + max_wait)) ]; then
+		[ ${#on[@]} -gt 0 ] && say "updating with ${#on[@]} server(s) still in use"
+		update
+		return
+	fi
+	if [ "$warned_at" = 0 ] && [ "$now" -ge $((pending_at + max_wait - 60)) ]; then
+		warned_at=$now
+		local v=${pending#buildat-}
+		v=${v%%-*}
+		for i in "${on[@]}"; do
+			say "warning ${games[$i]} on port ${ports[$i]}: updating to $v in 60 s"
+			mkdir -p "${users[$i]}/apps/${games[$i]}"
+			echo "The server updates to $v in 60 s" > "${users[$i]}/apps/${games[$i]}/notice"
+			echo "updating to $v" > "${users[$i]}/apps/${games[$i]}/shutdown_reason"
+		done
+	fi
+}
+
 stop_all(){
 	local i
 	# All told at once, so that they save and go together
@@ -359,7 +421,8 @@ while true; do
 			say "could not read the releases of $repo; keeping ${current:-nothing}"
 		elif [ "$(basename "$url" .tar.gz)" != "$current" ]; then
 			name=$(basename "$url" .tar.gz)
-			[ "$name" != "$bad_release" ] && name=$(install "$url") || name=""
+			[ "$name" != "$bad_release" ] && [ "$name" != "$pending" ] &&
+				name=$(install "$url") || name=""
 			if [ -n "$name" ]; then
 				say "new version: $name"
 				ok=1
@@ -372,18 +435,17 @@ while true; do
 					break
 				done
 				if [ -n "$ok" ]; then
-					old=$current
-					current=$name
-					# buildat-<version>-<hash>-linux-... said as its version
-					v=${name#buildat-}
-					for i in "${!games[@]}"; do
-						restart "$i" "updating to ${v%%-*}"
-					done
-					[ -n "$old" ] && prune
+					say "$name is ready; updating once nobody is on, in" \
+						"$max_wait s at the latest"
+					pending=$name
+					[ "$pending_at" = 0 ] && pending_at=$(date +%s)
+					# Nothing running yet: at once
+					[ -z "$current" ] && update
 				fi
 			fi
 		fi
 	fi
+	update_when_quiet
 	for i in "${!games[@]}"; do
 		pid=${pids[$i]:-}
 		if [ -n "$current" ] && [ "${broken[$i]:-}" != "$current" ] &&

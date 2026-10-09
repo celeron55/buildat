@@ -450,7 +450,8 @@ function M.show_connect_to_server()
 				row.name = g.kind == "pool" and tostring(g.name) or
 						tostring(x.name)
 				row.badge = (g.kind == "pool" and g.count .. " servers, " or
-						"") .. g.players .. " playing"
+						"") .. g.players .. " playing" ..
+						(x.updating == true and ", updating" or "")
 				row.line = tostring(x.description or "") .. "\n" ..
 						categories(x) .. "  via " ..
 						table.concat(x.starports or {}, ", ")

@@ -57,6 +57,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <chrono>
 #include <set>
 #include <condition_variable>
 
@@ -877,6 +878,10 @@ struct Module: public interface::Module
 				json::array());
 		l.set("players", jint(b, "players"));
 		l.set("players_max", jint(b, "players_max"));
+		// [SERVE_UPDATE_POLITE] 3: about to restart for an update; listed
+		// as "updating" until it announces again, 10 minutes at most
+		l.set("updating_until", b.get("updating").is_true() ? t + 600 :
+				(int64_t)0);
 		l.set("icon", icon_sha);
 		l.set("host", host);
 		l.set("port", port);
@@ -1136,14 +1141,24 @@ struct Module: public interface::Module
 			}
 			VerifyResult res;
 			res.listing = j.listing;
-			try {
-				const ss_ text = interface::http_get(j.url);
-				const json::Value v = json::load_string(text.c_str());
-				res.ok = v.is_object() && same(jstr(v, "response"), j.expect);
-				if(!res.ok)
-					res.why = "a wrong answer";
-			} catch(std::exception &e){
-				res.why = e.what();
+			// A 503 is asked again 3 s later, twice: a server that has just
+			// restarted under util/serve_latest_release.sh shares its port
+			// with the stand-in page for a moment after it announces
+			for(int attempt = 0; attempt < 3; attempt++){
+				if(attempt > 0)
+					std::this_thread::sleep_for(std::chrono::seconds(3));
+				try {
+					const ss_ text = interface::http_get(j.url);
+					const json::Value v = json::load_string(text.c_str());
+					res.ok = v.is_object() &&
+							same(jstr(v, "response"), j.expect);
+					if(!res.ok)
+						res.why = "a wrong answer";
+				} catch(std::exception &e){
+					res.why = e.what();
+				}
+				if(res.ok || res.why.find("error: 503") == ss_::npos)
+					break;
 			}
 			std::lock_guard<std::mutex> lock(m_vmutex);
 			m_vresults.push_back(res);
@@ -1291,6 +1306,8 @@ struct Module: public interface::Module
 			for(const char *k : {"kind", "audience", "access", "descriptors"})
 				s.set(k, e.get(k));
 			s.set("restricted", st != "listed");
+			if(jint(l, "updating_until") > now_s())
+				s.set("updating", true);
 			const ss_ fid = jstr(l, "fleet");
 			if(!fid.empty()){
 				const json::Value f = load("fleets", fid);

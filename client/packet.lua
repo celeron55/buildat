@@ -21,6 +21,14 @@ buildat.safe.take_packet_us = function()
 end
 
 function __buildat_handle_packet(name, data)
+	-- [SERVE_UPDATE_POLITE] 2: the server's admin's notice, whatever the
+	-- app subscribed to, in the notice line in its own colour
+	if name == "network:notice" then
+		log:info("Notice from the server: " .. data)
+		require("buildat/extension/ui_utils").safe.show_notice(data, nil,
+				"warn")
+		return
+	end
 	local cb = packet_subs[name]
 	if cb then
 		local t0 = buildat.get_time_us()

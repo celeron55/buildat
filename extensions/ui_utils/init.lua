@@ -1538,7 +1538,8 @@ end
 -- copy, if given ([LOG_REACH]: the error's full text), gets a "Copy"
 -- button beside the line, which takes no focus and only a click where the
 -- pointer is free; the line then stays 20 s, and while the pointer is on it
-function M.safe.show_notice(text, copy)
+-- color: a name for rgb(), "error" when absent
+function M.safe.show_notice(text, copy, color)
 	local t = magic.ui.root:CreateChild("UIElement")
 	t.defaultStyle = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
 	t:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(0, 0, 0, 0))
@@ -1548,7 +1549,7 @@ function M.safe.show_notice(text, copy)
 	local line = t:CreateChild("Text")
 	line:SetStyleAuto()
 	line.text = tostring(text)
-	line.color = magic.Color(M.safe.rgb("error"))
+	line.color = magic.Color(M.safe.rgb(color or "error"))
 	line:SetTextEffect(magic.TE_SHADOW)
 	local b, bt
 	if copy then
