@@ -38,6 +38,7 @@ declare -A srcs=(
 	# The decoders compiled in, instrumented; the rest of Urho3D from its
 	# library (image_fuzz.cpp)
 	[image]="3rdparty/Urho3D/Source/Urho3D/Resource/Image.cpp 3rdparty/Urho3D/Source/Urho3D/Resource/Decompress.cpp"
+	[image_data]="3rdparty/Urho3D/Source/Urho3D/Resource/Image.cpp 3rdparty/Urho3D/Source/Urho3D/Resource/Decompress.cpp"
 	# The model and animation parsers and the glTF loader, the same way
 	# (model_fuzz.cpp)
 	[model]="3rdparty/Urho3D/Source/Urho3D/Graphics/Model.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/Geometry.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/IndexBuffer.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/Animation.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/GLTFLoader.cpp"
@@ -79,6 +80,7 @@ declare -A libs=(
 	[json]=""
 	[zip]="-lz -lzstd"
 	[image]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
+	[image_data]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
 	[model]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
 	[xml]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
 	[sound]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
@@ -93,6 +95,7 @@ uflags=$here/3rdparty/Urho3D/Build/Source/Urho3D/CMakeFiles/Urho3D.dir/flags.mak
 urho_extra="$(sed -n 's/^CXX_\(DEFINES\|INCLUDES\) = //p' "$uflags" 2>/dev/null) -fno-sanitize=shift,nonnull-attribute -w"
 declare -A extra=(
 	[image]="$urho_extra"
+	[image_data]="$urho_extra"
 	[model]="$urho_extra -fno-sanitize=pointer-overflow -I$here/3rdparty/Urho3D/Source/ThirdParty/tinygltf"
 	[xml]="$urho_extra -fno-sanitize=pointer-overflow"
 	# stb_vorbis's sample conversion overflows a signed int in its
@@ -129,6 +132,7 @@ declare -A restart=(
 	# quiet machine (2026-10-05), a slow parse and not a finding
 	[font]=1
 	[image]=1
+	[image_data]=1
 )
 declare -A rss=()
 targets=${*:-${!srcs[@]}}

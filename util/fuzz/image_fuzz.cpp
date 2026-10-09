@@ -13,6 +13,7 @@
 #include <Urho3D/Resource/Image.h>
 #include <STB/stb_image.h>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
@@ -23,6 +24,13 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	// skipped, as the compressed branch skips one below -- stb_image
 	// decoding what a small input declares held run 2 at 3 exec/s. The
 	// large-size paths go unfuzzed; drop this for a run that wants them.
+#ifdef IMAGE_DATA
+	// [SECURITY_RUN_4] image_data: what image_load_data passes on, a PNG
+	// or a JPEG of at most 1 MiB (src/lua_bindings/misc_urho3d.cpp)
+	if(size < 4 || size > 1024 * 1024 || (memcmp(data, "\x89PNG", 4) != 0 &&
+			memcmp(data, "\xff\xd8\xff", 3) != 0))
+		return 0;
+#endif
 	int w, h, comp;
 	if(stbi_info_from_memory(data, (int)size, &w, &h, &comp) &&
 			(int64_t)w * h > (1 << 24))
