@@ -143,29 +143,35 @@ end
 -- **The Servers list's filters** ([SERVER_FILTER]): All, the ones joined
 -- before, then one per list the servers came from and one per network,
 -- out of what the entries say rather than a fixed set, so an app's own
--- server tiles bring their own
+-- server tiles bring their own. In the user's order ([BROWSE_TWEAKS]);
+-- any other after those, by name.
+local FILTER_ORDER = {"Starport", "Luanti server list", "LAN", "Buildat",
+	"Luanti"}
 local function server_filters(list)
 	-- This menu's own two lists are offered when they are empty too
-	local lists, networks = {"Starport"}, {}
 	local seen = {Starport = true, LAN = not web or nil}
-	if not web then lists[2] = "LAN" end
 	for _, e in ipairs(list) do
-		if e.listed_by and not seen[e.listed_by] then
-			seen[e.listed_by] = true
-			lists[#lists + 1] = e.listed_by
-		end
-		if e.network and not seen[e.network] then
-			seen[e.network] = true
-			networks[#networks + 1] = e.network
+		if e.listed_by then seen[e.listed_by] = true end
+		if e.network then seen[e.network] = true end
+	end
+	local out, rest = {"All", "Previously connected"}, {}
+	for _, f in ipairs(FILTER_ORDER) do
+		if seen[f] then
+			out[#out + 1] = f
+			seen[f] = nil
 		end
 	end
-	table.sort(lists)
-	table.sort(networks)
-	local out = {"All", "Previously connected"}
-	for _, f in ipairs(lists) do out[#out + 1] = f end
-	for _, f in ipairs(networks) do out[#out + 1] = f end
+	for f in pairs(seen) do rest[#rest + 1] = f end
+	table.sort(rest)
+	for _, f in ipairs(rest) do out[#out + 1] = f end
 	return out
 end
+assert(table.concat(server_filters({{listed_by = "Zed", network = "Luanti"},
+		{listed_by = "Luanti server list", network = "Buildat"},
+		{listed_by = "Abc"}, {network = "Mine"}}), ",") == (web and
+		"All,Previously connected,Starport,Luanti server list,Buildat,Luanti,Abc,Mine,Zed" or
+		"All,Previously connected,Starport,Luanti server list,LAN,Buildat,Luanti,Abc,Mine,Zed"),
+		"server_filters: the user's order, then by name")
 
 local function passes(e, filter)
 	if filter == "All" then return true end
@@ -515,7 +521,10 @@ local browse, settings
 local function home(query)
 	local t0 = api.get_time_us()
 	local width = math.min(magic.ui.root.width - 40, 760)
+	-- Short on a narrow screen, where the long one stretched the window
+	-- ([BROWSE_TWEAKS]; simplified: by the screen's width, not the text's)
 	local root, window = screen("launch_menu", width,
+			magic.ui.root.width < 760 and "Type to search" or
 			"Type to search apps, saves and servers", query)
 	local view = ui_utils.list_view(window, width - 32,
 			magic.ui.root.height - 24 - 160)
@@ -625,6 +634,7 @@ browse = function(kind, query, by, filter, focus_filter)
 	local width = math.min(magic.ui.root.width - 40, 1000)
 	local list_w = narrow and width - 32 or width - 32 - PANEL_WIDTH - 12
 	local root, window = screen("launch_menu " .. kind, width,
+			narrow and KIND_TITLE[kind] .. " (type to search)" or
 			KIND_TITLE[kind] .. "   (type to search; Ctrl+S sorts by " ..
 			(by == "name" and "recent use" or "name") ..
 			(kind == "server" and "; Ctrl+F filters" or "") .. ")", query)
@@ -633,6 +643,9 @@ browse = function(kind, query, by, filter, focus_filter)
 		if e.kind == kind then of_kind[#of_kind + 1] = e end
 	end
 	local filters = kind == "server" and server_filters(of_kind) or nil
+	if filters then
+		log:info("launch_menu: filters " .. table.concat(filters, ", "))
+	end
 	local function refilter(f, focus_filter)
 		uistack.main:pop(root)
 		browse(kind, query, by, f, focus_filter)
@@ -793,6 +806,15 @@ browse = function(kind, query, by, filter, focus_filter)
 			return true
 		end
 		local i = in_actions()
+		-- Shift+Tab is Left, and Tab in the panel Down, as in a form
+		-- ([BROWSE_TWEAKS])
+		if key == KEY_TAB then
+			if magic.input:GetQualifierDown(magic.QUAL_SHIFT) then
+				key = KEY_LEFT
+			elseif i then
+				key = KEY_DOWN
+			end
+		end
 		if i then
 			-- In the panel: up and down between its actions, Left or
 			-- Escape back to the row it is the panel of

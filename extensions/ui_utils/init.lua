@@ -1983,7 +1983,10 @@ function M.safe.scan_ui(label, element, depth, out)
 				end)
 				if okt and name and name ~= "" then
 					line = line .. " image " .. dump(name)
-				elseif not okt then
+				-- No texture reads as a nil the sandbox refuses: no image
+				-- (a close_glyph's button)
+				elseif not okt and not tostring(name):find(
+						'Disallowed type: "nil"', 1, true) then
 					line = line .. " image ? (" .. tostring(name) .. ")"
 				end
 			end

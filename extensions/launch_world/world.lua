@@ -101,7 +101,7 @@ local room = api.run_extension_file("room.lua")
 local GAMES, FLOOR_ACTIONS = {}, {}
 -- **An icon two things share is not a mark** (2026-09-24): the Luanti
 -- launcher gives every entry it offers `icon = "luanti.png"`, so
--- VoxeLibre, devtest, realtest, "Import a game" and twenty more all
+-- VoxeLibre, devtest, realtest, "Import a Luanti game" and twenty more all
 -- drew the same picture -- and a mark's whole job is to tell one orb
 -- from another. Counted here and read where the mark is made: an icon
 -- worn by more than one falls through to the name-seeded sigil, which
