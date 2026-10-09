@@ -8,8 +8,8 @@
 # apps/play serving web/; headless Firefox opens the page on 127.0.0.1,
 # picks "Join a Luanti server", connects and logs in: a local page
 # reaches this machine's servers ([WEB_LUANTI_JOIN]). A page asked for by
-# a public name is bridged to the listed address only, and refused this
-# machine's with the reason in the close frame.
+# a public name is refused an unlisted address, and a listed one that is
+# not public, with the reason in the close frame.
 # Needs web/ from util/build_web.sh.
 #   util/web_luanti_bridge_check.sh [steps.json]   (default: the check's own)
 set -u
@@ -79,10 +79,12 @@ f = d.split(b"\r\n\r\n", 1)[1] if b"\r\n\r\n" in d else b""
 print(f[4:2 + f[1]].decode() if f[:1] == b"\x88" else "open")
 ' $PLAY "$1" "$2"
 }
+# Listed, but this machine's: a public page reaches public addresses
+# only ([SECURITY_RUN_3]), so a listed one is past the list check and
+# stopped at the next
 listed=$(ws 127.0.0.1:$((LUANTI + 1)) play.example)
-[ "$listed" = open ] || fail "a listed address was not bridged: $listed ($tmp/play.log)"
-grep -q "to 127.0.0.1:$((LUANTI + 1))" "$tmp/play.log" ||
-	fail "no bridge to the listed address ($tmp/play.log)"
+[ "$listed" = "not a public address" ] ||
+	fail "a listed private address: $listed ($tmp/play.log)"
 refused=$(ws 127.0.0.1:$LUANTI play.example)
 grep -q "not on Luanti's list (127.0.0.1:$LUANTI)" "$tmp/play.log" ||
 	fail "a public page reached this machine's server ($tmp/play.log)"
