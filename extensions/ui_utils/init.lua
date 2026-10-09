@@ -103,8 +103,11 @@ local function in_view(sc, e)
 	local y, top = y_in(sc, e), sc.top()
 	return y >= top and y + e.height <= top + sc.height()
 end
--- Scrolls just enough that e is in view, its top if it is taller
+-- Scrolls just enough that e is in view, its top if it is taller; a
+-- multi-line field's caret, not the whole of it ([HEARTH_PAGE_SCROLL]:
+-- one grows with its text)
 local function show_in(sc, e)
+	e = e:GetCaret() or e
 	local y, top, h = y_in(sc, e), sc.top(), sc.height()
 	if y + e.height > top + h then
 		sc.set_top(math.min(y, y + e.height - h))
@@ -594,6 +597,14 @@ function M.safe.keyboard_page(win)
 				end
 			end
 		end
+		-- A multi-line field's caret before a key moves it: Up on its first
+		-- row and Down on its last leave it ([HEARTH_PAGE_SCROLL])
+		local f = magic.ui.focusElement
+		local caret, first = nil, false
+		if f then
+			caret, first = f:GetCaret()
+		end
+		page.rows_at = caret and {f, first, f:IsCaretOnLastRow()} or nil
 		local cols = page.columns
 		-- Most frames the focus is where it was: that one asked, not both
 		-- columns walked ([FRAME_WORK]: ~1 ms a frame on the join screen)
@@ -678,7 +689,10 @@ function M.safe.keyboard_page(win)
 		local focus = magic.ui.focusElement
 		local typing = focus ~= nil and focus:GetTypeName() == "LineEdit"
 		-- A multi-line field's rows are its up and down ([HEARTH_MVP])
-		local rows = typing and focus:IsMultiLine()
+		local ra = page.rows_at
+		local rows = typing and focus:IsMultiLine() and not (ra and
+				ra[1]:HasFocus() and (key == KEY_UP and ra[2] or
+				key == KEY_DOWN and ra[3]))
 		if not typing and (key == magic.KEY_PAGEUP or
 				key == magic.KEY_PAGEDOWN) then
 			local at = 0
@@ -911,6 +925,63 @@ function M.safe.vertical_menu(root, options)
 	return menu
 end
 
+-- view:header() and view:row() of a list_view, adding to `list`
+local function list_view_rows(view, list, width, options)
+	local row_height = options.row_height or 28
+	local icon_size = options.icon_size or 20
+	local function text(at, s, size, color)
+		local t = at:CreateChild("Text")
+		t:SetStyleAuto()
+		t.text = s
+		if size then t:SetFontSize(size) end
+		if color then t.color = magic.Color(M.safe.rgb(color)) end
+		return t
+	end
+	function view:header(s, size, color)
+		local t = text(list, s, size or 13, color or "dim")
+		t:SetFixedHeight(math.max(t.height, row_height - 4))
+		return t
+	end
+	function view:row(e, badge)
+		local b = list:CreateChild("Button")
+		b:SetStyleAuto()
+		b:SetName("Button")
+		b:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(10, 2, 10, 2))
+		b:SetFixedHeight(row_height)
+		-- The row's own icon, small enough to keep its height; an empty
+		-- one where there is none, so that the labels line up
+		local tex = e.icon and magic.cache:GetResource("Texture2D", e.icon)
+		local icon = b:CreateChild(tex and "BorderImage" or "UIElement")
+		icon:SetFixedSize(icon_size, icon_size)
+		if tex then
+			-- A game's own icon is pixel art
+			tex.filterMode = magic.FILTER_NEAREST
+			icon.texture = tex
+			icon.blendMode = magic.BLEND_ALPHA
+		elseif e.glyph then
+			-- [GLYPH_ICONS]
+			text(icon, e.glyph, icon_size + 2, "dim"):SetAlignment(HA_CENTER,
+					VA_CENTER)
+		end
+		local label = text(b, e.label)
+		label:SetName("ButtonText")
+		label:SetFixedWidth(math.floor(width * (options.label_share or 0.62)))
+		label:SetAlignment(HA_LEFT, VA_CENTER)
+		text(b, badge or e.badge or "", 12, "dim"):SetAlignment(HA_LEFT,
+				VA_CENTER)
+		-- e.mark = {glyph, colour name}: a glyph at the right of the
+		-- label's column ([HEARTH_NEW_MARKS]), returned for the caller to
+		-- change
+		if e.mark then
+			local m = text(label, e.mark[1], nil, e.mark[2])
+			m:SetAlignment(HA_RIGHT, VA_CENTER)
+			m.position = magic.IntVector2(-4, 0)
+			return b, m
+		end
+		return b
+	end
+end
+
 -- **A list in a viewport that clips it** and scrolls by moving it
 -- (launch_menu's, shared since [HEARTH_UI]). Its rows are anything:
 -- view:row() makes the menus' one-line button, and a caller with rows of
@@ -943,7 +1014,26 @@ end
 function M.safe.list_view(parent, width, height, options)
 	options = options or {}
 	local row_height = options.row_height or 28
-	local icon_size = options.icon_size or 20
+	-- options.within: another view, whose list this one's rows are a
+	-- group in ([HEARTH_PAGE_SCROLL]: a page's rows among its other
+	-- things, one scroll for them all); `parent` and `height` are then
+	-- unused, and the scrolling, the wheel and the focus are the other's
+	local outer = options.within
+	if outer then
+		local list = outer.list:CreateChild("UIElement")
+		list:SetFixedWidth(width)
+		list.enabled = true
+		local view = {viewport = outer.viewport, list = list}
+		list_view_rows(view, list, width, options)
+		function view:fit()
+			list:SetLayout(LM_VERTICAL, options.spacing or 2,
+					magic.IntRect(0, 0, 0, 0))
+			outer:fit()
+		end
+		function view:scroll(dy) outer:scroll(dy) end
+		function view:show(e) outer:show(e) end
+		return view
+	end
 	local viewport = parent:CreateChild("UIElement")
 	viewport.clipChildren = true
 	viewport.enabled = true
@@ -1009,73 +1099,22 @@ function M.safe.list_view(parent, width, height, options)
 					return
 				end
 				pending = false
-				-- Which row holds the focus
-				for i = 0, list:GetNumChildren() - 1 do
-					local r = list:GetChild(i)
-					if r and r:HasRecursiveFocus() then
-						view:show(r)
-						break
-					end
+				-- The focused element itself: a row may be a group of
+				-- them taller than the view
+				local f = magic.ui.focusElement
+				if f and list:HasRecursiveFocus() then
+					view:show(f)
 				end
 			end)
 		end
 	end
-	local function text(at, s, size, color)
-		local t = at:CreateChild("Text")
-		t:SetStyleAuto()
-		t.text = s
-		if size then t:SetFontSize(size) end
-		if color then t.color = magic.Color(M.safe.rgb(color)) end
-		return t
-	end
-	function view:header(s, size, color)
-		local t = text(list, s, size or 13, color or "dim")
-		t:SetFixedHeight(math.max(t.height, row_height - 4))
-		return t
-	end
-	function view:row(e, badge)
-		local b = list:CreateChild("Button")
-		b:SetStyleAuto()
-		b:SetName("Button")
-		b:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(10, 2, 10, 2))
-		b:SetFixedHeight(row_height)
-		-- The row's own icon, small enough to keep its height; an empty
-		-- one where there is none, so that the labels line up
-		local tex = e.icon and magic.cache:GetResource("Texture2D", e.icon)
-		local icon = b:CreateChild(tex and "BorderImage" or "UIElement")
-		icon:SetFixedSize(icon_size, icon_size)
-		if tex then
-			-- A game's own icon is pixel art
-			tex.filterMode = magic.FILTER_NEAREST
-			icon.texture = tex
-			icon.blendMode = magic.BLEND_ALPHA
-		elseif e.glyph then
-			-- [GLYPH_ICONS]
-			text(icon, e.glyph, icon_size + 2, "dim"):SetAlignment(HA_CENTER,
-					VA_CENTER)
-		end
-		local label = text(b, e.label)
-		label:SetName("ButtonText")
-		label:SetFixedWidth(math.floor(width * (options.label_share or 0.62)))
-		label:SetAlignment(HA_LEFT, VA_CENTER)
-		text(b, badge or e.badge or "", 12, "dim"):SetAlignment(HA_LEFT,
-				VA_CENTER)
-		-- e.mark = {glyph, colour name}: a glyph at the right of the
-		-- label's column ([HEARTH_NEW_MARKS]), returned for the caller to
-		-- change
-		if e.mark then
-			local m = text(label, e.mark[1], nil, e.mark[2])
-			m:SetAlignment(HA_RIGHT, VA_CENTER)
-			m.position = magic.IntVector2(-4, 0)
-			return b, m
-		end
-		return b
-	end
+	list_view_rows(view, list, width, options)
 	function view:fit()
 		list:SetLayout(LM_VERTICAL, options.spacing or 2,
 				magic.IntRect(0, 0, 0, 0))
-		viewport:SetFixedSize(width, math.max(row_height,
-				math.min(height, list.height)))
+		-- options.fill: the height whatever is in it (a page)
+		viewport:SetFixedSize(width, options.fill and height or
+				math.max(row_height, math.min(height, list.height)))
 		view:scroll(0)
 	end
 	function view:scroll(dy)

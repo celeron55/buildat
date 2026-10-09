@@ -29,7 +29,7 @@
 //   ["drag", x0, y0, x1, y1, "touch"]
 //                           the left button (or a finger) down at x0, y0,
 //                           moved to x1, y1 over half a second, and up
-//                           (Firefox only)
+//                           (Chrome: a finger only)
 //   ["shot", path]          a PNG of the page
 //   ["eval", js]            print what the expression gives
 //   ["window", n]           the steps after go to the nth top-level window
@@ -281,10 +281,13 @@ async function chrome() {
 				throw new Error("no file " + p);
 			file = p;
 		},
+		// One finger; a mouse drag is not here yet
+		drag: (x0, y0, x1, y1) => ops.fingers(x0, y0, null, null, x1, y1),
 		fingers: async (ax0, ay0, bx0, by0, ax1, ay1, bx1, by1) => {
-			const at = f => [{x: ax0 + (ax1 - ax0) * f, y: ay0 + (ay1 - ay0) * f,
-					id: 1}, {x: bx0 + (bx1 - bx0) * f, y: by0 + (by1 - by0) * f,
-					id: 2}];
+			const a = f => ({x: ax0 + (ax1 - ax0) * f, y: ay0 + (ay1 - ay0) * f,
+					id: 1});
+			const at = f => bx0 === null ? [a(f)] : [a(f), {x: bx0 +
+					(bx1 - bx0) * f, y: by0 + (by1 - by0) * f, id: 2}];
 			await c.send("Input.dispatchTouchEvent", {type: "touchStart",
 					touchPoints: at(0)});
 			for (let i = 1; i <= 10; i++) {

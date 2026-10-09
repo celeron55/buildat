@@ -6,7 +6,8 @@
 # the web client in headless Chrome as a phone (390x844 at 3 device pixels,
 # touch), held upright and then turned (844x390). Each time by taps: log in,
 # Help, New thread..., a title and a message, File... (the browser's picker,
-# given the shot) and Start the thread. The two threads carry the uploaded
+# given the shot), a finger's drag to the page's end (the field has grown
+# with the link, [HEARTH_PAGE_SCROLL]) and Start the thread. The two threads carry the uploaded
 # image's link and draw its thumbnail ([HEARTH_ATTACHMENTS]), and the image
 # is served. What a phone does and Chrome here does not (the on-screen
 # keyboard over the page, the real picker) is for a test by hand. Needs
@@ -51,7 +52,7 @@ admin "$t/admin2.log" '{"cmd":"trust","name":"reader","on":true}'
 cp "$here/3rdparty/Urho3D/bin/Data/Textures/LogoLarge.png" "$t/screenshot_lamp.png"
 
 # The taps are in CSS pixels, where the page puts the buttons at that size
-drive(){ # name viewport join help new message file start title
+drive(){ # name viewport join help new message file start title drag
 	local n=$1 vp=$2
 	cat > "$t/$n.json" <<J
 [
@@ -72,6 +73,8 @@ drive(){ # name viewport join help new message file start title
 	["waitlog", "the file picker opened", 10],
 	["wait", 3000],
 	["shot", "\${OUT}/picked.png"],
+	["drag", ${10}, "touch"], ["wait", 1000],
+	["shot", "\${OUT}/dragged.png"],
 	["tap", $8],
 	["wait", 3000],
 	["shot", "\${OUT}/posted.png"]
@@ -86,9 +89,9 @@ J
 		fail "$n: a thumbnail not shown"
 }
 drive upright 390x844@3 "195, 548" "194, 184" "80, 159" "194, 304" "197, 417" \
-	"92, 382" "Upright lamp"
-drive turned 844x390@3 "422, 320" "512, 150" "264, 125" "500, 245" "726, 301" \
-	"276, 301" "Turned lamp"
+	"97, 439" "Upright lamp" "200, 300, 200, 100"
+drive turned 844x390@3 "422, 320" "512, 150" "264, 125" "500, 245" "751, 338" \
+	"281, 306" "Turned lamp" "600, 180, 600, 20"
 
 for n in 1 2; do
 	curl -s "$U/t/$n" > "$t/page$n"

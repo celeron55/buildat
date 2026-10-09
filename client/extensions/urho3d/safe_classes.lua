@@ -2085,6 +2085,32 @@ function M.define(dst, util)
 				end
 				return raw:GetTypeName() == "LineEdit" and raw:IsMultiLine()
 			end,
+			-- A multi-line LineEdit's caret, nil for the rest, and whether
+			-- it is on the text's first row (IsCaretOnLastRow: its last),
+			-- asked of the focus, which reads as a UIElement: a page keeps the
+			-- caret in view as the field grows, and Up and Down leave the
+			-- field from its ends ([HEARTH_PAGE_SCROLL]; see keyboard_page()
+			-- in extensions/ui_utils)
+			GetCaret = util.wrap_function({"__safe", "__safe"}, {"UIElement"},
+				function(self)
+					if self:GetTypeName() ~= "LineEdit" or
+							not self:IsMultiLine() then
+						return nil, false
+					end
+					local c, t = self:GetCursor(), self:GetTextElement()
+					local y = c:GetPosition().y - t:GetPosition().y
+					return util.wrap_instance("UIElement", c), y < c:GetHeight()
+				end),
+			IsCaretOnLastRow = util.wrap_function({"boolean"}, {"UIElement"},
+				function(self)
+					if self:GetTypeName() ~= "LineEdit" or
+							not self:IsMultiLine() then
+						return false
+					end
+					local c, t = self:GetCursor(), self:GetTextElement()
+					local y = c:GetPosition().y - t:GetPosition().y
+					return y + c:GetHeight() >= t:GetHeight()
+				end),
 			-- Whether the wheel at window pixel (x, y), a click of delta, is
 			-- a multi-line edit's under this element, one with more text to
 			-- show that way ([TEXTAREA_WHEEL]): a page that scrolls by the

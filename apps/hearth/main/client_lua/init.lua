@@ -303,11 +303,27 @@ local function edit(parent, label, multi, draft, width, on_change)
 	e.multiLine = multi == true
 	e.textSelectable = true
 	e.textCopyable = true
+	-- A message's field is three rows and grows with its text: the page
+	-- scrolls, not the field ([HEARTH_PAGE_SCROLL])
+	local function grow()
+		if not multi then
+			return
+		end
+		local rh = e.cursor.height > 0 and e.cursor.height or 16
+		e:SetFixedHeight(math.max(3 * rh, e.textElement.height) + 12)
+		-- The field's own scroll goes back to its top: it changes only
+		-- when the caret moves (LineEdit.cpp, UpdateCursor)
+		local c = e.cursorPosition
+		e.cursorPosition = 0
+		e.cursorPosition = c
+	end
 	if draft then
 		e:SetText(drafts[draft] or "")
 	end
-	if draft or on_change then
+	grow()
+	if draft or on_change or multi then
 		magic.SubscribeToEvent(e, "TextChanged", function()
+			grow()
 			if draft then
 				drafts[draft] = e:GetText()
 				draft_times[draft] = buildat.get_time_us() / 1e6
@@ -342,6 +358,9 @@ end
 -- The frame: the sidebar and the page area beside it
 --
 local frame, sidebar, area = nil, nil, nil
+-- The page: one view in the area that scrolls all of it, its lists' rows
+-- among the rest ([HEARTH_PAGE_SCROLL])
+local page_view = nil
 local narrow = magic.ui.root.width < 560
 
 -- The stack's top under the frame: another on it is a dialog over Hearth
@@ -421,6 +440,10 @@ local status = nil
 say = function(t)
 	if status and pcall(function() status:SetText(t) end) then
 		status.visible = true
+		-- At the page's top, which may be scrolled away
+		-- simplified: the page goes up to it; a line kept in sight
+		-- beside the scroll would keep the place
+		page_view:show(status)
 	else
 		message = t
 	end
@@ -452,13 +475,17 @@ local function open(title)
 		log:info("hearth: page " .. title)
 	end
 	area:RemoveAllChildren()
+	page_view = ui.list_view(area, W, H, {wheel = 40, follow_focus = true,
+			spacing = 6, fill = true})
+	page_view:fit()
+	local page = page_view.list
 	marks.page = {}
 	selected, composer, thread_list = nil, nil, nil
 	if narrow then
 		sidebar.visible = false
 		area.visible = true
 	end
-	local top = row(area)
+	local top = row(page)
 	local tw = W
 	if #history > 0 or narrow then
 		local b = button(top, "Back", back)
@@ -467,32 +494,18 @@ local function open(title)
 	-- The title wraps; the row is as tall as it
 	local t = text(top, title, nil, tw, 16)
 	top:SetFixedHeight(math.max(28, t.height))
-	status = text(area, message or "", WARN, W)
+	status = text(page, message or "", WARN, W)
 	status.visible = message ~= nil
 	message = nil
-	return area
+	return page
 end
 
--- The height left in the area under what is on it, less `reserve`
-local function room(reserve)
-	local used = 0
-	for i = 0, area:GetNumChildren() - 1 do
-		local c = area:GetChild(i)
-		if c and c.visible then
-			used = used + c.height + 6
-		end
-	end
-	return math.max(60, H - used - (reserve or 0))
-end
-
--- The page's list: what is left of the area, the wheel over it scrolling
--- it and the keys' focus kept in view
-local function list(reserve, options)
+-- The page's list: its rows a group in the page, scrolled with it
+local function list(options)
 	options = options or {}
-	options.wheel = options.wheel or 40
-	options.follow_focus = true
+	options.within = page_view
 	options.label_share = options.label_share or 0.5
-	return ui.list_view(area, W, room(reserve), options)
+	return ui.list_view(area, W, 0, options)
 end
 
 -- A row of the list: a one-line button with its badge. `width`: the
@@ -1085,9 +1098,7 @@ show_thread = function(id, at, missing)
 						fixed_in:GetText() or ""}, redraw)
 			end)
 		end
-		-- The reply's room is kept at the foot: the field, its label and
-		-- its buttons
-		local v = list(165, {spacing = 6})
+		local v = list({spacing = 6})
 		thread_list = v
 		t.first = t.list[1] and t.list[1].id or 0
 		local boxes = {}
@@ -1194,7 +1205,7 @@ show_thread = function(id, at, missing)
 			action("Copy #" .. id, function()
 				magic.ui:SetClipboardText("#" .. id)
 			end)
-			boxes[m.id] = holder
+			boxes[m.id], boxes.last = holder, holder
 		end
 		-- The question, its answer, then the rest in order
 		local answer = nil
@@ -1213,7 +1224,7 @@ show_thread = function(id, at, missing)
 		end
 		v:fit()
 		-- Where it opens: at the message asked for, else at what is new,
-		-- else at the end
+		-- else at the last message (the reply form under it)
 		local function place()
 			local target = at and boxes[at]
 			if target then
@@ -1226,9 +1237,10 @@ show_thread = function(id, at, missing)
 				at = nil
 			elseif boxes.new then
 				v:scroll(-1000000)
-				v:scroll(boxes.new.position.y)
-			else
-				v:scroll(1000000)
+				v:scroll(v.list.position.y + boxes.new.position.y)
+			elseif boxes.last then
+				v:scroll(-1000000)
+				v:show(boxes.last)
 			end
 		end
 		place()
@@ -1241,15 +1253,18 @@ show_thread = function(id, at, missing)
 		open_thread = {id = id, view = v,
 				last = t.list[#t.list] and t.list[#t.list].id or 0,
 				append = function(list_)
+			local mine = false
 			for _, m in ipairs(list_) do
 				add_message(m, false)
 				open_thread.last = m.id
+				mine = m.author == me.account
 			end
 			v:fit()
 			if at then
 				place()
-			else
-				v:scroll(1000000)
+			elseif mine then
+				-- Just posted: in view
+				v:show(boxes.last)
 			end
 		end}
 		if t.more then
@@ -1345,7 +1360,7 @@ magic.SubscribeToEvent("Update", function()
 				end
 			end
 		end
-		pcall(find, area)
+		pcall(find, page_view.list)
 	end
 	acts(selected, false)
 	selected = id
@@ -1421,7 +1436,7 @@ magic.SubscribeToEvent("Update", function()
 	local p = place
 	if p and p.kind == "thread" and open_thread and open_thread.id == p.id
 			and open_thread.view then
-		p.scroll = -open_thread.view.list.position.y
+		p.scroll = -page_view.list.position.y
 	end
 	buildat.storage_write(STATE, encode({account = me.account, drafts = d,
 			place = p}))
@@ -1578,7 +1593,6 @@ show_compose = function(o)
 	local body = edit(w, "The message (Markdown)", true, key, W, function()
 		changed = buildat.get_time_us()
 	end)
-	body:SetFixedHeight(W >= 600 and 200 or 120)
 	if o.edit and not drafts[key] then
 		body:SetText(o.edit.body)
 	elseif o.feedback and not drafts[key] then
@@ -1639,18 +1653,6 @@ show_compose = function(o)
 		button(r, o.edit and "Save" or o.feedback and "Send" or
 				"Start the thread", submit, true)
 	end)
-	-- A short page (a phone turned, [HEARTH_USABILITY]) keeps the buttons
-	-- in it: the field gives up what the page lacks, down to 60
-	local used = 0
-	for i = 0, area:GetNumChildren() - 1 do
-		local c = area:GetChild(i)
-		if c and c.visible then
-			used = used + c.height + 6
-		end
-	end
-	if used > H then
-		body:SetFixedHeight(math.max(60, body.height - (used - H)))
-	end
 	local sub
 	sub = magic.SubscribeToEvent("Update", function()
 		if not pcall(function() return body.visible end) then
@@ -1860,28 +1862,24 @@ end
 -- (restore or dismiss), tracker domains (accept or dismiss) and held links
 -- (approve or reject, a helper's too; the rest a helper only sees) as
 -- rows; the one
--- picked in the panel beside them (under them on a narrow page), with the
--- statement of reasons its author is shown
+-- picked in a panel under its row, with the statement of reasons its
+-- author is shown
 show_queue = function()
 	open_thread = nil
 	req("queue", nil, function(items)
 		me.open_reports = #items
-		local w = open("Moderation")
+		open("Moderation")
 		draw_sidebar()
-		local wide = W >= 600
-		local body = w:CreateChild("UIElement")
-		body:SetLayout(wide and magic.LM_HORIZONTAL or magic.LM_VERTICAL, 8,
-				magic.IntRect(0, 0, 0, 0))
-		local lw = wide and math.floor(W * 0.45) or W
-		local pw = (wide and W - lw - 8 or W) - 32
-		local v = ui.list_view(body, lw, wide and room() or
-				math.floor(room() / 2), {wheel = 40, follow_focus = true,
-				label_share = 0.5})
-		local panel = body:CreateChild("UIElement")
-		panel:SetLayout(magic.LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
-		panel:SetFixedWidth(pw)
-		local function pick(r)
-			panel:RemoveAllChildren()
+		local pw = W - 32
+		local v = list()
+		local panel = nil
+		local function pick(r, slot)
+			if panel then
+				panel:RemoveAllChildren()
+				panel.visible = false
+			end
+			panel = slot
+			panel.visible = true
 			local function act(action, statement)
 				req("moderate", {report = r.id, action = action,
 						statement = statement and statement:GetText() or ""},
@@ -1935,19 +1933,29 @@ show_queue = function()
 				button(b, "Dismiss", function() act("dismiss", statement) end)
 			end
 		end
-		for _, r in ipairs(items) do
+		local slots = {}
+		for i, r in ipairs(items) do
 			local label = r.kind == "domain" and "Domain " .. r.reason or
 					(r.kind == "appeal" and "Appeal: " or r.kind == "held" and
 					"Link: " or "Report: ") .. r.title
-			add_row(v, label, r.by, function() pick(r) end, lw)
+			local slot
+			add_row(v, label, r.by, function()
+				pick(r, slot)
+				v:fit()
+			end)
+			slot = v.list:CreateChild("UIElement")
+			slot:SetLayout(magic.LM_VERTICAL, 6, magic.IntRect(16, 4, 0, 8))
+			slot:SetFixedWidth(pw + 16)
+			slot.visible = false
+			slots[i] = slot
 		end
 		if #items == 0 then
-			text(v.list, "Nothing open.", DIM, lw - 8)
+			text(v.list, "Nothing open.", DIM, W - 8)
+		end
+		if items[1] then
+			pick(items[1], slots[1])
 		end
 		v:fit()
-		if items[1] then
-			pick(items[1])
-		end
 	end)
 end
 
