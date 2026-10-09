@@ -524,9 +524,13 @@ void Text::UpdateText(bool onResize)
 
         rowHeight_ = face->GetRowHeight();
 
+        // buildat: the advances are fractions at a fractional UI scale
+        // (FontFaceFreeType divides them by it), so a row is summed as a
+        // float and its width rounded up; summed as an int it was wrapped
+        // up to a pixel a glyph narrower than it is drawn ([TEXT_WRAP_FLOAT])
         int width = 0;
         int height = 0;
-        int rowWidth = 0;
+        float rowWidth = 0;
         int rowHeight = (int)(rowSpacing_ * rowHeight_ + 0.5f);
 
         // First see if the text must be split up
@@ -555,7 +559,7 @@ void Text::UpdateText(bool onResize)
 
                     if (nextBreak <= i)
                     {
-                        int futureRowWidth = rowWidth;
+                        float futureRowWidth = rowWidth;
                         for (j = i; j < unicodeText_.Size(); ++j)
                         {
                             unsigned d = unicodeText_[j];
@@ -654,18 +658,18 @@ void Text::UpdateText(bool onResize)
             }
             else
             {
-                width = Max(width, rowWidth);
+                width = Max(width, CeilToInt(rowWidth));
                 height += rowHeight;
-                rowWidths_.Push(rowWidth);
+                rowWidths_.Push(CeilToInt(rowWidth));
                 rowWidth = 0;
             }
         }
 
         if (rowWidth)
         {
-            width = Max(width, rowWidth);
+            width = Max(width, CeilToInt(rowWidth));
             height += rowHeight;
-            rowWidths_.Push(rowWidth);
+            rowWidths_.Push(CeilToInt(rowWidth));
         }
 
         // Set at least one row height even if text is empty
