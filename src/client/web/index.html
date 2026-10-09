@@ -54,6 +54,18 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	var jm = /^\?server=([A-Za-z0-9.\-]{1,253}:[0-9]{1,5})$/.exec(location.search);
 	if(!server && jm)
 		join = jm[1];
+	// [HEARTH_OPEN_HERE] #open=<a page's path>, as a web page's "in the
+	// browser" link writes it: a place for the app to go and nothing else,
+	// so only that shape is taken; the app checks it again
+	var open_ = null;
+	if(location.hash){
+		var om = /^#open=(\/(topic|t|m|p|u)\/[A-Za-z0-9_.\-\/]{1,200})$/
+				.exec(location.hash);
+		if(om)
+			open_ = om[1];
+		else
+			console.log('Not taken from the address: ' + location.hash);
+	}
 	// After ? come more arguments, space separated: ?-l 4 for a verbose
 	// log. **The log level, the UI scale and the preferences only**
 	// ([SECURITY_RUN_1]): a link is anybody's to write, and with every
@@ -210,6 +222,8 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			Module.ENV.BUILDAT_TOUCH = coarse ? '1' : '0';
 			if(join)
 				Module.ENV.BUILDAT_JOIN = join;
+			if(open_)
+				Module.ENV.BUILDAT_OPEN = open_;
 			// [PLAY_PAGE] (c): the page with no game of its own is
 			// apps/play's, whose bridge carries luanti_client's datagrams
 			if(!server)

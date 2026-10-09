@@ -2485,6 +2485,31 @@ accounts.on_joined = function()
 			local open_ = tonumber(open_page or "") or
 					tonumber(open_page:match("^(%d+)#") or "")
 			local open_at = tonumber(open_page:match("^%d+#(%d+)$") or "")
+			-- [HEARTH_OPEN_HERE] BUILDAT_OPEN=<a web page's path>: the web
+			-- client opened by that page's "in the browser". Its page over
+			-- home, where Back goes and a place not there is said; the
+			-- shape checked again here
+			local web = buildat.get_env("BUILDAT_OPEN") or ""
+			local wk, wid = web:match("^/(%l+)/([%w_.%-/]+)$")
+			local n = tonumber(wid and wid:match("^%d+$") or "")
+			local web_page = wk and ({
+				topic = n and function() show_topic(n) end,
+				t = n and function() show_thread(n) end,
+				m = n and function()
+					req("message", {message = n}, function(t)
+						show_thread(t, n)
+					end)
+				end,
+				p = wid:match("^[%w_%-]+/[%w_%-]+$") and function()
+					show_place({subject = wid, package = wid})
+				end,
+				u = wid:match("^[%w_.%-]+$") and function()
+					show_account(wid)
+				end,
+			})[wk]
+			if web ~= "" and not web_page then
+				log:warning("hearth: not a place to open: " .. web)
+			end
 			-- **"Feedback..." on an app** ([PACKAGE_SUBJECT]): the launch grid
 			-- came here with the app's package and versions, which start the
 			-- message and go with the thread as its subject
@@ -2512,6 +2537,9 @@ accounts.on_joined = function()
 				else
 					go(function() show_compose({feedback = f}) end)
 				end
+			elseif web_page then
+				enter("home", function() show_home() end)
+				go(web_page)
 			elseif open_ then
 				here = function() show_home() end
 				go(function() show_thread(open_, open_at) end)

@@ -1836,8 +1836,15 @@ struct Module: public interface::Module
 		});
 	}
 
-	ss_ page(const ss_ &title, const ss_ &content)
+	// path: the page's own, which "in the browser" opens in the web client
+	// ([HEARTH_OPEN_HERE]) where it is a thread's, a message's, a
+	// topic's, a package's or an account's
+	ss_ page(const ss_ &title, const ss_ &content, const ss_ &path = "")
 	{
+		ss_ app = "/app";
+		for(const char *p : {"/topic/", "/t/", "/m/", "/p/", "/u/"})
+			if(path.compare(0, strlen(p), p) == 0 && path.size() > strlen(p))
+				app += "#open="+html(path);
 		return "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
 				"<meta name=\"viewport\" content=\"width=device-width, "
 				"initial-scale=1\"><title>"+html(title)+"</title><style>"+
@@ -1851,7 +1858,7 @@ struct Module: public interface::Module
 				"aria-label=\"Search\"> <button>Search</button></form>"
 				"</header>\n"+content+
 				"\n<p class=\"meta\">Posts are CC-BY-SA. To take part, open "
-				"this server in the buildat client (<a href=\"/app\">"
+				"this server in the buildat client (<a href=\""+app+"\">"
 				"in the browser</a>).</p></body></html>\n";
 	}
 
@@ -2060,7 +2067,7 @@ struct Module: public interface::Module
 			http_page(r.path, r.query, title, body);
 		if(body.empty())
 			return respond(r, 404, page("Not found", "<p>Nothing is here.</p>"));
-		respond(r, 200, page(title, body));
+		respond(r, 200, page(title, body, r.path));
 	}
 
 	void http_page(const ss_ &path, const ss_ &query, ss_ &title, ss_ &body)
@@ -2840,6 +2847,16 @@ struct Module: public interface::Module
 			t.set("threads", list);
 			return t;
 		}
+		// [HEARTH_OPEN_HERE] A message's thread, as its /m/ page finds it
+		if(cmd == "message"){
+			Q m(m_db, "SELECT m.thread FROM messages m JOIN threads t ON "
+					"t.id = m.thread WHERE m.id = ? AND (t.hidden = 0 OR ? OR "
+					"t.author = ?)");
+			m.b(jint(q, "message")).b((int64_t)mod).b(name);
+			if(!m.step())
+				throw Exception("no such message");
+			return json::Value(m.i(0));
+		}
 		if(cmd == "thread"){
 			json::Value t = thread(jint(q, "thread"), jint(q, "after"), name,
 					mod);
@@ -2889,9 +2906,14 @@ struct Module: public interface::Module
 			const ss_ subject = jstr(q, "subject");
 			need(text_ok(subject, 400, false, "the subject"));
 			json::Value list = json::array();
-			Q t(m_db, "SELECT " THREAD_COLUMNS " FROM threads WHERE subject = ? "
-					"AND hidden = 0 ORDER BY last DESC LIMIT 200");
-			t.b(subject);
+			// A package's name alone ([HEARTH_OPEN_HERE]): every key's, as
+			// its /p/ page lists them
+			const bool pkg = is_package(subject);
+			Q t(m_db, "SELECT " THREAD_COLUMNS " FROM threads WHERE "
+					"(subject = ? OR (? AND substr(subject, 1, ?) = ?)) AND "
+					"hidden = 0 ORDER BY last DESC LIMIT 200");
+			t.b(subject).b((int64_t)pkg).b((int64_t)subject.size() + 1).
+					b(subject+" ");
 			while(t.step())
 				list.append(thread_row(t));
 			return list;
