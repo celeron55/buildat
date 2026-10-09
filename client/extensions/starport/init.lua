@@ -2376,47 +2376,274 @@ end
 
 -- on_discuss(release): "Discuss" on a release that names its home
 -- Hearth ([PACKAGE_SUBJECT]); the grid connects there
-local function aitta_page(message, query, on_discuss)
+-- **Aitta's page** ([AITTA_PAGE_LAYOUT]), laid out as launch_menu's
+-- Browse: a package a row in a scrolling list, the selected one's
+-- details and actions in the panel beside it (under it on a narrow
+-- screen). A click or the keys select; Enter or a click on the selected
+-- row runs its main action; Right into the panel, Left back
+-- (keyboard_columns). The search filters as it is typed, the dropdown by
+-- the package's state; Ctrl+S sorts by name or newest. Escape or a click
+-- off the window closes it. A status line at the foot.
+-- simplified: copied from browse() rather than shared: launch_menu's
+-- layout is tied to its entries, and this page fetches and installs in
+-- the trusted extension
+-- simplified: no Play: an installed app is a tile on the grid behind
+local AITTA_FILTERS = {"All", "Installed", "Updates", "Not installed"}
+local function aitta_page(message, query, on_discuss, filter, by, chosen)
+	filter = filter or "All"
+	by = by or "name"
 	local e = effective()
-	local root, w = open_window("aitta", 900)
-	add_text(w, "Apps from Aitta: " .. (#e.aittas > 0 and
-			table.concat(e.aittas, ", ") or "none in the Starport settings"))
+	local ui_utils = require("buildat/extension/ui_utils").safe
+	local narrow = magic.ui.root.width < 760
+	local width = math.min(magic.ui.root.width - 16, 1000)
+	local panel_w = narrow and width - 24 or 360
+	local list_w = narrow and width - 24 or width - 24 - panel_w - 12
+	local room = math.max(120, magic.ui.root.height - 180 -
+			(narrow and 250 or 0))
+	local root, w = open_window("aitta", width)
+	local function reopen(m, q, f, b, c)
+		uistack.main:pop(root)
+		aitta_page(m, q, on_discuss, f, b, c)
+	end
+	add_text(w, "Apps from Aitta (" .. (#e.aittas > 0 and
+			table.concat(e.aittas, ", ") or "none in the Starport settings") ..
+			")")
 	-- [AITTA_REVIEW]: under the lock, a package's newest reviewed release
 	-- only, and none of a package with none
 	local only_reviewed = not e.filters.unreviewed
-	add_text(w, (only_reviewed and "This client's filters hide unreviewed " ..
-			"releases: reviewed ones only. " or "") .. "An app runs in the " ..
-			"server's box: it cannot reach your files, only its own saves.", DIM)
-	if message then
-		add_text(w, message, WARN)
+	if only_reviewed then
+		add_text(w, "This client's filters hide unreviewed releases.", DIM)
 	end
-	local sr = add_row(w)
-	local search = add_edit(sr, query or "")
-	add_button(sr, "Search", function()
-		local text = search:GetText()
-		uistack.main:pop(root)
-		aitta_page(nil, text, on_discuss)
+	local top = add_row(w)
+	local search = add_edit(top, query or "")
+	search.minWidth = narrow and 140 or 300
+	add_dropdown(top, AITTA_FILTERS, filter, function(f)
+		reopen(nil, search:GetText(), f, by, chosen)
+	end, {width = 160, height = 24})
+	local body = w:CreateChild("UIElement")
+	body:SetLayout(narrow and magic.LM_VERTICAL or magic.LM_HORIZONTAL, 12,
+			magic.IntRect(0, 0, 0, 0))
+	local view = ui_utils.list_view(body, list_w, room, {wheel = 28,
+			label_share = 0.55})
+	-- The panel scrolls too: a description and a changelog are the
+	-- author's length
+	local pview = ui_utils.list_view(body, panel_w, narrow and 240 or room,
+			{wheel = 28, fill = true, spacing = 6})
+	local panel = pview.list
+	ui_utils.keyboard_columns(w, view.viewport, pview.viewport)
+	local status = add_text(w, message or "Fetching the list...",
+			message and WARN or DIM)
+	if message then
+		log:info("aitta status: " .. message)
+	end
+	local function say(s, color)
+		log:info("aitta status: " .. s)
+		status:SetText(s)
+		status.color = color or DIM
+		reseal(status)
+	end
+	root:SubscribeToStackEvent("KeyDown", function(_, data)
+		if data:GetInt("Key") == magic.KEY_S and
+				magic.input:GetQualifierDown(magic.QUAL_CTRL) then
+			reopen(nil, search:GetText(), filter,
+					by == "name" and "newest" or "name", chosen)
+		end
 	end)
-	local status = add_text(w, "Fetching the list...", DIM)
-	add_button(w, "Back", function() uistack.main:pop(root) end)
-	local q = (query or ""):lower()
+
+	local packages = {}
+	local have = {}
+	local function state(p)
+		local mine = have[p.key]
+		return not mine and "Not installed" or
+				mine[tostring(p.rel.version)] and "Installed" or "Updates"
+	end
+	local function ptext(s, color, size)
+		local t = add_text(panel, s, color)
+		t:SetFixedWidth(panel_w)
+		if size then
+			t:SetFontSize(size)
+		end
+		return t
+	end
+	local function install(p)
+		local rel, k = p.rel, p.key
+		local base = rel.aitta .. "/api/aitta/archive/" .. tostring(rel.sha256)
+		say("Fetching " .. k .. "...")
+		local options = {description = "Aitta (install)"}
+		network.http_get(base .. ".sig", function(sig, err1)
+			if not sig then
+				return say("Could not fetch: " .. tostring(err1), WARN)
+			end
+			network.http_get(base .. ".zip", function(zip, err2)
+				if not zip then
+					return say("Could not fetch: " .. tostring(err2), WARN)
+				end
+				local dir, why = __buildat_aitta_install(zip, sig, rel.aitta)
+				-- Read before the grid's refresh, which takes the page down
+				local q = search:GetText()
+				uistack.main:pop(root)
+				-- The grid behind, with the new tile on it
+				local menu = dir and buildat.menu_extension()
+				if menu and type(menu.refresh) == "function" then
+					menu.refresh()
+				end
+				aitta_page(dir and ("Installed " .. k .. " " ..
+						tostring(rel.version) .. (rel.kind == "extension" and
+						(": the extension " .. tostring(rel.author) .. "__" ..
+						tostring(rel.name) .. ", in the sandbox") or
+						": it is on the grid")) or
+						("Not installed: " .. tostring(why)),
+						q, on_discuss, filter, by, k)
+			end, options)
+		end, options)
+	end
+	local selected = nil
+	local last_click = {}
+	local function fill(p)
+		selected = p
+		panel:RemoveAllChildren()
+		local rel = p.rel
+		log:info("aitta panel: " .. p.key .. " " .. tostring(rel.version))
+		ptext(p.key, nil, 18)
+		ptext(tostring(rel.version) .. ", " .. (rel.kind == "extension" and
+				"an extension" or "an app") .. ", by " ..
+				tostring(rel.author) .. "; " .. (rel.review == "reviewed" and
+				"reviewed" or "unreviewed"), DIM)
+		ptext(tostring(rel.license_code) .. " / " ..
+				tostring(rel.license_media) .. ", " ..
+				math.floor((tonumber(rel.size) or 0) / 1000) .. " kB", DIM)
+		if rel.description and rel.description ~= "" then
+			ptext(tostring(rel.description))
+		end
+		if rel.kind ~= "extension" then
+			ptext("It runs in the server's sandbox: it cannot reach your " ..
+					"files, only its own saves.", DIM)
+		end
+		local changelog = ptext("", DIM)
+		local st = state(p)
+		local actions = add_row(panel)
+		add_button(actions, st == "Installed" and "Installed" or
+				st == "Updates" and "Update" or "Install",
+				function() install(p) end, st ~= "Installed", true)
+		-- Without its own, the Hearth its Aitta's Starport recommends
+		if not (type(rel.home_hearth) == "string" and
+				rel.home_hearth:match("^https?://")) then
+			rel.home_hearth = M.safe.fallback_hearth(rel.aitta)
+		end
+		if on_discuss and rel.home_hearth then
+			add_button(actions, "Discuss", function()
+				uistack.main:pop(root)
+				on_discuss(rel)
+			end)
+		end
+		add_button(actions, "Report...", function()
+			aitta_report(rel.aitta, p.key .. "/" .. tostring(rel.version))
+		end)
+		pview:fit()
+		reseal(panel)
+		local id = p.key .. "/" .. tostring(rel.version)
+		network.http_get(rel.aitta .. "/api/aitta/release?id=" .. id,
+				function(body)
+			local v = body and network.parse_json(body)
+			if selected == p and type(v) == "table" and
+					type(v.changelog) == "string" and v.changelog ~= "" then
+				changelog:SetText("Changes:\n" .. v.changelog)
+				pview:fit()
+				reseal(changelog)
+			end
+		end, {description = "Aitta (app list)"})
+	end
+	local function show_rows()
+		view.list:RemoveAllChildren()
+		local q = search:GetText():lower()
+		local shown = {}
+		for _, p in ipairs(packages) do
+			if (filter == "All" or state(p) == filter) and (q == "" or
+					p.key:lower():find(q, 1, true) or tostring(
+					p.rel.description or ""):lower():find(q, 1, true)) then
+				shown[#shown + 1] = p
+			end
+		end
+		table.sort(shown, function(a, b)
+			if by == "newest" then
+				return (tonumber(a.rel.time) or 0) > (tonumber(b.rel.time) or 0)
+			end
+			return a.key:lower() < b.key:lower()
+		end)
+		local first
+		for _, p in ipairs(shown) do
+			local st = state(p)
+			-- simplified: a long name cut by its length, about 10 units a
+			-- character at the rows' size
+			local most = math.floor(list_w * 0.55 / 10)
+			local b = view:row({label = #p.key > most and
+					p.key:sub(1, most - 3) .. "..." or p.key},
+					tostring(p.rel.version) ..
+					(st == "Installed" and ", installed" or
+					st == "Updates" and ", update" or "") ..
+					-- The panel says it where a row has no room
+					((p.rel.review == "reviewed" or narrow) and "" or
+					", unreviewed"))
+			magic.SubscribeToEvent(b, "Focused", function()
+				if selected ~= p then
+					fill(p)
+				end
+			end)
+			-- As Browse's: Enter or a second click within half a second
+			-- runs it, a click selects it
+			magic.SubscribeToEvent(b, "Released", function()
+				local t = buildat.get_time_us()
+				local enter = magic.input:GetKeyDown(magic.KEY_RETURN) or
+						magic.input:GetKeyDown(magic.KEY_KP_ENTER)
+				if (enter or t - (last_click[p] or 0) < 500000) and
+						state(p) ~= "Installed" then
+					install(p)
+				elseif selected ~= p then
+					fill(p)
+				end
+				last_click[p] = t
+			end)
+			if p.key == chosen or not first then
+				first = {p = p, b = b}
+			end
+		end
+		if #shown == 0 then
+			add_text(view.list, #packages == 0 and "No packages" or
+					"Nothing matches", DIM)
+		end
+		view:fit()
+		if first and (not selected or chosen == first.p.key) then
+			fill(first.p)
+			view:show(first.b)
+		end
+		reseal(w)
+		return #shown
+	end
+	magic.SubscribeToEvent(search, "TextChanged", function()
+		if #packages > 0 then
+			local n = show_rows()
+			say(n .. " of " .. #packages .. " packages")
+		end
+	end)
 	-- Every Aitta's list, merged as Starports' are: a release shown once
-	-- by author/name, version and key, from the first Aitta listing it
+	-- by author/name, version and key, from the first Aitta listing it;
+	-- a package is its newest
 	local lists, errors, waiting = {}, {}, #e.aittas
-	local show
 	local function show_all()
-		local v, seen, newest = {releases = {}}, {}, {}
+		local newest, order = {}, {}
 		for _, a in ipairs(e.aittas) do
 			for _, rel in ipairs(lists[a] or {}) do
-				local id = type(rel) == "table" and table.concat({
-						tostring(rel.author), tostring(rel.name),
-						tostring(rel.version), tostring(rel.key)}, "/")
-				if id and not seen[id] and (not only_reviewed or
+				if type(rel) == "table" and (not only_reviewed or
 						rel.review == "reviewed") then
-					seen[id] = true
-					rel.aitta = a
-					v.releases[#v.releases + 1] = rel
+					rel.aitta = rel.aitta or a
 					local k = tostring(rel.author) .. "/" .. tostring(rel.name)
+					log:info("aitta page: " .. k .. " " ..
+							tostring(rel.version) .. " " ..
+							(rel.review == "reviewed" and "reviewed" or
+							"unreviewed"))
+					if not newest[k] then
+						order[#order + 1] = k
+					end
 					if not newest[k] or (tonumber(rel.time) or 0) >
 							(tonumber(newest[k].time) or 0) then
 						newest[k] = rel
@@ -2424,19 +2651,16 @@ local function aitta_page(message, query, on_discuss)
 				end
 			end
 		end
-		if only_reviewed then
-			local kept = {}
-			for _, rel in ipairs(v.releases) do
-				if newest[tostring(rel.author) .. "/" ..
-						tostring(rel.name)] == rel then
-					kept[#kept + 1] = rel
-				end
-			end
-			v.releases = kept
+		have = aitta_installed()
+		for _, k in ipairs(order) do
+			packages[#packages + 1] = {key = k, rel = newest[k]}
 		end
-		show(v)
-		if #errors > 0 then
-			status:SetText(status:GetText() .. "; " .. table.concat(errors, "; "))
+		local n = show_rows()
+		if not message then
+			say(#packages .. " packages" .. (n < #packages and ", " .. n ..
+					" shown" or "") .. (#errors > 0 and "; " ..
+					table.concat(errors, "; ") or ""),
+					#errors > 0 and WARN or DIM)
 		end
 	end
 	for _, a in ipairs(e.aittas) do
@@ -2466,87 +2690,7 @@ local function aitta_page(message, query, on_discuss)
 		end, {description = "Aitta (app list)"})
 	end
 	if waiting == 0 then
-		status:SetText("No Aittas in the Starport settings")
-	end
-	show = function(v)
-		local have = aitta_installed()
-		local shown = 0
-		for _, rel in ipairs(v.releases) do
-			local k = tostring(rel.author) .. "/" .. tostring(rel.name)
-			if q == "" or k:lower():find(q, 1, true) or
-					tostring(rel.description or ""):lower():find(q, 1, true) then
-				shown = shown + 1
-				local mine = have[k]
-				local r = add_row(w)
-				add_label(r, k .. " " .. tostring(rel.version) ..
-						(rel.kind == "extension" and " (extension)" or "") ..
-						(rel.review == "reviewed" and ", reviewed" or
-						", unreviewed") .. "  " ..
-						tostring(rel.license_code) .. " / " ..
-						tostring(rel.license_media) .. "  " ..
-						math.floor((tonumber(rel.size) or 0) / 1000) .. " kB", 560)
-				local installed = mine and mine[tostring(rel.version)]
-				add_button(r, installed and "Installed" or
-						(mine and "Update" or "Install"), function()
-					local base = rel.aitta .. "/api/aitta/archive/" ..
-							tostring(rel.sha256)
-					status:SetText("Fetching " .. k .. "...")
-					local options = {description = "Aitta (install)"}
-					network.http_get(base .. ".sig", function(sig, err1)
-						if not sig then
-							status:SetText("Could not fetch: " .. tostring(err1))
-							return
-						end
-						network.http_get(base .. ".zip", function(zip, err2)
-							if not zip then
-								status:SetText("Could not fetch: " .. tostring(err2))
-								return
-							end
-							local dir, why = __buildat_aitta_install(zip, sig,
-									rel.aitta)
-							uistack.main:pop(root)
-							-- The grid behind, with the new tile on it
-							local menu = dir and buildat.menu_extension()
-							if menu and type(menu.refresh) == "function" then
-								menu.refresh()
-							end
-							aitta_page(dir and ("Installed " .. k .. " " ..
-									tostring(rel.version) .. (rel.kind ==
-									"extension" and (": the extension " ..
-									tostring(rel.author) .. "__" ..
-									tostring(rel.name) .. ", in the sandbox") or
-									": it is on the grid")) or
-									("Not installed: " .. tostring(why)), nil,
-									on_discuss)
-						end, options)
-					end, options)
-				end, not installed)
-				-- Without its own, the Hearth its Aitta's Starport recommends
-				if not (type(rel.home_hearth) == "string" and
-						rel.home_hearth:match("^https?://")) then
-					rel.home_hearth = M.safe.fallback_hearth(rel.aitta)
-				end
-				add_button(r, "Report...", function()
-					aitta_report(rel.aitta, k .. "/" .. tostring(rel.version))
-				end)
-				if on_discuss and rel.home_hearth then
-					add_button(r, "Discuss", function()
-						uistack.main:pop(root)
-						on_discuss(rel)
-					end)
-				end
-				if rel.description and rel.description ~= "" then
-					add_text(w, "    " .. tostring(rel.description), DIM)
-				end
-			end
-		end
-		for _, rel in ipairs(v.releases) do
-			log:info("aitta page: " .. tostring(rel.author) .. "/" ..
-					tostring(rel.name) .. " " .. tostring(rel.version) .. " " ..
-					(rel.review == "reviewed" and "reviewed" or "unreviewed"))
-		end
-		status:SetText(q == "" and #v.releases .. " releases" or
-				shown .. " of " .. #v.releases .. " releases match")
+		say("No Aittas in the Starport settings")
 	end
 end
 

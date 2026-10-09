@@ -146,14 +146,13 @@ grep -aq "module_path: .*/dev_apps/hello" "$t/play.log" ||
 	fail "the Dev tile did not start dev_apps/hello (play.log)"
 grep -aq "hello started" "$t/play.log" ||
 	fail "hello's client Lua did not run (play.log)"
-# Apps from Aitta lists 0.1.0, 0.1.1 and the extension, Search with the
-# focus: Back, Install, Install is 0.1.1's; then the extension's, after
-# 0.1.1's Installed
+# Apps from Aitta lists hello (0.1.1, its newest) and the extension:
+# each selected and installed from its panel ([AITTA_PAGE_LAYOUT])
 client u2 install "delay 5000" "text aitta" "delay 1500" "keypress Return" \
-	"delay 3000" "shot aitta.png" "keypress Tab" "keypress Tab" "keypress Tab" \
-	"keypress Return" "delay 3000" "keypress Tab" "keypress Tab" \
-	"keypress Tab" "keypress Tab" "keypress Return" "delay 3000" \
-	"shot installed.png"
+	"delay 3000" "shot aitta.png" "click Button \"tester/hello\"" \
+	"delay 1000" "click Button \"Install\"" "delay 3000" \
+	"click Button \"tester/hello_ext\"" "delay 1000" \
+	"click Button \"Install\"" "delay 3000" "shot installed.png"
 [ -d "$t/u2/installed/tester/hello/0.1.1" ] ||
 	fail "0.1.1 was not installed from Apps from Aitta (aitta.png)"
 [ -f "$t/u2/installed/tester/hello_ext/0.1.0/init.lua" ] ||
