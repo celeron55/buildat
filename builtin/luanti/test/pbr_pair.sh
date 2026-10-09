@@ -87,8 +87,15 @@ core.register_on_joinplayer(function(player)
 		build()
 		core.log("action", "pbr_pair: built")
 		for i, s in ipairs(steps) do
-			core.after(15 + 15 * (i - 1), function()
+			-- The hour a second before the move: Luanti sends a new time
+			-- on its next step and a move at once, so set together the
+			-- field showed under the cave hour (noon) for a few frames,
+			-- and the meter, at 0.6 a second, was still coming down from
+			-- that at the shot (the snow read 47 against 61 settled)
+			core.after(14 + 15 * (i - 1), function()
 				core.set_timeofday(s[1])
+			end)
+			core.after(15 + 15 * (i - 1), function()
 				player:set_pos({x = s[2].x, y = s[2].y, z = s[2].z})
 				player:set_look_horizontal(s[3])
 				player:set_look_vertical(s[4])
