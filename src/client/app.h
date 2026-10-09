@@ -87,6 +87,11 @@ namespace app
 		// gain is made from it where it is applied and nowhere else.
 		float sound_volume_db = 0.0f;
 		bool sound_mute = false;
+		// **Listening for LAN games** ([WIN_FIREWALL]): off until the
+		// player first opens the list of this network's games, then on
+		// from each start. The listen is on every interface, which is what
+		// Windows' firewall asks about: asked once, when the player looked.
+		bool lan_discovery = false;
 		// **The UI's size** (user, 2026-10-06, a floorplanner playtest):
 		// the UI scale, or "auto", the default, which follows the window
 		// (apply_ui_scale). -u for a run wins over it.

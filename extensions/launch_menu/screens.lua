@@ -453,6 +453,14 @@ function M.show_connect_to_server()
 			b:SetFixedSize(120, 26)
 			magic.SubscribeToEvent(b, "Released", function()
 				tab = t[1]
+				-- Listening on the LAN from here on ([WIN_FIREWALL]): the
+				-- firewall's question comes when the player looked
+				if tab == "lan" and not api.get_preference("lan_discovery") then
+					local ok, err = api.set_preference("lan_discovery", true)
+					if not ok then
+						log:warning("lan_discovery: " .. tostring(err))
+					end
+				end
 				redraw()
 			end)
 			tab_buttons[t[1]] = b

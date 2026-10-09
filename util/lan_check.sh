@@ -10,6 +10,10 @@
 #   3. 100 false announcements (other ports, control characters in the
 #      name) while a client shows the connect screen: the client says its
 #      list is full, and the screenshot shows 32 at most.
+#   4. [WIN_FIREWALL]: a fresh client holds no socket on the LAN port
+#      (Windows' firewall asks about one) until the player opens the
+#      connect screen's "This network". From the start once that is in
+#      the preferences: 3, by -o.
 #
 #   util/lan_check.sh    (SHOT=x.png keeps the screenshot)
 set -u
@@ -76,7 +80,7 @@ kill $s; wait $s 2>/dev/null; s=
 printf 'wait_log 10000 LAN list full\ndelay 1500\nscreenshot %s/flood.png\nquit\n' \
 	"$t" > "$t/seq"
 timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/u" -w 1280x720 -u 1 -l 3 -o sound_mute=1 \
-	-a extension/launch_menu/connect -c @"$t/seq" > "$t/c.log" 2>&1 &
+	-o lan_discovery=1 -a extension/launch_menu/connect -c @"$t/seq" > "$t/c.log" 2>&1 &
 c=$!
 sleep 3
 python3 - <<'EOF'
@@ -94,4 +98,25 @@ wait $c
 grep -q "LAN list full (32)" "$t/c.log" || fail "the list was not capped ($(grep -i lan "$t/c.log" | tail -3))"
 grep -q "Wrote screenshot" "$t/c.log" || fail "no screenshot"
 [ -n "${SHOT:-}" ] && cp "$t/flood.png" "$SHOT"
-echo "PASS: announced only with --lan-announce; a flood capped at 32"
+# 4. The sockets on the LAN port of the client (timeout's child), each
+# read once the log says the drive is at that point
+lan_fds(){ # pid
+	ss -Huanp "sport = :29599" 2>/dev/null | grep -c "pid=$(pgrep -P $1),"
+}
+until_log(){ # file pattern
+	for _ in $(seq 300); do grep -aq "$2" "$1" && return 0; sleep 0.1; done
+	return 1
+}
+printf 'delay 3000\ndelay 1500\nclick Button "This network"\ndelay 3000\nquit\n' > "$t/seq4"
+timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/u4" -w 1280x720 -u 1 -l 3 \
+	-o sound_mute=1 -a extension/launch_menu/connect -c @"$t/seq4" > "$t/c4.log" 2>&1 &
+c=$!
+until_log "$t/c4.log" "command: delay 1500" && before=$(lan_fds $c)
+until_log "$t/c4.log" "Listening for LAN" && sleep 0.5 && after=$(lan_fds $c)
+wait $c
+grep -q "Command sequence complete" "$t/c4.log" ||
+	fail "the drive stopped: $(grep -a "Command sequence\|rror" "$t/c4.log" | tail -2)"
+[ "${before:-}" = 0 ] || fail "a fresh client listens on the LAN port (${before:-not read})"
+[ -n "${after:-}" ] && [ "$after" != 0 ] ||
+	fail "This network did not start the listen ($(grep -a "LAN\|lan_" "$t/c4.log" | tail -2))"
+echo "PASS: announced only with --lan-announce; a flood capped at 32; the LAN heard only once the player opened This network"

@@ -490,6 +490,8 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 			opt->sound_volume_db = (float)v;
 		} else if(key == "sound_mute"){
 			opt->sound_mute = (v != 0);
+		} else if(key == "lan_discovery"){
+			opt->lan_discovery = (v != 0);
 		} else if(key == "ui_size"){
 			in_range = (v >= 0.5 && v <= 3.0);
 			opt->ui_size = (float)v;
@@ -739,6 +741,7 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	// on the other -- which is why the key is a new one.
 	const json::Value &jsv_old = o.get("sound_volume");
 	const json::Value &jsm = o.get("sound_mute");
+	const json::Value &jld = o.get("lan_discovery");
 	const json::Value &jus = o.get("ui_size");
 	const json::Value &jui = o.get("launch_ui");
 	const json::Value &jwa = o.get("web_address_bar");
@@ -788,6 +791,8 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	}
 	if(jsm.is_boolean())
 		items += ss_()+(items.empty()?"":",")+"sound_mute="+(jsm.as_boolean()?"1":"0");
+	if(jld.is_boolean())
+		items += ss_()+(items.empty()?"":",")+"lan_discovery="+(jld.as_boolean()?"1":"0");
 	if(jus.is_number())
 		items += ss_()+(items.empty()?"":",")+"ui_size="+ftos(jus.as_number());
 	else if(jus.is_string() && jus.as_string() == "auto")
@@ -868,6 +873,7 @@ static void save_preferences(const app::Options &opt)
 	o.set("multisampling", opt.graphics.multisampling);
 	o.set("sound_volume_db", opt.sound_volume_db);
 	o.set("sound_mute", opt.sound_mute);
+	o.set("lan_discovery", opt.lan_discovery);
 	if(opt.ui_size_auto)
 		o.set("ui_size", "auto");
 	else
@@ -1447,8 +1453,9 @@ struct CApp: public App, public magic::Application
 	// The launch UI that was asked for and did not load, so that the one
 	// that did can say why it is not the one the setting names
 	ss_ m_launch_ui_fell_back;
-	// [LAN_DISCOVERY]: the group's socket, opened by the first
-	// lan_servers(), and what was heard, by "host:port"
+	// [LAN_DISCOVERY]: the group's socket, opened at the start or when
+	// lan_discovery is turned on ([WIN_FIREWALL]), and what was heard,
+	// by "host:port"
 	struct LanEntry {
 		ss_ name, app, version;
 		int64_t players = 0;
@@ -1471,12 +1478,6 @@ struct CApp: public App, public magic::Application
 		m_thread_pool(interface::thread_pool::createThreadPool())
 	{
 		log_v(MODULE, "constructor()");
-		// [LAN_DISCOVERY]: a launcher listens from the client's start,
-		// so one built in its first frames (launch_world's floor) has
-		// heard the 2 s announcements by then: the window takes ~2 s.
-		// No address given is a launcher (boot_to_menu, set after this).
-		if(g_client_config.get<ss_>("server_address").empty())
-			lan_listen();
 		check_pick_default_window_size();
 		check_parse_preference_options();
 		check_open_url_ok();
@@ -1497,6 +1498,14 @@ struct CApp: public App, public magic::Application
 					&m_options, &err))
 				throw AppStartupError("-o: "+err);
 		}
+		// [LAN_DISCOVERY]: a launcher listens from the client's start,
+		// so one built in its first frames (launch_world's floor) has
+		// heard the 2 s announcements by then: the window takes ~2 s.
+		// No address given is a launcher (boot_to_menu, set after this).
+		// Once the player has looked at this network's games ([WIN_FIREWALL])
+		if(g_client_config.get<ss_>("server_address").empty() &&
+				m_options.lan_discovery)
+			lan_listen();
 		settle_render_scale(&m_options);
 		if(m_options.graphics.size_forced){
 			m_options.graphics.fullscreen = false;
@@ -3559,6 +3568,8 @@ struct CApp: public App, public magic::Application
 		if(m_options.sound_volume_db != before.sound_volume_db ||
 				m_options.sound_mute != before.sound_mute)
 			apply_sound_preferences();
+		if(m_options.lan_discovery)
+			lan_listen();
 		// The client's own level at once; the server's on its next start.
 		// Not over a -l given for this run.
 		if(m_options.log_level != before.log_level &&

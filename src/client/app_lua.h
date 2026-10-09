@@ -913,7 +913,7 @@
 	static const char** preference_names()
 	{
 		static const char *names[] = {"render_scale", "vsync", "max_fps",
-				"multisampling", "sound_volume_db", "sound_mute", "ui_size",
+				"multisampling", "sound_volume_db", "sound_mute", "ui_size", "lan_discovery",
 				"launch_ui",
 				"default_username",
 #ifdef __EMSCRIPTEN__
@@ -972,6 +972,8 @@
 			lua_pushinteger(L, o.graphics.multisampling);
 		else if(name == "sound_volume_db")
 			lua_pushnumber(L, o.sound_volume_db);
+		else if(name == "lan_discovery")
+			lua_pushboolean(L, o.lan_discovery);
 		else if(name == "sound_mute")
 			lua_pushboolean(L, o.sound_mute);
 		else if(name == "ui_size" && o.ui_size_auto)
@@ -1480,6 +1482,8 @@
 	// business. An announcement is anyone's to send, so every field is
 	// cleaned and capped, a sender is heard once a second, and the list
 	// holds 32.
+	// Nothing until lan_listen() ran: at the start or when lan_discovery
+	// was turned on ([WIN_FIREWALL]).
 	// simplified: the socket stays open once the launcher has asked; the
 	// kernel drops what is not read. Closing it on a connect when a
 	// game's long session makes that matter.
@@ -1529,7 +1533,6 @@
 		lua_newtable(L);
 		if(self->m_state && !self->m_state->get_address().empty())
 			return 1;
-		self->lan_listen();
 		const int64_t now = interface::os::time_us();
 		ss_ data, from;
 		for(int i = 0; i < 256 && self->m_lan_fd != -1 &&

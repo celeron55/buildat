@@ -214,7 +214,8 @@ do
 	log:info("servers: " .. #SERVERS .. " of the client's own")
 	-- **The games on this network** ([LAN_DISCOVERY]): what announced
 	-- itself before the room was built (the client listens from its
-	-- start), as heard -- anyone on the LAN can announce.
+	-- start once the player has opened This network, [WIN_FIREWALL]),
+	-- as heard -- anyone on the LAN can announce.
 	-- simplified: heard once, at the build; a game opened to the LAN
 	-- after it stands on the floor the next time the room is entered.
 	-- Spheres added to a built floor when that is not soon enough.
