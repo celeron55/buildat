@@ -857,6 +857,11 @@ struct Module: public interface::Module, public moderation::Host
 						"instance takes");
 		const ss_ id = jstr(m, "author")+"/"+jstr(m, "name")+"/"+
 				jstr(m, "version");
+		// A moderator's "Delist package" holds for its later releases
+		if(!get("delisted_packages", jstr(m, "author")+"/"+jstr(m, "name"))
+				.empty())
+			return drop(jstr(m, "author")+"/"+jstr(m, "name")+" is delisted "
+					"here: see your statements on Aitta's page");
 		if(!load("releases", id).is_undefined())
 			return drop(id+" is here already");
 		if(!interface::fs::rename(zip, m_archives+"/"+sha+".zip") ||
@@ -998,22 +1003,31 @@ struct Module: public interface::Module, public moderation::Host
 	// what is left out between. simplified: a whole-file LCS, so a file
 	// pair over 3000 lines each is "too long to compare"; Myers' diff is
 	// the upgrade
-	static ss_ line_diff(const ss_ &a_text, const ss_ &b_text)
+	// `cells`: what is left of the release's budget of (n + 1) * (m + 1)
+	static ss_ line_diff(const ss_ &a_text, const ss_ &b_text, size_t &cells)
 	{
 		const sv_<ss_> a = lines_of(a_text), b = lines_of(b_text);
 		const size_t n = a.size(), m = b.size();
-		if((n + 1) * (m + 1) > 9000000)
+		if((n + 1) * (m + 1) > 9000000 || (n + 1) * (m + 1) > cells)
 			return "(too long to compare here: "+itos(n)+" and "+itos(m)+
 					" lines)\n";
+		cells -= (n + 1) * (m + 1);
+		// Each line an id, so a comparison is one int whatever its length
+		std::map<ss_, uint32_t> ids;
+		sv_<uint32_t> ai, bi;
+		for(const ss_ &x : a)
+			ai.push_back(ids.emplace(x, (uint32_t)ids.size()).first->second);
+		for(const ss_ &x : b)
+			bi.push_back(ids.emplace(x, (uint32_t)ids.size()).first->second);
 		sv_<sv_<uint32_t>> L(n + 1, sv_<uint32_t>(m + 1, 0));
 		for(size_t i = n; i-- > 0;)
 			for(size_t j = m; j-- > 0;)
-				L[i][j] = a[i] == b[j] ? L[i + 1][j + 1] + 1 :
+				L[i][j] = ai[i] == bi[j] ? L[i + 1][j + 1] + 1 :
 						std::max(L[i + 1][j], L[i][j + 1]);
 		sv_<ss_> ops; // " x", "-x", "+x"
 		size_t i = 0, j = 0;
 		while(i < n || j < m){
-			if(i < n && j < m && a[i] == b[j])
+			if(i < n && j < m && ai[i] == bi[j])
 				ops.push_back(" "+a[i++]), j++;
 			else if(j < m && (i == n || L[i][j + 1] >= L[i + 1][j]))
 				ops.push_back("+"+b[j++]);
@@ -1027,8 +1041,14 @@ struct Module: public interface::Module, public moderation::Host
 			for(size_t d = (k < 2 ? 0 : k - 2); d < ops.size() && d <= k + 2;
 					d++)
 				near = near || ops[d][0] != ' ';
+			// simplified: a 64 KiB diff a file, a line's first 300 bytes
+			if(out.size() > 64 * 1024){
+				out += "(... the rest left out)\n";
+				break;
+			}
 			if(near){
-				out += ops[k]+"\n";
+				out += ops[k].substr(0, 300)+(ops[k].size() > 300 ? "..." : "")+
+						"\n";
 				skipped = false;
 			} else if(!skipped){
 				out += "...\n";
@@ -1047,6 +1067,7 @@ struct Module: public interface::Module, public moderation::Host
 			files_of(unpacked(base), "", before);
 		json::Value added = json::array(), removed = json::array(),
 				changed = json::array();
+		size_t cells = 50000000;
 		for(auto &f : now)
 			if(!before.count(f.first))
 				added.append(f.first);
@@ -1060,7 +1081,7 @@ struct Module: public interface::Module, public moderation::Host
 				continue;
 			json::Value c = json::object();
 			c.set("path", f.first);
-			c.set("diff", is_text(a) && is_text(b) ? line_diff(a, b) :
+			c.set("diff", is_text(a) && is_text(b) ? line_diff(a, b, cells) :
 					"(binary: "+itos((int64_t)a.size())+" bytes, now "+
 					itos((int64_t)b.size())+")\n");
 			changed.append(c);
@@ -1340,6 +1361,8 @@ struct Module: public interface::Module, public moderation::Host
 			}
 			put("releases", k, o);
 		}
+		if(action == "delist_package")
+			store("delisted_packages")->set(pkg.substr(0, pkg.size() - 1), by);
 		if(action == "bar"){
 			const double days = q.get("days").is_number() ?
 					q.get("days").as_number() : 0;
@@ -1390,6 +1413,8 @@ struct Module: public interface::Module, public moderation::Host
 			}
 			put("releases", k, o);
 		}
+		if(action == "package delisted")
+			store("delisted_packages")->set(pkg.substr(0, pkg.size() - 1), "");
 		if(action.compare(0, 6, "barred") == 0){
 			json::Value au = load("authors", jstr(rel, "author"));
 			au.set("barred_until", (int64_t)0);

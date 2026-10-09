@@ -405,6 +405,8 @@ struct Module: public interface::Module, public Interface
 			throw Exception("no such open appeal");
 		if(jstr(a, "acted_by") == by && !jstr(a, "acted_by").empty())
 			throw Exception("another moderator than the one who acted decides");
+		if(jstr(a, "by") == by)
+			throw Exception("another moderator than the one who appealed decides");
 		const ss_ outcome = jstr(q, "outcome");
 		if(outcome != "reverse" && outcome != "keep")
 			throw Exception("outcome: reverse or keep");
