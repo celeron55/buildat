@@ -24,6 +24,7 @@ end
 
 -- JSON out; in is buildat.parse_json
 local encode = require("buildat/extension/network").write_json
+local uistack = require("buildat/extension/uistack")
 
 -- BUILDAT_HEARTH_RESUME=1 logs as a scripted client does, for its check
 local scripted = (buildat.get_env("BUILDAT_HEARTH_REQS") or "") ~= "" or
@@ -228,7 +229,8 @@ magic.SubscribeToEvent("Update", function()
 		say("The file: " .. why)
 	end
 	if not name then
-		return fail(tostring(data))
+		-- A cancel is not worth a warning
+		return data ~= "no file picked" and fail(tostring(data)) or nil
 	end
 	if #data > 16 * 1024 * 1024 then
 		return fail("a file is 16 MiB at most")
@@ -319,7 +321,12 @@ local narrow = magic.ui.root.width < 560
 -- The page area's size
 local W, H = 100, 100
 
+-- The stack's top under the frame: another on it is a dialog over Hearth
+-- (the file picker, the menu), whose Escape is its own
+local base_top = nil
+
 local function build_frame()
+	base_top = uistack.main:top()
 	frame = accounts.page_window(880)
 	frame:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(8, 8, 8, 8))
 	frame:SetFixedHeight(math.floor(magic.ui.root.height * 0.85))
@@ -1241,7 +1248,8 @@ end)
 -- Account button (user, 2026-10-07)
 magic.SubscribeToEvent("KeyDown", function(_, d)
 	if not frame or not frame.visible or
-			d:GetInt("Key") ~= magic.KEY_ESCAPE then
+			d:GetInt("Key") ~= magic.KEY_ESCAPE or
+			uistack.main:top() ~= base_top then
 		return
 	end
 	if accounts.page then
