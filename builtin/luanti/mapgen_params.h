@@ -454,6 +454,39 @@
 		return out;
 	}
 
+	// The game's aliases whose target is a node, for the save's names
+	// (voxelworld's set_name_aliases(), [FEATURE_SWEEP_1009])
+	std::map<ss_, ss_> node_aliases()
+	{
+		std::map<ss_, ss_> out;
+		if(!m_lua)
+			return out;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__aliases");
+		lua_getfield(L, -2, "__content_ids");
+		if(lua_istable(L, -2) && lua_istable(L, -1)){
+			lua_pushnil(L);
+			while(lua_next(L, -3) != 0){
+				// lua_tostring on a number key would break lua_next
+				if(lua_type(L, -2) == LUA_TSTRING &&
+						lua_type(L, -1) == LUA_TSTRING){
+					const char *from = lua_tostring(L, -2);
+					const char *to = lua_tostring(L, -1);
+					lua_getfield(L, -3, to);
+					if(!lua_isnil(L, -1))
+						out[from] = to;
+					lua_pop(L, 1);
+				}
+				lua_pop(L, 1);
+			}
+		}
+		lua_settop(L, base);
+		return out;
+	}
+
 	// What the world's own settings call the mapgen. This is Luanti's
 	// map_meta.txt: the mapgen a world was made with belongs to the world
 	// and not to the configuration, so it is written into the save the

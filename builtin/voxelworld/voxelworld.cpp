@@ -21,6 +21,7 @@
 #include "interface/polyvox_std.h"
 #include "interface/os.h"
 #include <cstring>
+#include <set>
 #include <PolyVoxCore/RawVolume.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
@@ -417,6 +418,10 @@ struct CInstance: public voxelworld::Instance
 	sv_<interface::VoxelTypeId> m_session_to_save;
 	bool m_id_map_identity = true;
 	bool m_logged_remap = false;
+	// set_name_aliases(): old block name -> new; and the save ids read
+	// through one, which are never written to
+	std::map<ss_, ss_> m_name_aliases;
+	std::set<size_t> m_aliased_save_ids;
 	// Session ids up to here are in the name table, and the registry row on
 	// disk was written when the table reached the second of these. They are
 	// what keeps both of those from being redone on every section.
@@ -2236,8 +2241,14 @@ struct CInstance: public voxelworld::Instance
 		m_stale_dirty = false;
 	}
 
+	void set_name_aliases(const std::map<ss_, ss_> &aliases)
+	{
+		m_name_aliases = aliases;
+	}
+
 	void set_save(storage::Save *save, const ss_ &world_name)
 	{
+		m_aliased_save_ids.clear();
 		if(!save){
 			m_store = nullptr;
 			m_world_name = "";
@@ -2436,6 +2447,19 @@ struct CInstance: public voxelworld::Instance
 		for(size_t i = 1; i < m_save_names.size(); i++){
 			if(m_save_to_session[i] != 0)
 				continue; // Resolved once and for all: nothing is unregistered
+			// A renamed type: the voxel its alias names, written back under
+			// that name (the reverse map below skips this save id)
+			auto al = m_name_aliases.find(m_save_names[i].block_name);
+			if(al != m_name_aliases.end()){
+				interface::VoxelName n = m_save_names[i];
+				n.block_name = al->second;
+				const interface::VoxelDefinition *d = m_voxel_reg->get(n);
+				if(d){
+					m_save_to_session[i] = d->id;
+					m_aliased_save_ids.insert(i);
+					continue;
+				}
+			}
 			const interface::VoxelDefinition *def =
 					adopt_unknown_voxel(m_save_names[i]);
 			if(!def){
@@ -2452,6 +2476,8 @@ struct CInstance: public voxelworld::Instance
 		m_session_to_save.assign(m_names_synced_to + 1, 0);
 		for(size_t i = 1; i < m_save_to_session.size(); i++){
 			interface::VoxelTypeId sid = m_save_to_session[i];
+			if(m_aliased_save_ids.count(i))
+				continue;
 			if(sid != 0 && sid < m_session_to_save.size())
 				m_session_to_save[sid] = (interface::VoxelTypeId)i;
 		}

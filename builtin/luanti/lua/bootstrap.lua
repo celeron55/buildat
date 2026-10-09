@@ -2451,6 +2451,12 @@ local function name_matcher(nodenames)
 			groups[#groups + 1] = g
 		else
 			plain[n] = true
+			-- An old name a game keeps as an alias means the node it
+			-- names, as Luanti's getIds() resolves it ([FEATURE_SWEEP_1009])
+			local a = core.__aliases[n]
+			if a then
+				plain[a] = true
+			end
 		end
 	end
 	-- What each name answered, because this is asked once per voxel of a box

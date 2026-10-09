@@ -2472,6 +2472,7 @@ struct Module: public interface::Module, public luanti::Interface
 			// content ids the mods asked for while loading are the ids this
 			// run uses whatever a previous one did. See
 			// doc/plan/world_persistence_plan.md.
+			world->set_name_aliases(node_aliases());
 			world->set_save(m_save, "main");
 			m_section_size = world->get_section_size_voxels();
 		});

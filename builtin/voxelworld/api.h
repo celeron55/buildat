@@ -11,6 +11,7 @@
 #include <PolyVoxCore/Region.h>
 #include <PolyVoxCore/RawVolume.h>
 #include <functional>
+#include <map>
 
 namespace Urho3D
 {
@@ -163,6 +164,13 @@ namespace voxelworld
 		// world still points at it is a use-after-free. Pass nullptr to stop
 		// persisting first.
 		virtual void set_save(storage::Save *save, const ss_ &world_name) = 0;
+
+		// Before set_save(): old block name -> the one it is now. A name the
+		// save holds and the game no longer registers is read as the voxel
+		// of the name its alias gives, rather than kept as unknown -- a game
+		// that renamed a node and kept the old name as an alias, as Luanti
+		// remaps a stored block's names ([FEATURE_SWEEP_1009]).
+		virtual void set_name_aliases(const std::map<ss_, ss_> &aliases) = 0;
 
 		// Write out every section that has changed since it was read.
 		// Happens by itself when a section is unloaded and at shutdown, so
