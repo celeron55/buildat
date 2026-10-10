@@ -224,7 +224,8 @@ Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
                            at the end. Not a helper or above
     vet_file               a helper and up: file or message (each of its
                            new account's images), on -- shown to
-                           everyone, or taken back
+                           everyone, or taken back; only an author's
+                           below one's own level
     trust                  a helper and up: name, on -- an account
                            trusted (a member), or no longer; a helper
                            takes back only its own, within 7 days
