@@ -10,6 +10,8 @@
 //     Allow, and the token goes to the window that opened this by
 //     postMessage -- only to the listed server's own web client, or a page
 //     of the setting web_clients ("origin"), which the API checks.
+//   /authorize?site=<id>  [STARPORT_SITE_LOGIN] the same for a website an
+//     operator registered: the token goes to the site's origin only.
 //   /id  the ID's settings, (b): its sessions and recent logins with "log
 //     out everywhere else", the e-mail, the password, TOTP and the age.
 // One page for both; the session is kept in this origin's storage.
@@ -107,6 +109,7 @@ const authorize = location.pathname == "/authorize";
 const q = new URLSearchParams(location.search);
 const want = {listing: q.get("listing") || "", address: q.get("address") || "",
 	origin: q.get("origin") || "", web: true};
+if(q.get("site")) want.site = q.get("site");
 // The server has an account of its own by this ID's name there: another
 const rename = q.get("rename") == "1";
 if(rename) want.rename = true;
@@ -183,14 +186,17 @@ async function signed_in(){
 async function start(){
 	if(authorize){
 		$("title").textContent = "Sign in with a Starport ID";
+		if(want.site)
+			$("fleetl").firstChild.textContent = "Your name on this site ";
 		if(!window.opener){
-			$("what").textContent = "Open this from a Buildat web client.";
+			$("what").textContent = want.site ? "Open this from the site's "
+				+ "page." : "Open this from a Buildat web client.";
 			return;
 		}
 		try {
 			const i = await call("authorize_info", want);
 			const b = document.createElement("b");
-			b.textContent = i.name || "a server";
+			b.textContent = i.name || (i.site ? "a website" : "a server");
 			$("what").append(b, " at " + i.origin + " asks who you are. "
 				+ "Allowing signs you in there, by the name you have on it.");
 		} catch(e){ return fail(e); }
@@ -254,7 +260,7 @@ $("allow").onsubmit = act(async () => {
 		return;
 	}
 	window.opener.postMessage({buildat_starport_token: r.token,
-		name: r.name, listing: r.listing}, r.origin);
+		name: r.name, listing: r.listing, site: r.site}, r.origin);
 	window.close();
 });
 $("cancel").onclick = () => window.close();

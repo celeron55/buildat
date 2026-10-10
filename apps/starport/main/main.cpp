@@ -16,7 +16,9 @@
 //   GET /api/icon/<sha256>   a listing's icon, a PNG ([SERVER_ICONS])
 //   POST /api/id/<call>      a Starport ID's calls ([STARPORT] 10)
 //   GET /authorize, GET /id  the pages a web client signs in by and an
-//                            ID's settings are on ([WEB_ID_TRUST])
+//                            ID's settings are on ([WEB_ID_TRUST]);
+//                            /authorize?site=<id> a website's sign-in
+//                            ([STARPORT_SITE_LOGIN])
 //   GET /brand/<file>        the pages' font and logo ([HTML_BRAND])
 //   GET /                    the listed servers and the numbers as a page,
 //                            ?kind=, ?audience= ([FRONT_PAGES]), only
@@ -2343,6 +2345,15 @@ struct Module: public interface::Module, public moderation::Host
 		}
 		// [WEB_ID_TRUST]: what /authorize shows before its Allow
 		if(what == "authorize_info"){
+			// [STARPORT_SITE_LOGIN] Or a website's
+			if(!jstr(b, "site").empty()){
+				const json::Value f = find_site(b);
+				json::Value out = json::object();
+				out.set("name", jstr(f, "name"));
+				out.set("origin", jstr(f, "origin"));
+				out.set("site", true);
+				return out;
+			}
 			const json::Value l = find_listing(b);
 			json::Value out = json::object();
 			out.set("name", jstr(l, "name"));
@@ -2516,15 +2527,18 @@ struct Module: public interface::Module, public moderation::Host
 					"have age limits, so an ID says whether its owner is 18 "
 					"or over (in the client: Starport settings..., Starport "
 					"ID..., Change the age...)");
-		const json::Value l = find_listing(b);
-		const ss_ origin = web_origin(l, b);
+		// [STARPORT_SITE_LOGIN] A website's: its origin, its own scope and
+		// secret, no audience
+		const bool site = !jstr(b, "site").empty();
+		const json::Value l = site ? find_site(b) : find_listing(b);
+		const ss_ origin = site ? jstr(l, "origin") : web_origin(l, b);
 		// 10b: the age band against the listing's audience
-		const ss_ aud = jstr(effective(l), "audience");
+		const ss_ aud = site ? "" : jstr(effective(l), "audience");
 		const int64_t age = age_low(id);
 		if((aud == "adult" && age < 18) || (aud == "teen" && age < 13))
 			throw Exception("this server's audience is "+aud+": not for "
 					"this ID's age");
-		const ss_ scope = scope_of(l);
+		const ss_ scope = site ? "site:"+jstr(l, "id") : scope_of(l);
 		json::Value scopes = id.get("scopes").is_object() ?
 				id.get("scopes").deepcopy() : json::object();
 		ss_ shown = jstr(scopes.get(scope), "name");
@@ -2563,7 +2577,7 @@ struct Module: public interface::Module, public moderation::Host
 		json::Value p = json::object();
 		p.set("sub", sub_of(name, scope));
 		p.set("name", shown);
-		p.set("listing", jstr(l, "id"));
+		p.set(site ? "site" : "listing", jstr(l, "id"));
 		p.set("exp", now_s() + 30 * 86400);
 		if(aud == "adult")
 			p.set("adult", true);
@@ -2571,12 +2585,22 @@ struct Module: public interface::Module, public moderation::Host
 		json::Value out = json::object();
 		out.set("token", payload+"."+hex(interface::sha256::hmac(
 				unhex(jstr(l, "secret")), payload)));
-		out.set("listing", jstr(l, "id"));
+		out.set(site ? "site" : "listing", jstr(l, "id"));
 		out.set("name", shown);
 		out.set("exp", jint(p, "exp"));
 		if(!origin.empty())
 			out.set("origin", origin);
 		return out;
+	}
+
+	// [STARPORT_SITE_LOGIN] A token's website, by its id; none of a banned
+	// account's
+	json::Value find_site(const json::Value &b)
+	{
+		const json::Value f = load("sites", jstr(b, "site"));
+		if(!f.is_object() || banned("account", jstr(f, "owner")))
+			throw Exception("no such site");
+		return f;
 	}
 
 	// A token's listing: by its id, or else (10g) an unlisted server by the
@@ -2843,6 +2867,9 @@ struct Module: public interface::Module, public moderation::Host
 			return cmd_fleet(name, cmd, q);
 		if(cmd == "fleet_remove_server")
 			return cmd_fleet_remove_server(name, q);
+		if(cmd == "site_create" || cmd == "site_update" ||
+				cmd == "site_new_secret" || cmd == "site_remove")
+			return cmd_site(name, cmd, q);
 		if(cmd.compare(0, 10, "blocklist_") == 0 || cmd == "blocklists")
 			return cmd_blocklist(name, cmd, q);
 		if(cmd == "appeal"){
@@ -2947,6 +2974,13 @@ struct Module: public interface::Module, public moderation::Host
 				fleets.append(f);
 		}
 		r.set("fleets", fleets);
+		json::Value sites = json::array();
+		for(const ss_ &id : store("sites")->list("")){
+			const json::Value f = load("sites", id);
+			if(jstr(f, "owner") == name)
+				sites.append(f);
+		}
+		r.set("sites", sites);
 		r.set("starport", jstr(m_settings, "name"));
 		// The Overview's ([STARPORT_UI]): the notice, the standing, what
 		// waits, and how many events are unseen
@@ -3421,6 +3455,70 @@ struct Module: public interface::Module, public moderation::Host
 		}
 		put("fleets", jstr(f, "id"), f);
 		record(name, "", cmd, "fleet "+jstr(f, "id"), false);
+		return f;
+	}
+
+	// [STARPORT_SITE_LOGIN] An operator's websites: a site signs its
+	// visitors in by a Starport ID as a web client does a server's
+	// (/authorize?site=<id>), the token by postMessage to its origin only,
+	// signed with its secret, an identity of its own as a fleet's
+	static bool origin_ok(const ss_ &o)
+	{
+		const size_t sep = o.find("://");
+		if(o.size() > 200 || sep == ss_::npos ||
+				(o.substr(0, sep) != "https" && o.substr(0, sep) != "http"))
+			return false;
+		const ss_ rest = o.substr(sep + 3);
+		if(rest.empty() || rest[0] == ':')
+			return false;
+		for(char c : rest)
+			if(!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+					c == '.' || c == '-' || c == ':'))
+				return false;
+		return true;
+	}
+	json::Value cmd_site(const ss_ &name, const ss_ &cmd, const json::Value &q)
+	{
+		json::Value f;
+		if(cmd == "site_create"){
+			const json::Value o = load("operators", name);
+			if(!o.is_object() || jstr(o, "email").empty())
+				throw Exception("set your contact e-mail first");
+			if(banned("account", name))
+				throw Exception("this account may not register sites");
+			int n = 0;
+			for(const ss_ &id : store("sites")->list(""))
+				n += jstr(load("sites", id), "owner") == name;
+			if(n >= 20)
+				throw Exception("20 sites an account");
+			f = json::object();
+			f.set("id", random_hex(6));
+			f.set("owner", name);
+			f.set("secret", random_hex(32));
+		} else {
+			f = load("sites", jstr(q, "site"));
+			if(!f.is_object() || jstr(f, "owner") != name)
+				throw Exception("no such site of yours");
+			if(cmd == "site_remove"){
+				store("sites")->remove(jstr(f, "id"));
+				record(name, "", cmd, "site "+jstr(f, "id"), false);
+				return json::Value(true);
+			}
+			if(cmd == "site_new_secret")
+				f.set("secret", random_hex(32));
+		}
+		if(cmd != "site_new_secret"){
+			const ss_ sname = jstr(q, "name"), origin = jstr(q, "origin");
+			if(sname.empty() || sname.size() > 60)
+				throw Exception("name: 1 to 60 characters");
+			if(!origin_ok(origin))
+				throw Exception("origin: https://host[:port], no path, in "
+						"lower case");
+			f.set("name", sname);
+			f.set("origin", origin);
+		}
+		put("sites", jstr(f, "id"), f);
+		record(name, "", cmd, "site "+jstr(f, "id"), false);
 		return f;
 	}
 

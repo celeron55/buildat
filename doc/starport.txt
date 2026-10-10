@@ -34,6 +34,20 @@ run their own. The official one is https://starport.buildat.org.
   The age asks "18 or over?" first, the birth year only on a No, kept
   until the ID turns 18. With TOTP on, changing the password or the
   e-mail takes a current code.
+- A website signs its visitors in the same way ([STARPORT_SITE_LOGIN]):
+  its operator registers it (the Starport app's Sites page: a name and
+  an origin, https://host[:port]) and gets an id and a secret. The site
+  opens `https://<starport>/authorize?site=<id>` with `window.open`; the
+  visitor logs in there and allows, and the site's window gets
+  `{buildat_starport_token, name, site}` by postMessage, to the site's
+  origin only. The token is `<payload>.<hmac>`: payload the base64url
+  (no padding) of `{"sub", "name", "site", "exp"}`, hmac the hex of
+  HMAC-SHA256 over the payload's text with the secret's bytes (the
+  secret is hex). The site's server checks the hmac, the site id and
+  `exp` (a unix time), and knows the visitor by `sub`, which is the
+  same on every visit and different on any other site, server or
+  fleet; the name is one the visitor picks for the site. A new secret
+  makes the old tokens fail.
 - A Starport ID holds a name, a password hash and, if given, a recovery
   e-mail. It is deleted from its own settings. Mail goes through the
   server's SMTP server, set on the Server window's Health page; the old

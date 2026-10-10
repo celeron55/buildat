@@ -184,6 +184,7 @@ end
 
 local home, queue_page, group_page, listings_page, listing_page
 local audit_page, appeals_page, settings_page, appeal_page, fleets_page
+local sites_page
 local blocklists_page
 
 -- What a moderator does to a listing ([STARPORT] 6), for a group's
@@ -221,6 +222,7 @@ accounts.server_menu = function(add)
 	add(nil, "Overview", "overview", overview_page, me.unseen_events)
 	add("Mine", "Servers", "servers", servers_page)
 	add("Mine", "Fleets", "fleets", function() fleets_page(me) end)
+	add("Mine", "Sites", "sites", function() sites_page(me) end)
 	add("Mine", "Blocklists", "blocklists", function() blocklists_page(me) end,
 			me.blocklist_offers)
 	if me.moderator then
@@ -439,6 +441,42 @@ fleets_page = function(me)
 			description = description:GetText(), link = link:GetText()},
 				function()
 			req("me", {}, fleets_page)
+		end)
+	end)
+end
+
+-- [STARPORT_SITE_LOGIN] An operator's websites: each signs its visitors
+-- in by a Starport ID, in this Starport's window, the token sent to the
+-- site's origin and signed with its secret (doc/starport.txt)
+sites_page = function(me)
+	local w = open("Sites", function() sites_page(me) end)
+	text(w, "A website signs its visitors in by opening this Starport's "..
+			"/authorize?site=<id> in a window; the token comes back to the "..
+			"site's origin by postMessage, and the site checks it with the "..
+			"secret (doc/starport.txt). A visitor's name there is their own "..
+			"for the site.", GREY)
+	local l = list(w)
+	for _, f in ipairs(me.sites or {}) do
+		l.text(s(f.name) .. " at " .. s(f.origin) .. ", id " .. s(f.id))
+		l.copy("Secret", s(f.secret))
+		local r = l.row()
+		button(r, "New secret (tokens signed with the old fail)", function()
+			req("site_new_secret", {site = f.id}, function()
+				req("me", {}, sites_page)
+			end)
+		end)
+		button(r, "Remove", function()
+			req("site_remove", {site = f.id}, function()
+				req("me", {}, sites_page)
+			end)
+		end)
+	end
+	local name = edit(w, "Name", "")
+	local origin = edit(w, "Origin (https://host[:port])", "")
+	button(row(w), "Register a site", function()
+		req("site_create", {name = name:GetText(), origin = origin:GetText()},
+				function()
+			req("me", {}, sites_page)
 		end)
 	end)
 end
