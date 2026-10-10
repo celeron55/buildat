@@ -59,7 +59,7 @@ run their own. The official one is https://starport.buildat.org.
   first. The web client is at /index.html.
 - Reports, their weights, the queue, decisions, statements of reasons and
   appeals are builtin/moderation's (doc/server_api.txt); a statement has
-  one open appeal. A blocklist takes only an offered listing or fleet; an
+  one appeal; a decided one closes it. A blocklist takes only an offered listing or fleet; an
   account makes 20 at most, none when banned. Moderators are accounts at
   the Steward level ([TRUST_LADDER]), set by the "level" request as
   Hearth's are.

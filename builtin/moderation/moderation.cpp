@@ -223,7 +223,7 @@ struct Module: public interface::Module, public Interface
 		s.set("text", text);
 		s.set("by", by);
 		s.set("owner", owner);
-		s.set("appeal", "Appeal from your account on this "+h->name()+
+		s.set("appeal", "Appeal once, from your account on this "+h->name()+
 				"; another moderator than the one who acted decides.");
 		put(h, "statements", id, s);
 		if(!owner.empty())
@@ -361,11 +361,15 @@ struct Module: public interface::Module, public Interface
 		const ss_ text = jstr(q, "text");
 		if(text.empty() || text.size() > 4000)
 			throw Exception("say why, in at most 4000 characters");
+		// One appeal a statement ([SEC_RUN4_LEFTOVERS]): a decided one
+		// closes it; a new decision is a new statement
 		for(const ss_ &aid : keys(h, "appeals")){
 			const json::Value o = load(h, "appeals", aid);
-			if(jstr(o, "statement") == jstr(s, "id") &&
-					jstr(o, "state") == "open")
-				throw Exception("this statement has an open appeal");
+			if(jstr(o, "statement") != jstr(s, "id"))
+				continue;
+			throw Exception(jstr(o, "state") == "open" ?
+					"this statement has an open appeal" :
+					"this statement was appealed already");
 		}
 		json::Value a = json::object();
 		const ss_ id = random_hex(6);

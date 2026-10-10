@@ -11,7 +11,9 @@
 #      here): pk is out of the list. A web form's report on pk2 is taken.
 #   2. The admin upholds pk's group as a delist: the author's statement;
 #      the author appeals; the admin may not decide it, mod2 reverses it:
-#      pk listed again. The key's receipt reads upheld.
+#      pk listed again. The key's receipt reads upheld. The statement
+#      is not appealed twice; the admin's own delist and relist are in
+#      the audit log and stated to the author.
 #   3. While pk is delisted, the launcher's Aitta page notes it on the
 #      installed tile: "Delisted by its Aitta" and why.
 #   4. A bar: tester's next release refused.
@@ -174,6 +176,23 @@ reqs mod2 "$t/ap3.log" \
 	"{\"cmd\":\"mod_decide_appeal\",\"appeal\":\"$apid\",\"outcome\":\"reverse\",\"text\":\"it starts\"}"
 ans "$t/ap3.log" 1 > /dev/null || fail "mod2's reverse: $(grep -a 'ai: \|refused' "$t/ap3.log")"
 listed pk || fail "pk not relisted"
+# [SEC_RUN4_LEFTOVERS]: the admin's delist and relist in the audit log
+# and told to the owner; a decided appeal closes its statement
+reqs admin "$t/adm.log" \
+	'{"cmd":"delist","release":"tester/pk/1.0.0","text":"a check"}' \
+	'{"cmd":"relist","release":"tester/pk/1.0.0"}' '{"cmd":"mod_audit"}'
+ans "$t/adm.log" 3 | grep -q '"action":"delist","auto":false,"by":"admin"' &&
+	ans "$t/adm.log" 3 | grep -q '"action":"relist","auto":false,"by":"admin"' ||
+	fail "the admin's delist and relist not audited: $(grep -a 'ai: {"id":[12]' "$t/adm.log")"
+listed pk || fail "pk not relisted by the admin"
+reqs author1 "$t/again.log" \
+	"{\"cmd\":\"appeal\",\"statement\":\"$st\",\"text\":\"again\"}" \
+	'{"cmd":"statements"}'
+grep -aq "this statement was appealed already" "$t/again.log" ||
+	fail "a decided statement appealed again: $(grep -a 'ai: {"id":1' "$t/again.log")"
+ans "$t/again.log" 2 | grep -q '"action":"relisted"[^}]*"reason":"the admin' &&
+	ans "$t/again.log" 2 | grep -q '"action":"delisted"[^}]*"reason":"the admin' ||
+	fail "no statement of the admin's delist and relist: $(ans "$t/again.log" 2 | head -c 600)"
 curl -s -X POST -d "{\"key\":\"$key\",\"receipts\":[\"$receipt\"]}" \
 	"$A/api/aitta/report_status" | grep -q '"state":"upheld"' ||
 	fail "the receipt's outcome"
@@ -186,4 +205,4 @@ sed -i 's/"1.0.0"/"1.0.1"/' "$t/app/meta.json"
 zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.0.1"
 "$b" aitta publish "$zip" 127.0.0.1:$P 2>&1 | grep -q "barred from publishing" ||
 	fail "a barred author published"
-echo "PASS: weighed reports, the automatic hide, a web report; delist, statement, appeal decided by another moderator; the tile note; a bar"
+echo "PASS: weighed reports, the automatic hide, a web report; delist, statement, appeal decided by another moderator, once; the admin's delist and relist audited and stated; the tile note; a bar"

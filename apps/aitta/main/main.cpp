@@ -1598,6 +1598,16 @@ struct Module: public interface::Module, public moderation::Host
 				throw Exception("no release "+id);
 			rel.set("delisted", cmd == "delist");
 			put("releases", id, rel);
+			// In the audit log the moderators read, and told to the owner,
+			// as a moderator's delist is: the admin does not undo one
+			// unseen ([SEC_RUN4_LEFTOVERS])
+			const ss_ text = jstr(q, "text");
+			moderation::access(m_server, [&](moderation::Interface *m){
+				m->audit(this, name, id, cmd, "admin", text, false);
+				m->statement(this, subject(id), cmd == "delist" ?
+						"delisted" : "relisted", "the admin's decision", text,
+						name);
+			});
 			log_i(MODULE, "%s: %s %s", cs(name), cs(cmd), cs(id));
 			return json::Value(true);
 		}

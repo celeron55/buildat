@@ -96,7 +96,8 @@ author name to the public key keygen printed; the name and the key do
 not change after. A published release is checked -- the signature by a
 bound key, the hash, the manifest, its author being the key's, the
 licences against the instance's list (free ones by default, in its
-settings), the size -- and listed, unreviewed. The admin can delist.
+settings), the size -- and listed, unreviewed. The admin can delist and relist, in the moderators'
+audit log and told to the owner as a moderator's delist is.
 A package's later release is listed once it is the settings'
 "update_delay" seconds old (0 by default), so a release made with a
 stolen key can be reported and delisted before clients are offered it.
@@ -129,8 +130,8 @@ the list until a moderator looks. "Reports" on Aitta's page is the
 moderators' queue: dismiss, or unreview, delist the release, delist the
 package or bar the author from publishing (days, or until lifted). The
 author reads what was done on their Aitta page ("What was done to my
-releases") and appeals there; another moderator than the one who acted
-decides. A delisted release installed in a client is noted on its tile
+releases") and appeals there, once a statement; another moderator than
+the one who acted decides. A delisted release installed in a client is noted on its tile
 when the launcher next fetches that Aitta's list.
 
     GET  /api/aitta/list                      the listed releases, JSON, and
