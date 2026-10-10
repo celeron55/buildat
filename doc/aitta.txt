@@ -144,6 +144,10 @@ when the launcher next fetches that Aitta's list.
     GET  /                                    a page of each package's latest
                                               release, for a browser
     GET  /p/<author>/<name>                   a package's listed releases
+                                              (the newest, the rest
+                                              folded), then Install: "On
+                                              the client" and "On a
+                                              dedicated server", folded
 
 The HTTP requests are limited per network (an IPv4 /24, an IPv6 /64):
 240 reads and 30 uploads a minute. The web client of an Aitta server is
@@ -192,7 +196,9 @@ the script installs it, and at each update check installs the newest
 listed release, compiles it and restarts onto it as it does for a new
 engine release (the same wait for players, the same warning). Without
 AITTA the installed version stays until one is installed by hand. A
-package's page on the Aitta shows these commands with its name filled in.
+package's page on the Aitta shows these commands with its name filled in,
+under Install's "On a dedicated server", after "On the client" (Apps
+from Aitta, this Aitta added in the Starport settings) ([AITTA_INSTALL_HELP]).
 
     AITTA=https://aitta.example util/serve_latest_release.sh someone/lamps 29500 ~/lamps-user
 

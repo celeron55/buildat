@@ -64,7 +64,12 @@ namespace interface
 			".box img{max-width:100%;height:auto}"
 			"ul.files{list-style:none;padding:0}"
 			"ul.files img{vertical-align:middle;margin:.2em .5em .2em 0}"
-			".box::after{content:\"\";display:block;clear:both}";
+			".box::after{content:\"\";display:block;clear:both}"
+			// [AITTA_INSTALL_HELP] A fold: the client's ▼ closed, ▲ open
+			"summary{cursor:pointer;list-style:none;color:#fff;margin:.5em 0}"
+			"summary::-webkit-details-marker{display:none}"
+			"summary::after{content:\" \\25BC\";color:#999}"
+			"details[open]>summary::after{content:\" \\25B2\"}";
 
 		static const char *logo = "<img src=\"/brand/logo.png\" alt=\"\">";
 

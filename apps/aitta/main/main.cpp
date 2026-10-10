@@ -631,13 +631,23 @@ struct Module: public interface::Module, public moderation::Host
 		ss_ c;
 		if(r.path.compare(0, 3, "/p/") == 0){
 			const ss_ want = r.path.substr(3);
+			// [AITTA_INSTALL_HELP] The newest, the rest folded
+			sv_<const json::Value*> mine;
 			for(const json::Value &rel : rels)
 				if(pkg(rel) == want)
-					c += release_box(rel, false);
-			if(c.empty())
+					mine.push_back(&rel);
+			if(mine.empty())
 				return send(404, html_type, interface::web_brand::page(
 						"Not found", "Aitta", "<p>No package of that name is "
 						"listed here. <a href=\"/\">The list</a>.</p>"));
+			c = release_box(*mine[0], false);
+			if(mine.size() > 1){
+				c += "<details><summary>Older releases ("+
+						itos(mine.size() - 1)+")</summary>\n";
+				for(size_t i = 1; i < mine.size(); i++)
+					c += release_box(*mine[i], false);
+				c += "</details>\n";
+			}
 			// [AITTA_SERVE] The commands for a dedicated server, filled in
 			// simplified: behind a proxy without public_url set, the
 			// address may read as the proxy's inside one; the setting is
@@ -646,13 +656,26 @@ struct Module: public interface::Module, public moderation::Host
 			if(self.empty())
 				self = "http://"+r.host;
 			ss_ vers;
-			for(const json::Value &rel : rels)
-				if(pkg(rel) == want)
-					vers += "bin/buildat aitta install "+self+" "+want+"@"+
-							jstr(rel, "version")+" <user dir>\n";
-			c = "<div class=\"box\"><b>On a dedicated server</b> <span "
-					"class=\"meta\">in the directory of a Buildat release; "
-					"the newest listed, or a version</span><pre>"
+			for(const json::Value *rel : mine)
+				vers += "bin/buildat aitta install "+self+" "+want+"@"+
+						jstr(*rel, "version")+" <user dir>\n";
+			const ss_ name = jstr(*mine[0], "name");
+			c += "<h2>Install</h2>\n<details><summary>On the client</summary>"
+					"<ol><li>In the Buildat client, open <b>Apps from Aitta"
+					"</b>.</li><li>If this Aitta, <code>"+html(self)+"</code>, "
+					"is not one of the client's Aittas, add it in the "
+					"Starport settings (<b>Starport settings...</b> in the "
+					"launcher, then <b>Add Aitta</b>).</li><li>Search for "
+					"<code>"+html(name)+"</code> and pick <b>Install</b>; the "
+					"client checks the author's signature first.</li>"+
+					(jstr(*mine[0], "review") == "reviewed" ? "" :
+					"<li>The newest release is unreviewed: it shows only "
+					"with <b>Apps from Aitta (unreviewed): shown</b> in the "
+					"same settings.</li>")+"</ol></details>\n"
+					"<details><summary>On a dedicated server</summary>"
+					"<div class=\"box\"><span class=\"meta\">In the "
+					"directory of a Buildat release; the newest listed, or a "
+					"version</span><pre>"
 					"bin/buildat aitta install "+html(self)+" "+html(want)+
 					" &lt;user dir&gt;\n"
 					"util/serve_latest_release.sh "+html(want)+
@@ -660,7 +683,7 @@ struct Module: public interface::Module, public moderation::Host
 					"# following its releases here:\n"
 					"AITTA="+html(self)+" util/serve_latest_release.sh "+
 					html(want)+" &lt;port&gt; &lt;user dir&gt;</pre><pre>"+
-					html(vers)+"</pre></div>\n"+c;
+					html(vers)+"</pre></div></details>\n";
 			// [AITTA_REPORTS] A report from the web: anonymous, so it
 			// weighs little alone
 			ss_ f = "<h2>Report</h2><form method=\"post\" action=\""

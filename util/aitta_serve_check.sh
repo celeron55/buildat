@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~2 min (2026-10-09)
-# covers: util/serve_latest_release.sh src/client/main.cpp apps/aitta/main/main.cpp
+# covers: util/serve_latest_release.sh src/client/main.cpp apps/aitta/main/main.cpp src/interface/web_brand.h
 # [AITTA_SERVE]: a local Aitta with tester/pt (apps/minigame) 1.0.0.
 #   1. buildat aitta install by name: the newest, @1.0.0 said installed
 #      already, an unknown version refused with the versions listed, an
@@ -14,6 +14,11 @@
 #      compiled and the server restarted onto it, a save under
 #      apps/tester.pt kept.
 #   5. Restarted without AITTA, 1.0.2 published: stays on 1.0.1.
+#   6. The page with the three ([AITTA_INSTALL_HELP]): 1.0.2 outside a
+#      fold, the two others in a closed "Older releases (2)"; Install
+#      after the releases and before Report, "On the client" (unreviewed:
+#      the setting named) then "On a dedicated server" with the commands,
+#      neither open.
 #
 #   util/aitta_serve_check.sh
 set -u
@@ -139,4 +144,26 @@ publish 1.0.2
 sleep 15
 [ -d "$t/u1/installed/tester/pt/1.0.2" ] && fail "1.0.2 installed without AITTA"
 grep -aq "tester/pt 1.0.2" "$t/serve2.log" && fail "updated without AITTA"
-echo "PASS: install by name and version, refusals listing the versions, the page's commands; the script refuses without an install, installs with AITTA, follows 1.0.1 keeping the save, stays without AITTA"
+
+# 6. The page's order
+curl -s "http://127.0.0.1:$P/p/tester/pt" > "$t/page3"
+python3 - "$t/page3" "http://127.0.0.1:$P" <<'PY' || fail "the page's order ($t/page3)"
+import sys
+s, self = open(sys.argv[1]).read(), sys.argv[2]
+order = ["</b> 1.0.2 ", "<details><summary>Older releases (2)</summary>",
+	"</b> 1.0.1 ", "</b> 1.0.0 ", "</details>", "<h2>Install</h2>",
+	"<details><summary>On the client</summary>", "<code>" + self + "</code>",
+	"Apps from Aitta (unreviewed): shown", "</details>",
+	"<details><summary>On a dedicated server</summary>",
+	"bin/buildat aitta install " + self + " tester/pt &lt;user dir&gt;",
+	"tester/pt@1.0.0", "</details>", "<h2>Report</h2>"]
+at = 0
+for x in order:
+	i = s.find(x, at)
+	if i < 0:
+		sys.exit("not in order: " + x)
+	at = i + len(x)
+if "<details open" in s:
+	sys.exit("a fold open")
+PY
+echo "PASS: install by name and version, refusals listing the versions, the page's commands; the script refuses without an install, installs with AITTA, follows 1.0.1 keeping the save, stays without AITTA; the page's newest, older folded, Install's two folds before Report"
