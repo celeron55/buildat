@@ -1839,10 +1839,11 @@ struct Module: public interface::Module
 	// The HTML face
 
 	void respond(const network::HttpRequest &r, int status, const ss_ &body,
-			const ss_ &type = "text/html; charset=utf-8")
+			const ss_ &type = "text/html; charset=utf-8",
+			const ss_ &extra_headers = "")
 	{
 		network::access(m_server, [&](network::Interface *iface){
-			iface->http_respond(r.peer, status, type, body);
+			iface->http_respond(r.peer, status, type, body, extra_headers);
 		});
 	}
 
@@ -2074,7 +2075,10 @@ struct Module: public interface::Module
 					r.path.find('/', 3) == r.path.size() - 6;
 			ss_ type, data;
 			if(id >= 0 && file_served(id) && file_data(id, thumb, type, data))
-				return respond(r, 200, data, type);
+				// An upload is its stored type and nothing a browser
+				// guesses ([SEC_RUN4_LEFTOVERS])
+				return respond(r, 200, data, type,
+						"X-Content-Type-Options: nosniff\r\n");
 		}
 		ss_ title, body;
 		if(r.method == "GET")
@@ -3327,13 +3331,26 @@ struct Module: public interface::Module
 			}
 			const bool on = q.get("on").is_true();
 			int changed = 0;
+			bool above = false;
 			for(int64_t id : ids){
+				// Only an image of an author below the one vetting
+				// ([SEC_RUN4_LEFTOVERS]): a helper does not take back
+				// the admin's or a moderator's
+				Q o(m_db, "SELECT uploader FROM files WHERE id = ?");
+				o.b(id);
+				if(o.step() && level_of(o.s(0)) >= lv){
+					above = true;
+					continue;
+				}
 				Q u(m_db, "UPDATE files SET vetted = ? WHERE id = ? AND lod > 0");
 				u.b((int64_t)(on ? 1 : -1)).b(id).step();
 				changed += sqlite3_changes(m_db);
 				log_i(MODULE, "%s %s image %lld", cs(name), on ?
 						"showed everyone" : "took back", (long long)id);
 			}
+			if(changed == 0 && above)
+				throw Exception("an image of a "+level_name(lv)+
+						" or above is not yours to vet");
 			if(changed == 0)
 				throw Exception("no such image");
 			return json::Value(true);

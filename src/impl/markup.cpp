@@ -44,12 +44,23 @@ struct Out {
 	ss_ img_src, alt;
 };
 
-// The Hearth's own file, "/f/<id>...": drawn, as loading it tells only
-// the Hearth who reads the page
+// The Hearth's own file, "/f/<id>" or "/f/<id>/<name>": drawn, as loading
+// it tells only the Hearth who reads the page. Exactly that, so that an
+// image cannot GET another of the server's paths with the reader's
+// cookies ("/f/1/../../x"; [SEC_RUN4_LEFTOVERS])
 static bool own_image(const ss_ &src)
 {
-	return src.size() > 3 && src.compare(0, 3, "/f/") == 0 &&
-			isdigit((unsigned char)src[3]);
+	if(src.size() <= 3 || src.compare(0, 3, "/f/") != 0)
+		return false;
+	size_t i = 3;
+	while(i < src.size() && isdigit((unsigned char)src[i]))
+		i++;
+	if(i == 3)
+		return false;
+	if(i == src.size())
+		return true;
+	return src[i] == '/' &&
+			src.find_first_of("/?#", i + 1) == ss_::npos;
 }
 
 static void open_link(Out *o, const MD_ATTRIBUTE &href,

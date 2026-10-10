@@ -613,6 +613,22 @@ client admin checkpass12 "$t/admin13b.log" '{"cmd":"trust","name":"frank","on":t
 [ "$(get /t/$TN2)" = 200 ] && ! grep -q "<img src=\"/f/$I2/" "$t/page" ||
 	fail "an image taken back shown once its account is trusted"
 echo "ok: a new account's one image a thread, shown once a helper says or it is trusted"
+# [SEC_RUN4_LEFTOVERS]: a helper does not take back the admin's image; an
+# image is exactly /f/<id>[/<name>], not another path after it; /f/ says
+# nosniff
+client admin checkpass12 "$t/admin13c.log" "{\"cmd\":\"upload\",\"name\":\"a.png\",\"data\":\"$(cat "$t/up_png")\"}"
+FP=$(res "$t/admin13c.log" 1001 'r["result"]["id"]')
+client carol carolpass1234 "$t/carol13d.log" "{\"cmd\":\"vet_file\",\"file\":$FP,\"on\":false}"
+answer "$t/carol13d.log" 1001 | grep -q "not yours to vet" ||
+	fail "a helper took back the admin's image: $(answer "$t/carol13d.log" 1001)"
+client admin checkpass12 "$t/admin13d.log" "{\"cmd\":\"reply\",\"thread\":1,\"body\":\"![a](/f/$FP/../../x) ![b](/f/$FP/ok.png)\"}"
+MI=$(num "$t/admin13d.log" 1001)
+[ "$(get /m/$MI)" = 200 ] && ! grep -q "<img src=\"/f/$FP/\.\." "$t/page" &&
+	grep -q "<img src=\"/f/$FP/ok.png\"" "$t/page" ||
+	fail "an image path past /f/<id>/<name>: $(grep -o '<img src="/f/[^>]*>' "$t/page" | head -3)"
+curl -s -D - -o /dev/null "$U/f/$FP" | grep -qi "^X-Content-Type-Options: nosniff" ||
+	fail "/f/ without nosniff"
+echo "ok: a helper vets only below its level; an image by its exact path; /f/ nosniff"
 # A Steward (a moderator): in the Server window's Accounts page, levels
 # below its own and kicks and bans, but no password reset
 client admin checkpass12 "$t/admin12c.log" '{"cmd":"level","name":"dave","level":30}'

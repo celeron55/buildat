@@ -3,11 +3,12 @@
 // any account's message is turned into for the HTML face. Beside the
 // sanitizers, an oracle of its own: the page gets only the tags and
 // attributes the renderer writes, and no href with a scheme past http,
-// https and mailto, and no image but the Hearth's own /f/<id> -- read here
+// https and mailto, and no image but the Hearth's own /f/<id>[/<name>] -- read here
 // independently of markup.cpp's own check.
 #include "interface/markup.h"
 #include <cstring>
 #include <cctype>
+#include <regex>
 #include <set>
 #include <cstdlib>
 
@@ -99,10 +100,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 				if(name == "href" && !scheme_ok(out.substr(k + 2, ve - k - 2)))
 					__builtin_trap();
 				// An image is the Hearth's own file and nothing else
-				// ([HEARTH_ATTACHMENTS])
+				// ([HEARTH_ATTACHMENTS]), by exactly its path
+				// ([SEC_RUN4_LEFTOVERS])
+				static const std::regex own("/f/[0-9]+(/[^/?#]*)?");
 				const ss_ v = unescape(out.substr(k + 2, ve - k - 2));
-				if(name == "src" && !(v.size() > 3 && v.compare(0, 3, "/f/") == 0 &&
-						isdigit((unsigned char)v[3])))
+				if(name == "src" && !std::regex_match(v, own))
 					__builtin_trap();
 				k = ve + 1;
 			}
