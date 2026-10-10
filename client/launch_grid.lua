@@ -422,11 +422,9 @@ function M.actions(log)
 					icon = a.icon
 				elseif source.kind == "installed" or source.kind == "dev" or
 						source.kind == "review" then
-					-- simplified: an installed app's icon is the fallback,
-					-- as <user>/installed is no resource dir; the upgrade
-					-- is copying it under the cache as
-					-- installed_game_icon() does a Luanti game's
-					icon = ICON_FALLBACK
+					-- [PACKAGE_MEDIA] Its manifest's icon, copied under the
+					-- cache by list_launchers(); none, the fallback
+					icon = source.icon or ICON_FALLBACK
 				elseif type(a.icon) == "string" and
 						not a.icon:find("[/\\]") then
 					-- Resolved here, never by the file: <name>/launcher/<icon>

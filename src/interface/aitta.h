@@ -36,6 +36,19 @@ namespace interface
 
 		// The manifest's fields checked; "" or why not
 		ss_ check_manifest(const json::Value &m);
+
+		// [PACKAGE_MEDIA] A package's image checked by its header: which
+		// "icon", a square PNG of 256 px a side and 64 KB at most, or
+		// "screenshot", a PNG or a JPEG (baseline or progressive, 8-bit:
+		// what the client's decoder takes) of 1920 px a side and 2 MB at
+		// most. "" or why not; *type "image/png" or "image/jpeg".
+		// simplified: the header only; the client and the browser decode
+		// the rest, as a server's icon
+		ss_ media_check(const ss_ &which, const ss_ &data,
+				ss_ *type = nullptr);
+		// The manifest's "icon" and "screenshot" in dir checked: "" or why
+		// not
+		ss_ check_media(const json::Value &m, const ss_ &dir);
 		// "app", or "extension" ([AITTA] step 3's second kind): a client
 		// extension, run in the client's sandbox under the name
 		// "<author>__<name>"

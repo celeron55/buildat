@@ -346,6 +346,8 @@ struct Module: public interface::Module, public moderation::Host
 				return http_release(r);
 			if(call.compare(0, 8, "archive/") == 0)
 				return http_archive(r, call.substr(8));
+			if(call.compare(0, 6, "media/") == 0)
+				return http_media(r, call.substr(6));
 			if(r.method != "POST")
 				return refuse(r, "no such call");
 			if(call == "upload_begin")
@@ -635,7 +637,12 @@ struct Module: public interface::Module, public moderation::Host
 		const ss_ pkg = jstr(rel, "author")+"/"+jstr(rel, "name");
 		const ss_ sha = jstr(rel, "sha256");
 		const int64_t size = (int64_t)rel.get("size").as_number();
-		ss_ b = "<div class=\"box\"><b>"+(latest ? "<a href=\"/p/"+html(pkg)+
+		// [PACKAGE_MEDIA] Its icon before the name
+		const ss_ icon = jstr(rel, "icon");
+		ss_ b = "<div class=\"box\">"+(is_hex(icon, 64) ? "<img src=\""
+				"/api/aitta/media/"+icon+"\" alt=\"\" width=\"32\" height=\"32\" "
+				"style=\"vertical-align:middle\"> " : "")+"<b>"+(latest ?
+				"<a href=\"/p/"+html(pkg)+
 				"\">"+html(pkg)+"</a>" : html(pkg))+"</b> "+
 				html(jstr(rel, "version"))+" <span class=\"meta\">"+
 				html(jstr(rel, "kind"))+(rel.get("serverless").is_true() ?
@@ -774,8 +781,19 @@ struct Module: public interface::Module, public moderation::Host
 					"rows=\"3\" cols=\"60\" placeholder=\"What is wrong "
 					"(optional)\"></textarea></p><p><button>Send the report"
 					"</button></p></form>\n";
+			// [PACKAGE_MEDIA] The newest's icon by the heading, its
+			// screenshot a link to the image
+			const ss_ icon = jstr(*mine[0], "icon"),
+					shot = jstr(*mine[0], "screenshot");
+			const ss_ head = "<h1>"+(is_hex(icon, 64) ? "<img src=\""
+					"/api/aitta/media/"+icon+"\" alt=\"\" width=\"48\" "
+					"height=\"48\" style=\"vertical-align:middle\"> " : "")+
+					html(want)+"</h1>"+(is_hex(shot, 64) ? "<p><a href=\""
+					"/api/aitta/media/"+shot+"\"><img src=\"/api/aitta/media/"+
+					shot+"\" alt=\"A screenshot\" style=\"max-width:100%;"
+					"max-height:360px\"></a></p>" : "");
 			return send(200, html_type, interface::web_brand::page(want+
-					" - Aitta", "Aitta", "<h1>"+html(want)+"</h1><p class=\""
+					" - Aitta", "Aitta", head+"<p class=\""
 					"meta\">Every listed release, the newest first.</p>\n"+
 					(pl.empty() ? "" : "<p>"+pl+"</p>\n")+c+
 					f, MANAGE));
@@ -831,6 +849,35 @@ struct Module: public interface::Module, public moderation::Host
 			return respond(r, 404, "text/plain", "Not found\n");
 		respond(r, 200, ext == ".zip" ? "application/zip" : "application/json",
 				read_file(m_archives+"/"+sha+ext));
+	}
+
+	// [PACKAGE_MEDIA] A listed release's icon or screenshot, by its
+	// sha256: the type its bytes are, never sniffed, cached for good (a
+	// hash's bytes do not change)
+	void http_media(const network::HttpRequest &r, const ss_ &sha)
+	{
+		bool listed = false;
+		if(is_hex(sha, 64))
+			for(const ss_ &k : store("releases")->list("")){
+				const json::Value rel = load("releases", k);
+				if((jstr(rel, "icon") == sha || jstr(rel, "screenshot") == sha) &&
+						!rel.get("delisted").is_true() &&
+						!rel.get("hidden").is_true())
+					listed = true;
+			}
+		ss_ data, type;
+		if(listed)
+			data = read_file(m_archives+"/media/"+sha);
+		if(data.empty() || (interface::aitta::media_check("screenshot", data,
+				&type) != "" && interface::aitta::media_check("icon", data,
+				&type) != ""))
+			return respond(r, 404, "text/plain", "Not found\n");
+		network::access(m_server, [&](network::Interface *iface){
+			iface->http_respond(r.peer, 200, type, data,
+					"Access-Control-Allow-Origin: *\r\n"
+					"X-Content-Type-Options: nosniff\r\n"
+					"Cache-Control: public, max-age=31536000, immutable\r\n");
+		});
 	}
 
 	void http_upload_begin(const network::HttpRequest &r)
@@ -999,6 +1046,13 @@ struct Module: public interface::Module, public moderation::Host
 		// the web; another's is only warned of
 		const ss_ lua51 = m.is_object() ? lua51_problems(dir,
 				interface::aitta::kind_of(m) == "extension") : "";
+		// [PACKAGE_MEDIA] Its icon and screenshot, checked, kept by hash
+		const ss_ media_why = m.is_object() ?
+				interface::aitta::check_media(m, dir) : "";
+		sm_<ss_, ss_> media;
+		for(const char *k : {"icon", "screenshot"})
+			if(media_why.empty() && !jstr(m, k).empty())
+				media[k] = read_file(dir+"/"+jstr(m, k));
 		interface::fs::remove_all(dir);
 		auto drop = [&](const ss_ &why){
 			interface::fs::remove_all(zip);
@@ -1026,6 +1080,8 @@ struct Module: public interface::Module, public moderation::Host
 					"here: see your statements on Aitta's page");
 		if(!load("releases", id).is_undefined())
 			return drop(id+" is here already");
+		if(!media_why.empty())
+			return drop("meta.json: "+media_why);
 		if(m.get("serverless").as_boolean() && !lua51.empty())
 			return drop("\"serverless\": the web client's Lua 5.1 cannot "
 					"load this:\n"+lua51);
@@ -1041,6 +1097,14 @@ struct Module: public interface::Module, public moderation::Host
 		// [SERVERLESS_PLAY] Its client half runs with no server: Play
 		rel.set("serverless", m.get("serverless").as_boolean());
 		rel.set("kind", interface::aitta::kind_of(m));
+		interface::fs::create_directories(m_archives+"/media");
+		for(const auto &x : media){
+			const ss_ h = interface::sha256::hex(
+					interface::sha256::calculate(x.second));
+			if(!write_file(m_archives+"/media/"+h, x.second))
+				return drop("cannot store the "+x.first);
+			rel.set(x.first, h);
+		}
 		rel.set("sha256", sha);
 		rel.set("size", (int64_t)u.size);
 		rel.set("key", jstr(u.sig, "key"));

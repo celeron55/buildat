@@ -41,6 +41,9 @@ local FIELDS = {
 	{"audience", "Audience", "choice"},
 	{"home_hearth", "Home Hearth", "edit"},
 	{"changelog", "Changelog file", "edit"},
+	-- [PACKAGE_MEDIA] Files in the package, checked as Aitta does
+	{"icon", "Icon (PNG)", "edit"},
+	{"screenshot", "Screenshot", "edit"},
 }
 local PIECE = 60000
 
@@ -221,7 +224,8 @@ page_package = function(message)
 	local why_of = {}
 	local general = nil
 	local function recheck()
-		local why = __buildat_aitta_dev("check", network.write_json(m)) or ""
+		local why = __buildat_aitta_dev("check", network.write_json(m),
+				entry.name) or ""
 		-- " ", so that each keeps its line and the form does not move
 		-- under the pointer as reasons come and go
 		for k, t in pairs(why_of) do
@@ -229,6 +233,12 @@ page_package = function(message)
 		end
 		general.text = ""
 		local field = why:match('^"([%w_]+)"')
+		-- An image's reason starts with its file's name
+		for _, k in ipairs({"icon", "screenshot"}) do
+			if m[k] and m[k] ~= "" and why:sub(1, #m[k] + 2) == m[k] .. ": " then
+				field = k
+			end
+		end
 		if why ~= "" and why_of[field] then
 			why_of[field].text = why
 		elseif why ~= "" then
@@ -251,7 +261,8 @@ page_package = function(message)
 			local e = add_edit(r, tostring(m[k] or ""))
 			magic.SubscribeToEvent(e, "TextChanged", function()
 				m[k] = e:GetText()
-				if m[k] == "" and (k == "home_hearth" or k == "changelog") then
+				if m[k] == "" and (k == "home_hearth" or k == "changelog" or
+						k == "icon" or k == "screenshot") then
 					m[k] = nil
 				end
 				recheck()

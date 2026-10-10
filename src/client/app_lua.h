@@ -112,6 +112,7 @@
 			lua_pushboolean(L, interface::fs::path_exists(
 					path+"/launcher/init.lua"));
 			lua_setfield(L, -2, "launcher");
+			set_package_icon(L, path);
 			lua_rawseti(L, -2, i++);
 		}
 		// And a reviewer's playtests ([AITTA_REVIEW]), as installed ones
@@ -128,6 +129,7 @@
 			lua_pushboolean(L, interface::fs::path_exists(
 					path+"/launcher/init.lua"));
 			lua_setfield(L, -2, "launcher");
+			set_package_icon(L, path);
 			lua_rawseti(L, -2, i++);
 		}
 		// And an author's own ([AITTA_PUBLISH_UI]): an app with its
@@ -146,6 +148,8 @@
 			lua_pushboolean(L, e.kind == "app" && interface::fs::path_exists(
 					path+"/launcher/init.lua"));
 			lua_setfield(L, -2, "launcher");
+			if(e.kind == "app")
+				set_package_icon(L, path);
 			lua_rawseti(L, -2, i++);
 		}
 		// And the installed extensions ([AITTA]), with no launcher: a
@@ -217,6 +221,45 @@
 						cs(root));
 		}
 		return family+"/"+name+".png";
+	}
+
+	// [PACKAGE_MEDIA] An installed or dev app's own icon, its manifest's
+	// "icon": checked and copied to <cache>/package_media/<sha256>.png, a
+	// resource dir. The resource name, or "" for none
+	static ss_ package_icon(lua_State *L, const ss_ &dir)
+	{
+		json::json_error_t e;
+		const json::Value m = json::load_file((dir+"/meta.json").c_str(), &e);
+		const ss_ name = m.get("icon").is_string() ?
+				m.get("icon").as_string() : "";
+		if(name.empty() || name.find("..") != ss_::npos)
+			return "";
+		std::ifstream f(dir+"/"+name, std::ios::binary);
+		const ss_ data((std::istreambuf_iterator<char>(f)),
+				std::istreambuf_iterator<char>());
+		const ss_ why = interface::aitta::media_check("icon", data);
+		if(!why.empty()){
+			log_w(MODULE, "%s: %s", cs(dir), cs(why));
+			return "";
+		}
+		const ss_ h = interface::sha256::hex(interface::sha256::calculate(data));
+		const ss_ path = g_client_config.get<ss_>("cache_path")+
+				"/package_media/"+h+".png";
+		if(!interface::fs::path_exists(path)){
+			std::ofstream o(path, std::ios::binary);
+			o<<data;
+			if(!o.good())
+				return "";
+		}
+		return h+".png";
+	}
+	static void set_package_icon(lua_State *L, const ss_ &dir)
+	{
+		const ss_ icon = package_icon(L, dir);
+		if(icon.empty())
+			return;
+		lua_pushstring(L, icon.c_str());
+		lua_setfield(L, -2, "icon");
 	}
 
 	// list_installed_games(app) -> {{name =, size =, icon =}, ...}: the
@@ -338,7 +381,8 @@
 	//   "list"                  {{name, kind, path}} of <user>/dev_apps
 	//   "new", name, kind       a minimal app or extension there -> its
 	//                           path, or nil and why
-	//   "check", json           why the manifest is refused, or ""
+	//   "check", json[, name]   why the manifest is refused, or ""; with
+	//                           the dev package's name, its images too
 	//   "engine_api"            the engine API a manifest says
 	//   "keygen", author        <user>/aitta_keys/<author>.key made ->
 	//                           the public key, or nil and why
@@ -465,7 +509,13 @@
 			if(op == "check"){
 				json::json_error_t err;
 				const json::Value m = json::load_string(arg.c_str(), &err);
-				lua_pushstring(L, interface::aitta::check_manifest(m).c_str());
+				ss_ why = interface::aitta::check_manifest(m);
+				// [PACKAGE_MEDIA] And its images, given the package's name
+				const ss_ dir = lua_isstring(L, 3) ? dev_app_dir("dev:"+
+						lua_bindings::lua_tocppstring(L, 3)) : "";
+				if(why.empty() && !dir.empty())
+					why = interface::aitta::check_media(m, dir);
+				lua_pushstring(L, why.c_str());
 				return 1;
 			}
 			if(op == "engine_api"){
@@ -1600,6 +1650,42 @@
 		if(sha.empty())
 			return 0;
 		lua_pushstring(L, sha.c_str());
+		return 1;
+	}
+
+	// keep_package_media(data, which) -> resource name, or nil and why:
+	// an Aitta release's "icon" or "screenshot" ([PACKAGE_MEDIA]), checked
+	// as Aitta checks it and kept under <cache>/package_media (a resource
+	// dir) as <sha256>.png or .jpg
+	static int l_keep_package_media(lua_State *L)
+	{
+		size_t n = 0;
+		const char *d = luaL_checklstring(L, 1, &n);
+		const ss_ which = lua_bindings::lua_tocppstring(L, 2);
+		const ss_ data(d, n);
+		ss_ type;
+		const ss_ why = which == "icon" || which == "screenshot" ?
+				interface::aitta::media_check(which, data, &type) :
+				"not an icon or a screenshot";
+		if(!why.empty()){
+			lua_pushnil(L);
+			lua_pushstring(L, why.c_str());
+			return 2;
+		}
+		const ss_ name = interface::sha256::hex(interface::sha256::calculate(
+				data))+(type == "image/png" ? ".png" : ".jpg");
+		const ss_ path = g_client_config.get<ss_>("cache_path")+
+				"/package_media/"+name;
+		if(!interface::fs::path_exists(path)){
+			std::ofstream f(path, std::ios::binary);
+			f<<data;
+			if(!f.good()){
+				lua_pushnil(L);
+				lua_pushstring(L, ("cannot write "+path).c_str());
+				return 2;
+			}
+		}
+		lua_pushstring(L, name.c_str());
 		return 1;
 	}
 

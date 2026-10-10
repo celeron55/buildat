@@ -23,9 +23,19 @@ An app's meta.json, at the app directory's root (apps/<app>/meta.json):
         "audience": "everyone",       optional: "everyone", "teen" or
                                       "adult"; Aitta's page at / lists
                                       only "everyone" and "teen"
-        "serverless": true            optional: its client half runs
+        "serverless": true,           optional: its client half runs
                                       with no server (Play)
+        "icon": "icon.png",           optional: a square PNG in the
+                                      archive, 256 px and 64 kB at most
+        "screenshot": "shot.jpg"      optional: a PNG or a JPEG
+                                      (baseline or progressive, 8-bit),
+                                      1920 px a side and 2 MB at most
     }
+
+The icon and screenshot are checked by their bytes, not their names, at
+pack and again at publish. The icon is on the release's launch grid
+tile, its row in "Apps from Aitta" and Aitta's pages; the screenshot in
+the row's panel and on the package page.
 
 Client-side Lua (a client_lua directory's, an extension's every file)
 runs on LuaJIT natively and on Lua 5.1 on the web. Aitta parses it at
@@ -149,6 +159,9 @@ when the launcher next fetches that Aitta's list.
     POST /api/aitta/report                    {release, reason, text, key}
     POST /api/aitta/report_status             {key, receipts}: outcomes
     GET  /api/aitta/archive/<sha256>.zip|.sig a listed release's files
+    GET  /api/aitta/media/<sha256>            a listed release's icon or
+                                              screenshot, image/png or
+                                              image/jpeg by its bytes
     GET  /api/aitta/info?key=<public key>     {ok, licences, author}: the
                                               author the key is bound to
     GET  /                                    a page of each package's latest

@@ -678,9 +678,13 @@ local function shape(e, depth, out, in_drop)
 		shape(e:GetChild(i), depth + 1, out, in_drop or t == "DropDownList")
 	end
 end
+-- Whether a window open_window() gave is still open
+local function is_open(root)
+	local m = getmetatable(root)
+	return m ~= nil and not m.dead
+end
 local function picture(g)
-	local m = getmetatable(g.root)
-	if not m or m.dead then
+	if not is_open(g.root) then
 		return nil
 	end
 	local out = {}
@@ -2456,6 +2460,46 @@ local function play_installed(key, version)
 	end
 end
 
+-- [PACKAGE_MEDIA] A release's "icon" or "screenshot" by its hash, from its
+-- Aitta, checked and kept under the cache's package_media/: the resource
+-- name, or nil where it has none or it is still on its way (got(name)
+-- then, once)
+local MEDIA_DIR = __buildat_get_path("cache") .. "/package_media/"
+local media_asked = {}
+local function aitta_media(rel, which, got)
+	local h = type(rel[which]) == "string" and rel[which]:lower()
+	if not h or not h:match("^%x+$") or #h ~= 64 then
+		return nil
+	end
+	for _, ext in ipairs({".png", ".jpg"}) do
+		local f = io.open(MEDIA_DIR .. h .. ext, "rb")
+		if f then
+			f:close()
+			return h .. ext
+		end
+	end
+	if not media_asked[h] then
+		media_asked[h] = true
+		network.http_get(tostring(rel.aitta) .. "/api/aitta/media/" .. h,
+				function(body, err)
+			local name, why = nil, err
+			if body then
+				name, why = __buildat_keep_package_media(body, which)
+			end
+			if not name or name:sub(1, 64) ~= h then
+				log:warning("aitta: " .. which .. " " .. h .. " not kept (" ..
+						tostring(why or name) .. ")")
+				return
+			end
+			log:info("aitta: " .. which .. " " .. name .. " kept")
+			if got then
+				got(name)
+			end
+		end, {description = "Aitta (images)"})
+	end
+	return nil
+end
+
 local function aitta_page(message, query, on_discuss, filter, by, chosen)
 	filter = filter or "All"
 	by = by or "name"
@@ -2586,6 +2630,21 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		if rel.description and rel.description ~= "" then
 			ptext(tostring(rel.description))
 		end
+		-- Its screenshot, the panel's width at most and 200 high
+		local shot = aitta_media(rel, "screenshot", function()
+			if selected == p and is_open(root) then
+				fill(p)
+			end
+		end)
+		local tex = shot and magic.cache:GetResource("Texture2D", shot)
+		if tex and tex.width > 0 and tex.height > 0 then
+			local img = panel:CreateChild("BorderImage")
+			img.texture = tex
+			local sw = math.min(panel_w, math.floor(200 * tex.width / tex.height))
+			img:SetFixedSize(sw, math.floor(sw * tex.height / tex.width))
+			reseal(img)
+			log:info("aitta panel: screenshot " .. shot)
+		end
 		if rel.kind ~= "extension" then
 			ptext("It runs in the server's sandbox: it cannot reach your " ..
 					"files, only its own saves.", DIM)
@@ -2662,7 +2721,12 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 			-- character at the rows' size
 			local most = math.floor(list_w * 0.55 / 10)
 			local b = view:row({label = #p.key > most and
-					p.key:sub(1, most - 3) .. "..." or p.key},
+					p.key:sub(1, most - 3) .. "..." or p.key,
+					icon = aitta_media(p.rel, "icon", function()
+						if is_open(root) then
+							show_rows()
+						end
+					end)},
 					tostring(p.rel.version) ..
 					(st == "Installed" and ", installed" or
 					st == "Updates" and ", update" or "") ..

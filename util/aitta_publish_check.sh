@@ -82,8 +82,8 @@ mapfile -t cmds < <(
 	backs 3; echo "text tester"
 	tabs 3; echo "text Says hello."
 	tabs 1; pick1; tabs 1; pick1
-	# Audience, Home Hearth, Changelog, Save, Next
-	tabs 5; echo "keypress Return"; echo "delay 1500"
+	# Audience, Home Hearth, Changelog, Icon, Screenshot, Save, Next
+	tabs 7; echo "keypress Return"; echo "delay 1500"
 	# Page 2: "Create my publishing key" has the focus
 	echo "keypress Return"; echo "delay 3000"; echo "event scan"
 	# Show the file, Bind on...
@@ -93,7 +93,7 @@ mapfile -t cmds < <(
 	echo "mouse_pos 422 177"; echo "mouse_click left"; echo "delay 2500"
 	echo "mouse_pos 422 139"; echo "mouse_click left"; echo "delay 5000"
 	printf '%s\n' "${OPEN[@]}"
-	tabs 14; echo "keypress Return"; echo "delay 3000"; echo "event scan"
+	tabs 16; echo "keypress Return"; echo "delay 3000"; echo "event scan"
 	# Show the file, Back, Pack and publish
 	tabs 2; echo "keypress Return"; echo "delay 4000"; echo "event scan"
 	tabs 2; echo "keypress Return"; echo "delay 4000"; echo "event scan"
@@ -109,7 +109,7 @@ mapfile -t cmds < <(
 	# the field before typing, the focus coming from a dropdown
 	tabs 4; echo "delay 100"; echo "text tester"; tabs 3; echo "text Says hello too."
 	tabs 1; pick1; tabs 1; pick1
-	tabs 5; echo "keypress Return"; echo "delay 3000"
+	tabs 7; echo "keypress Return"; echo "delay 3000"
 	tabs 2; echo "keypress Return"; echo "delay 4000"; echo "event scan"
 	echo "shot extension.png"
 )

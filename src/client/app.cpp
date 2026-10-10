@@ -1582,12 +1582,17 @@ struct CApp: public App, public magic::Application
 
 		interface::fs::create_directories(
 				g_client_config.get<ss_>("cache_path")+"/server_icons");
+		interface::fs::create_directories(
+				g_client_config.get<ss_>("cache_path")+"/package_media");
 		sv_<ss_> resource_paths = {
 			g_client_config.get<ss_>("share_path")+"/client/data",
 			g_client_config.get<ss_>("cache_path")+"/tmp",
 			// The icons native servers sent ([LAUNCH_WORLD] (4)): a PNG a
 			// file, named by its sha256, checked before it was kept
 			g_client_config.get<ss_>("cache_path")+"/server_icons",
+			// Aitta releases' icons and screenshots ([PACKAGE_MEDIA]), the
+			// same: named by the hash, checked before kept
+			g_client_config.get<ss_>("cache_path")+"/package_media",
 			g_client_config.get<ss_>("share_path")+"/extensions", // Could be unsafe
 			// The launch grid's icons: <name>/launcher/<icon>.png and a
 			// game's icon.png, resolved by the menu on the trusted side
@@ -2434,6 +2439,7 @@ struct CApp: public App, public magic::Application
 
 		DEF_BUILDAT_FUNC(connect_server)
 		DEF_BUILDAT_FUNC(keep_server_icon)
+		DEF_BUILDAT_FUNC(keep_package_media)
 		DEF_BUILDAT_FUNC(connect_server_start)
 		DEF_BUILDAT_FUNC(connect_server_poll)
 		DEF_BUILDAT_FUNC(disconnect)

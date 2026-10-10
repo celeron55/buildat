@@ -245,7 +245,7 @@ ss_ check_manifest(const json::Value &m)
 		return "\"license_code\" and \"license_media\": its licences";
 	if(str("description").size() > 300)
 		return "\"description\": 300 characters at most";
-	for(const char *k : {"home_hearth", "changelog"})
+	for(const char *k : {"home_hearth", "changelog", "icon", "screenshot"})
 		if(!m.get(k).is_undefined() && !m.get(k).is_string())
 			return ss_("\"")+k+"\": a string";
 	if(!str("home_hearth").empty() && !address_ok(str("home_hearth")))
@@ -253,6 +253,9 @@ ss_ check_manifest(const json::Value &m)
 				"characters at most";
 	if(!str("changelog").empty() && !archive_path_ok(str("changelog")))
 		return "\"changelog\": a path inside the archive, like CHANGELOG.md";
+	for(const char *k : {"icon", "screenshot"})
+		if(!str(k).empty() && !archive_path_ok(str(k)))
+			return ss_("\"")+k+"\": a path inside the archive, like icon.png";
 	// [FRONT_PAGES]: who it suits; a browser's page at / lists only
 	// "everyone" and "teen"
 	const json::Value &aud = m.get("audience");
@@ -270,6 +273,94 @@ ss_ check_manifest(const json::Value &m)
 					str(k).find("__") != ss_::npos)
 				return ss_("\"")+k+"\": an extension's has no \"__\" and "
 						"does not start or end with _";
+	return "";
+}
+
+ss_ media_check(const ss_ &which, const ss_ &data, ss_ *type)
+{
+	const bool icon = which == "icon";
+	const size_t max_bytes = icon ? 64 * 1024 : 2 * 1000 * 1000;
+	const uint32_t max_side = icon ? 256 : 1920;
+	const unsigned char *d = (const unsigned char*)data.data();
+	auto be = [&](size_t at, int n){
+		uint32_t v = 0;
+		for(int i = 0; i < n; i++)
+			v = v << 8 | d[at + i];
+		return v;
+	};
+	uint32_t w = 0, h = 0;
+	ss_ t;
+	if(data.size() >= 24 && data.compare(0, 8, "\x89PNG\r\n\x1a\n") == 0 &&
+			data.compare(12, 4, "IHDR") == 0){
+		t = "image/png";
+		w = be(16, 4);
+		h = be(20, 4);
+	} else if(!icon && data.size() >= 4 && d[0] == 0xff && d[1] == 0xd8){
+		// The markers to the first SOF: SOF0 to SOF2 at 8 bits are what
+		// stb_image decodes
+		size_t at = 2;
+		while(at + 4 <= data.size()){
+			if(d[at] != 0xff)
+				return "screenshot: not a JPEG the client can read";
+			const unsigned char m = d[at + 1];
+			if(m == 0xff){
+				at++;
+				continue;
+			}
+			if(m == 0x01 || (m >= 0xd0 && m <= 0xd7)){
+				at += 2;
+				continue;
+			}
+			const uint32_t len = be(at + 2, 2);
+			if(m >= 0xc0 && m <= 0xc2){
+				if(at + 9 > data.size() || len < 8)
+					break;
+				if(d[at + 4] != 8)
+					return "screenshot: a JPEG of 8 bits a sample only";
+				h = be(at + 5, 2);
+				w = be(at + 7, 2);
+				t = "image/jpeg";
+				break;
+			}
+			if((m >= 0xc3 && m <= 0xcf && m != 0xc4 && m != 0xc8 &&
+					m != 0xcc) || m == 0xda || m == 0xd9)
+				return "screenshot: a baseline or progressive JPEG only "
+						"(no lossless, no arithmetic coding)";
+			if(len < 2)
+				break;
+			at += 2 + len;
+		}
+		if(t.empty())
+			return "screenshot: not a JPEG the client can read";
+	} else {
+		return icon ? "icon: not a PNG" : "screenshot: not a PNG or a JPEG";
+	}
+	if(data.size() > max_bytes)
+		return which+": "+itos((int64_t)data.size() / 1000)+" kB, more than "+
+				itos((int64_t)max_bytes / 1000)+" kB";
+	if(w < 1 || h < 1 || w > max_side || h > max_side)
+		return which+": "+itos((int64_t)w)+"x"+itos((int64_t)h)+", not 1 to "+
+				itos((int64_t)max_side)+" px a side";
+	if(icon && w != h)
+		return "icon: "+itos((int64_t)w)+"x"+itos((int64_t)h)+", not square";
+	if(type)
+		*type = t;
+	return "";
+}
+
+ss_ check_media(const json::Value &m, const ss_ &dir)
+{
+	for(const char *k : {"icon", "screenshot"}){
+		const json::Value &v = m.get(k);
+		if(!v.is_string() || v.as_string().empty())
+			continue;
+		const ss_ path = dir+"/"+v.as_string();
+		if(!fs::path_exists(path))
+			return ss_("\"")+k+"\": "+v.as_string()+" is not there";
+		const ss_ why = media_check(k, read_file(path));
+		if(!why.empty())
+			return v.as_string()+": "+why.substr(why.find(": ") + 2);
+	}
 	return "";
 }
 
@@ -354,6 +445,9 @@ ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir)
 				changelog.as_string()+" is not there");
 	if(kind_of(m) == "extension" && !fs::path_exists(app_dir+"/init.lua"))
 		throw Exception(app_dir+": an extension has init.lua at its root");
+	const ss_ media = check_media(m, app_dir);
+	if(!media.empty())
+		throw Exception(app_dir+"/meta.json: "+media);
 	const ss_ key = read_file(key_path);
 	const ss_ zip = zip_directory(app_dir);
 	const ss_ base = out_dir+"/"+m.get("author").as_string()+"-"+
