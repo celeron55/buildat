@@ -896,6 +896,8 @@ struct Module: public interface::Module, public moderation::Host
 				"audience"})
 			rel.set(k, jstr(m, k));
 		rel.set("engine_api", m.get("engine_api"));
+		// [SERVERLESS_PLAY] Its client half runs with no server: Play
+		rel.set("serverless", m.get("serverless").as_boolean());
 		rel.set("kind", interface::aitta::kind_of(m));
 		rel.set("sha256", sha);
 		rel.set("size", (int64_t)u.size);

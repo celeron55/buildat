@@ -1564,7 +1564,8 @@
 	// local_server_running() -> bool
 	// game_storage_dir() -> the directory under the user path where the
 	// game code of the server this client is connected to keeps what it
-	// stores on the client, or nil when there is no server: like a web
+	// stores on the client, or nil when there is no server (a serverless
+	// app's is its local server's, [SERVERLESS_PLAY]): like a web
 	// page's localStorage, one per origin. A server this client started is
 	// its game's (the port changes every launch); any other its address's,
 	// so a server cannot read what another one, or a local game, stored.
@@ -1776,9 +1777,13 @@
 		CApp *self = (CApp*)lua_touserdata(L, -1);
 		lua_pop(L, 1);
 		ss_ address = self->m_state ? self->m_state->get_address() : "";
+		ss_ user = g_client_config.get<ss_>("user_path");
+		if(address.empty() && !g_serverless_app.empty()){
+			lua_pushstring(L, (user+"/apps/"+g_serverless_app+"/client").c_str());
+			return 1;
+		}
 		if(address.empty())
 			return 0;
-		ss_ user = g_client_config.get<ss_>("user_path");
 		bool local = connected_locally(address);
 		ss_ dir;
 		if(local){
@@ -1799,6 +1804,79 @@
 	{
 		adopt_pidfile();
 		lua_pushboolean(L, interface::process::is_running(g_local_server));
+		return 1;
+	}
+
+	// [SERVERLESS_PLAY] serverless_start(app id) -> {"<module>/<script>",
+	// ...} or nil and why: an app's client half with no server. Each
+	// module's (a directory with a meta.json) client_lua and client_data
+	// into the file table under the names a server announces, and its
+	// client_main among those returned, for the caller to run. The storage
+	// is the app's own, as with a local server, until leave_to_menu().
+	// simplified: the modules in name order, not the loader's dependency
+	// order, and no "base" app under it
+	// Trusted only: client/api.lua
+	static int l_serverless_start(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		const ss_ id = lua_bindings::lua_tocppstring(L, 1);
+		const ss_ dir = app_dir(id);
+		if(dir.empty() || !interface::fs::path_exists(dir+"/meta.json")){
+			lua_pushnil(L);
+			lua_pushstring(L, ("no app "+id).c_str());
+			return 2;
+		}
+		sv_<ss_> modules;
+		for(const auto &n : interface::fs::list_directory(dir))
+			if(n.is_directory && interface::fs::path_exists(
+					dir+"/"+n.name+"/meta.json"))
+				modules.push_back(n.name);
+		std::sort(modules.begin(), modules.end());
+		sv_<std::pair<ss_, ss_>> files;
+		sv_<ss_> mains;
+		std::function<void(const ss_&, const ss_&)> data =
+				[&](const ss_ &path, const ss_ &name){
+			for(const auto &n : interface::fs::list_directory(path)){
+				if(n.is_directory)
+					data(path+"/"+n.name, name+n.name+"/");
+				else
+					files.push_back({name+n.name, path+"/"+n.name});
+			}
+		};
+		for(const ss_ &m : modules){
+			const ss_ md = dir+"/"+m;
+			for(const auto &n : interface::fs::list_directory(md+"/client_lua"))
+				if(!n.is_directory)
+					files.push_back({m+"/"+n.name, md+"/client_lua/"+n.name});
+			data(md+"/client_data", m+"/");
+			json::json_error_t err;
+			const json::Value meta = json::load_file(
+					(md+"/meta.json").c_str(), &err);
+			if(meta.get("client_main").is_string())
+				mains.push_back(m+"/"+meta.get("client_main").as_string());
+		}
+		if(mains.empty()){
+			lua_pushnil(L);
+			lua_pushstring(L, (id+" has no client_main").c_str());
+			return 2;
+		}
+		try {
+			self->m_state->add_local_files(files);
+		} catch(std::exception &e){
+			lua_pushnil(L);
+			lua_pushstring(L, e.what());
+			return 2;
+		}
+		g_serverless_app = server_app_id(id);
+		log_i(MODULE, "serverless_start(%s): %zu files, %zu to run",
+				cs(id), files.size(), mains.size());
+		lua_newtable(L);
+		for(size_t i = 0; i < mains.size(); i++){
+			lua_pushstring(L, mains[i].c_str());
+			lua_rawseti(L, -2, (int)i + 1);
+		}
 		return 1;
 	}
 
@@ -1827,6 +1905,7 @@
 		else
 			begin_stop_local_server();
 		self->m_state->reset();
+		g_serverless_app.clear();
 		self->m_lost_connection_us = 0;
 		self->m_lost_remote = false;
 		// **The last frame of the game goes with the game** ([MENU_LEAVE],

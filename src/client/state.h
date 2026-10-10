@@ -40,6 +40,11 @@ namespace client
 		// menu-only connection left for the launcher ([MENU_CONTEXT]); what
 		// the sandbox kept is client/sandbox.lua's __buildat_reset_sandbox
 		virtual void reset() = 0;
+		// [SERVERLESS_PLAY] An app's client files with no server to send
+		// them, {name, path}: into the cache by hash as a server's, under
+		// the names a server announces. Throws on a file it cannot read.
+		virtual void add_local_files(
+				const sv_<std::pair<ss_, ss_>> &name_paths) = 0;
 	};
 
 	State* createState(sp_<app::App> app);

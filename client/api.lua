@@ -1466,6 +1466,36 @@ buildat.safe.join_server = function(address)
 	launch_grid.screens().connect(address)
 	return true
 end
+-- **An app's client half with no server** ([SERVERLESS_PLAY]): its files
+-- from its directory, the launcher's placeholder under it so that
+-- leave_app takes it down, and its client_mains run, buildat.serverless()
+-- true for it. `id` as list_apps() names it -> true, or false and why.
+-- Trusted only: the launcher's Play
+buildat.serverless_play = function(id)
+	local scripts, why = __buildat_serverless_start(tostring(id))
+	if not scripts then
+		return false, why
+	end
+	__buildat_set_serverless()
+	launch_grid.screens().game_running()
+	for _, name in ipairs(scripts) do
+		buildat.run_script_file(name)
+	end
+	return true
+end
+-- BUILDAT_RUN, from src/client/app.cpp once the launch UI is up: an app id
+-- as list_apps() names it played at once, or <author>/<name> from the
+-- Aittas (client/extensions/starport)
+function __buildat_run_serverless(what)
+	if what:match("^[%w_]+/[%w_]+$") then
+		require("buildat/extension/starport").run_serverless(what)
+		return
+	end
+	local ok, why = buildat.serverless_play(what)
+	if not ok then
+		log:warning("BUILDAT_RUN=" .. what .. ": " .. tostring(why))
+	end
+end
 -- [SERVE_UPDATE_SMOOTH] 6, from __buildat_leave_lost above
 function __buildat_reconnect(address, why, restarting)
 	launch_grid.screens().reconnect(address, why, restarting)

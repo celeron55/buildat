@@ -413,7 +413,7 @@ function __buildat_report_error(err)
 end
 
 local function report_failure(err)
-	log:error("Failed to run function:\n"..err)
+	log:error("Failed to run function:\n"..tostring(err))
 	local ok, why = pcall(__buildat_report_error, err)
 	if not ok then
 		log:warning("the error could not be shown: "..tostring(why))
@@ -459,7 +459,7 @@ function __buildat_run_code_in_sandbox(untrusted_code, chunkname)
 	local status, err, retval = run_code_in_sandbox(
 			untrusted_code, __buildat_sandbox_environment, chunkname)
 	if status == false then
-		log:error("Failed to run script:\n"..err)
+		log:error("Failed to run script:\n"..tostring(err))
 		local ok, why = pcall(__buildat_report_error, err)
 		if not ok then
 			log:warning("the error could not be shown: "..tostring(why))
@@ -478,7 +478,7 @@ function __buildat_run_served_code(code, chunkname)
 	local status, err, retval = run_code_in_sandbox(
 			code, __buildat_sandbox_environment, chunkname, served_globals)
 	if status == false then
-		log:error("Failed to run script:\n"..err)
+		log:error("Failed to run script:\n"..tostring(err))
 		local ok, why = pcall(__buildat_report_error, err)
 		if not ok then
 			log:warning("the error could not be shown: "..tostring(why))

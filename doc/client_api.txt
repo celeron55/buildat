@@ -432,6 +432,14 @@ buildat.set_back_depth_extra(n)
 - Screens of the app's own inside one of the main stack's (Hearth's
   pages), so the web page's Back is Escape while there is one to go back
   from ([TAP_BACK]). Cleared when the app is left for the launcher.
+buildat.serverless() -> bool
+- Whether the app runs with no server ([SERVERLESS_PLAY]): its package's
+  meta.json says "serverless": true and the client's Play (Apps from
+  Aitta; BUILDAT_RUN=<author>/<name> or an app id natively, a play page's
+  #run=<author>/<name> on the web) ran its modules' client_mains from the
+  installed package. There send_packet() sends nothing (each name logged
+  once), no server module's client files exist (accounts/accounts.lua and
+  the like), and storage is the app's own, as with a local server.
 buildat.leave_web_page(go) -> bool or nil
 - On the web, whether there is a page before this one, and with go, back
   to it, past the web page's own history entries ([HEARTH_WEB_BACK]); nil

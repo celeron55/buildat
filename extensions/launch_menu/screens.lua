@@ -177,13 +177,7 @@ local function connect_or_show_error(address, fallbacks)
 		uistack.main:pop(root)
 		if state == "ok" then
 			log:info("connect_server() ok")
-			-- **The placeholder goes on the stack whichever launcher
-			-- this is** ([MENU_LEAVE]): the launcher's screens are not
-			-- drawn through the world, and the scan a driven run reads
-			-- stands aside only for a top named "game is running". A
-			-- launcher leaving a game pops the whole stack.
-			uistack.main:push({desc = GAME_RUNNING, tap_outside = false})
-			magic.ui:SetFocusElement(nil)
+			M.game_running()
 		elseif fallbacks and #fallbacks > 0 then
 			log:info("connect_server() failed; the pool's next server")
 			local rest = {}
@@ -270,6 +264,16 @@ function M.reconnect(address, why, restarting)
 end
 
 -- A connect asked for by the launch grid ("Feedback..." on an app)
+-- **The placeholder goes on the stack whichever launcher this is**
+-- ([MENU_LEAVE]): the launcher's screens are not drawn through the world,
+-- and the scan a driven run reads stands aside only for a top named "game
+-- is running". A launcher leaving a game pops the whole stack. After a
+-- connect, and under a serverless app ([SERVERLESS_PLAY])
+function M.game_running()
+	uistack.main:push({desc = GAME_RUNNING, tap_outside = false})
+	magic.ui:SetFocusElement(nil)
+end
+
 function M.connect(address)
 	api.stop_local_server()
 	connect_or_show_error(address)

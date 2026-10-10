@@ -2434,6 +2434,28 @@ end
 -- the trusted extension
 -- simplified: no Play: an installed app is a tile on the grid behind
 local AITTA_FILTERS = {"All", "Installed", "Updates", "Not installed"}
+-- [SERVERLESS_PLAY] On the web there is no server to install an app onto:
+-- Apps from Aitta lists the serverless ones, with Play only
+local ON_WEB = GetPlatform() == "Web"
+
+-- An installed release's client half started with no server, the pages
+-- over the launcher taken down first
+local function play_installed(key, version)
+	local id = key:gsub("/", ".", 1) .. "@" .. tostring(version)
+	log:info("aitta: play " .. id .. " serverless")
+	if uistack.main.stack[1] then
+		pcall(function()
+			uistack.main:pop_to(uistack.main.stack[1])
+		end)
+	end
+	local ok, why = buildat.serverless_play(id)
+	if not ok then
+		log:warning("aitta: play " .. id .. ": " .. tostring(why))
+		require("buildat/extension/ui_utils").safe.show_message_dialog(
+				"Could not start " .. key .. ": " .. tostring(why))
+	end
+end
+
 local function aitta_page(message, query, on_discuss, filter, by, chosen)
 	filter = filter or "All"
 	by = by or "name"
@@ -2510,7 +2532,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		end
 		return t
 	end
-	local function install(p)
+	local function install(p, play)
 		local rel, k = p.rel, p.key
 		local base = rel.aitta .. "/api/aitta/archive/" .. tostring(rel.sha256)
 		say("Fetching " .. k .. "...")
@@ -2524,6 +2546,9 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 					return say("Could not fetch: " .. tostring(err2), WARN)
 				end
 				local dir, why = __buildat_aitta_install(zip, sig, rel.aitta)
+				if dir and play then
+					return play_installed(k, rel.version)
+				end
 				-- Read before the grid's refresh, which takes the page down
 				local q = search:GetText()
 				uistack.main:pop(root)
@@ -2567,9 +2592,23 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		local changelog = ptext("", DIM)
 		local st = state(p)
 		local actions = add_row(panel)
-		add_button(actions, st == "Installed" and "Installed" or
-				st == "Updates" and "Update" or "Install",
-				function() install(p) end, st ~= "Installed", true)
+		-- [SERVERLESS_PLAY] Play: installed first where it is not; on the
+		-- web, with no server to install onto, only Play
+		if rel.serverless == true then
+			add_button(actions, "Play", function()
+				if st == "Installed" then
+					play_installed(p.key, rel.version)
+				else
+					install(p, true)
+				end
+			end, true, true)
+		end
+		if not ON_WEB then
+			add_button(actions, st == "Installed" and "Installed" or
+					st == "Updates" and "Update" or "Install",
+					function() install(p) end, st ~= "Installed",
+					rel.serverless ~= true)
+		end
 		-- Without its own, the Hearth its Aitta's Starport recommends
 		if not (type(rel.home_hearth) == "string" and
 				rel.home_hearth:match("^https?://")) then
@@ -2679,7 +2718,8 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		for _, a in ipairs(e.aittas) do
 			for _, rel in ipairs(lists[a] or {}) do
 				if type(rel) == "table" and (not only_reviewed or
-						rel.review == "reviewed") then
+						rel.review == "reviewed") and
+						(rel.serverless == true or not ON_WEB) then
 					rel.aitta = rel.aitta or a
 					local k = tostring(rel.author) .. "/" .. tostring(rel.name)
 					log:info("aitta page: " .. k .. " " ..
@@ -2794,6 +2834,81 @@ function M.playtest(offer, start)
 	end, function()
 		log:info("playtest: no, " .. id)
 	end, "Playtest", "Cancel")
+end
+
+-- [SERVERLESS_PLAY] BUILDAT_RUN=<author>/<name>, a play page's #run=: the
+-- newest serverless release of it on the Aittas in the settings,
+-- installed if it is not (the signature checked) and played. With no
+-- answer from them, an installed version of it is played.
+-- simplified: the newest by the time an Aitta listed it, as the list's
+function M.run_serverless(key)
+	local ui = require("buildat/extension/ui_utils").safe
+	local e = effective()
+	local function failed(why)
+		log:warning("run " .. key .. ": " .. why)
+		ui.show_message_dialog("Could not start " .. key .. ": " .. why)
+	end
+	local best, waiting, errors = nil, #e.aittas, {}
+	local function decide()
+		local have = aitta_installed()[key]
+		if best and have and have[tostring(best.version)] then
+			return play_installed(key, best.version)
+		end
+		if best then
+			local base = best.aitta .. "/api/aitta/archive/" ..
+					tostring(best.sha256)
+			local options = {description = "Aitta (install)"}
+			network.http_get(base .. ".sig", function(sig, e1)
+				if not sig then
+					return failed(tostring(e1))
+				end
+				network.http_get(base .. ".zip", function(zip, e2)
+					if not zip then
+						return failed(tostring(e2))
+					end
+					local dir, why = __buildat_aitta_install(zip, sig, best.aitta)
+					if not dir then
+						return failed(tostring(why))
+					end
+					play_installed(key, best.version)
+				end, options)
+			end, options)
+			return
+		end
+		for version, _ in pairs(have or {}) do
+			return play_installed(key, version)
+		end
+		failed(#errors > 0 and table.concat(errors, "; ") or
+				"no Aitta in the settings lists it as playable with no server")
+	end
+	for _, a in ipairs(e.aittas) do
+		network.http_get(a .. "/api/aitta/list", function(body, err)
+			local v = body and network.parse_json(body)
+			if type(v) == "table" and type(v.releases) == "table" then
+				for _, rel in ipairs(v.releases) do
+					if type(rel) == "table" and rel.serverless == true and
+							tostring(rel.author) .. "/" ..
+							tostring(rel.name) == key and
+							(e.filters.unreviewed or rel.review == "reviewed")
+							and (not best or (tonumber(rel.time) or 0) >
+							(tonumber(best.time) or 0)) then
+						rel.aitta = a
+						best = rel
+					end
+				end
+			else
+				errors[#errors + 1] = a .. ": " .. tostring(err or
+						"the answer was not a list")
+			end
+			waiting = waiting - 1
+			if waiting == 0 then
+				decide()
+			end
+		end, {description = "Aitta (app list)"})
+	end
+	if waiting == 0 then
+		decide()
+	end
 end
 
 function M.safe.open_aitta(on_discuss)

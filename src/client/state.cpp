@@ -602,6 +602,29 @@ struct CState: public State
 		return path;
 	}
 
+	void add_local_files(const sv_<std::pair<ss_, ss_>> &name_paths)
+	{
+		m_remote_cache_path = g_client_config.get<ss_>("cache_path")+
+				"/remote/local";
+		interface::fs::create_directories(m_remote_cache_path);
+		for(const auto &np : name_paths){
+			std::ifstream f(np.second, std::ios::binary);
+			if(!f.good())
+				throw Exception(ss_()+"Could not open file: "+np.second);
+			const ss_ content((std::istreambuf_iterator<char>(f)),
+					std::istreambuf_iterator<char>());
+			const ss_ hash = interface::sha1::calculate(content);
+			const ss_ path = m_remote_cache_path+"/"+
+					interface::sha1::hex(hash);
+			{
+				std::ofstream of(path, std::ios::binary);
+				of<<content;
+			}
+			m_file_hashes[np.first] = hash;
+			m_app->file_updated_in_cache(np.first, hash, path);
+		}
+	}
+
 	ss_ get_file_content(const ss_ &name)
 	{
 		ss_ file_hash;

@@ -65,10 +65,15 @@ function __buildat_handle_packet(name, data)
 end
 
 -- Every handler dropped: a menu-only connection left ([MENU_CONTEXT])
+-- [SERVERLESS_PLAY] While an app's client half runs with no server, the
+-- packet names it sent, each logged once; nil otherwise
+local serverless_sent = nil
+
 function __buildat_reset_packet_subs()
 	packet_subs = {}
 	held = {}
 	held_bytes = 0
+	serverless_sent = nil
 end
 
 -- The held packets something now subscribes to, in order; after served
@@ -107,8 +112,24 @@ end
 buildat.safe.unsub_packet = buildat.unsub_packet
 
 function buildat.send_packet(name, data)
+	if serverless_sent then
+		if not serverless_sent[name] then
+			serverless_sent[name] = true
+			log:info("serverless: " .. tostring(name) .. " goes nowhere")
+		end
+		return
+	end
 	__buildat_send_packet(name, data)
 end
 buildat.safe.send_packet = buildat.send_packet
+
+-- buildat.serverless(): whether this app runs with no server, until it
+-- is left ([SERVERLESS_PLAY])
+function __buildat_set_serverless()
+	serverless_sent = {}
+end
+buildat.safe.serverless = function()
+	return serverless_sent ~= nil
+end
 
 -- vim: set noet ts=4 sw=4:

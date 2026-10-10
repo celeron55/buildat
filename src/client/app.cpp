@@ -2501,6 +2501,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(press_back)
 		DEF_BUILDAT_FUNC(set_back_depth)
 		DEF_BUILDAT_FUNC(leave_web_page)
+		DEF_BUILDAT_FUNC(serverless_start)
 		DEF_BUILDAT_FUNC(leave_to_menu)
 		DEF_BUILDAT_FUNC(http_get)
 		DEF_BUILDAT_FUNC(http_poll)
@@ -2681,6 +2682,22 @@ struct CApp: public App, public magic::Application
 					run_script_no_sandbox("__buildat_join_listed('"+a+"')");
 				else
 					log_w(MODULE, "BUILDAT_JOIN is not host:port; not joined");
+			}
+			// [SERVERLESS_PLAY] BUILDAT_RUN (a play page's #run=): an app run
+			// with no server, <author>/<name> or an app id; the shape
+			// checked here too, since it goes into a script
+			const char *run = getenv("BUILDAT_RUN");
+			if(run && *run){
+				const ss_ r = run;
+				bool ok = r.size() <= 200;
+				for(size_t i = 0; ok && i < r.size(); i++){
+					const char c = r[i];
+					ok = isalnum((unsigned char)c) || strchr("._-/:@", c);
+				}
+				if(ok)
+					run_script_no_sandbox("__buildat_run_serverless('"+r+"')");
+				else
+					log_w(MODULE, "BUILDAT_RUN is not an app's name; not run");
 			}
 		}
 	}

@@ -61,13 +61,21 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	// return after the browser dropped it makes: the app's kept place is
 	// where the user was since
 	var open_ = null;
+	// [SERVERLESS_PLAY] #run=<author>/<name>, an Aitta page's "Play in the
+	// browser": the launch menu runs that app with no server, from the
+	// Aittas in its settings
+	var run = null;
 	var nav = performance.getEntriesByType &&
 			performance.getEntriesByType('navigation')[0];
 	if(location.hash && !(nav && nav.type === 'reload')){
 		var om = /^#open=(\/(topic|t|m|p|u)\/[A-Za-z0-9_.\-\/]{1,200})$/
 				.exec(location.hash);
+		var rm = /^#run=([A-Za-z0-9_]{1,64}\/[A-Za-z0-9_]{1,64})$/
+				.exec(location.hash);
 		if(om)
 			open_ = om[1];
+		else if(rm && !server)
+			run = rm[1];
 		else
 			console.log('Not taken from the address: ' + location.hash);
 	}
@@ -268,6 +276,8 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 				Module.ENV.BUILDAT_JOIN = join;
 			if(open_)
 				Module.ENV.BUILDAT_OPEN = open_;
+			if(run)
+				Module.ENV.BUILDAT_RUN = run;
 			// [PLAY_PAGE] (c): the page with no game of its own is
 			// apps/play's, whose bridge carries luanti_client's datagrams
 			if(!server)
