@@ -446,8 +446,17 @@ older setting, taken only when none is set.
 
 The Server window (builtin/accounts' client Lua, [SERVER_ADMIN_PAGE]):
 a sidebar of pages, Account; for an admin Accounts, the Starport pages
-(when starport_announce is loaded) and Health (disk, the server's sandbox and a
-check of it, the last 100 warnings and errors, mail, the listings). The
+(when starport_announce is loaded), Statistics and Health (disk, the server's sandbox and a
+check of it, the last 100 warnings and errors, mail, the listings); for a
+moderator Accounts and Statistics. **Statistics** ([SERVER_STATS]): accounts
+samples the players joined, the peak tick gap and the memory each minute
+into a row an hour (stats/h/, kept eight days; joins, distinct names and
+accounts made counted in it too), folded into a row a day when the day ends
+(stats/d/, kept for ever), and per account the last join and the time joined
+(seen/<name>); the page draws the week by the hour and the half year by the
+day as bar graphs (the players' most, average and fewest), the line under
+them the bar the pointer is on, and the accounts by level, made in 30 days,
+not joined in 90 and the ten with the most time joined. The
 "Server" corner button and a game's My account open it as a window of
 its own, closed by Close or a click outside it. An app adds its
 own pages with accounts.server_menu = function(add) add(header, label,

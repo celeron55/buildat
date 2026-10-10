@@ -154,6 +154,96 @@ static void totp_self_check()
 		throw Exception("accounts: TOTP self-check failed");
 }
 
+// [SERVER_STATS] An hour's row, or a day's folded from them: players by
+// the minute (min, the sum for an average weighted by minutes, max), the
+// joins, the accounts made, the distinct names, the peak tick gap and
+// memory, and the minutes sampled -- none is a gap, not a zero
+struct StatRow
+{
+	int64_t minutes = 0, pmin = 0, psum = 0, pmax = 0, joins = 0, made = 0,
+			names = 0, gap_ms = 0, mem = 0;
+
+	ss_ str() const {
+		char b[200];
+		snprintf(b, sizeof b, "%lld %lld %lld %lld %lld %lld %lld %lld %lld",
+				(long long)minutes, (long long)pmin, (long long)psum,
+				(long long)pmax, (long long)joins, (long long)made,
+				(long long)names, (long long)gap_ms, (long long)mem);
+		return b;
+	}
+	static StatRow parse(const ss_ &s){
+		StatRow r;
+		std::istringstream is(s);
+		is >> r.minutes >> r.pmin >> r.psum >> r.pmax >> r.joins >> r.made >>
+				r.names >> r.gap_ms >> r.mem;
+		return r;
+	}
+	void sample(int64_t players, int64_t gap, int64_t memory){
+		pmin = minutes ? std::min(pmin, players) : players;
+		psum += players;
+		pmax = std::max(pmax, players);
+		gap_ms = std::max(gap_ms, gap);
+		mem = std::max(mem, memory);
+		minutes++;
+	}
+	// [unit, minutes, min, average, max, joins, made, names, gap, memory]
+	json::Value json(int64_t unit) const {
+		json::Value v = json::array();
+		v.append(unit);
+		v.append(minutes);
+		v.append(pmin);
+		v.append(json::Value(minutes ? (double)psum / minutes : 0.0));
+		for(int64_t x : {pmax, joins, made, names, gap_ms, mem})
+			v.append(x);
+		return v;
+	}
+};
+
+// A day from its hours: what they sum or bound; the names are the day's
+// own count, which the hours' cannot add up to
+static StatRow fold_hours(const sv_<StatRow> &hours, int64_t names)
+{
+	StatRow d;
+	for(const StatRow &h : hours){
+		if(h.minutes > 0){
+			d.pmin = d.minutes ? std::min(d.pmin, h.pmin) : h.pmin;
+			d.minutes += h.minutes;
+		}
+		d.psum += h.psum;
+		d.pmax = std::max(d.pmax, h.pmax);
+		d.joins += h.joins;
+		d.made += h.made;
+		d.gap_ms = std::max(d.gap_ms, h.gap_ms);
+		d.mem = std::max(d.mem, h.mem);
+	}
+	d.names = names;
+	return d;
+}
+
+// 24 made-up hours, one missing, the first half sampled at 4 players: the
+// day's average is by minutes, not the hours' averages'
+static void stats_self_check()
+{
+	sv_<StatRow> hours;
+	for(int i = 0; i < 24; i++){
+		if(i == 5)
+			continue;
+		StatRow h;
+		const int n = i == 0 ? 30 : 60;
+		for(int m = 0; m < n; m++)
+			h.sample(i == 0 ? 4 : i == 10 && m == 7 ? 7 : 2, i == 3 ? 500 : 10,
+					1000 + i);
+		h.joins = 1;
+		h.made = i == 20;
+		hours.push_back(StatRow::parse(h.str()));
+	}
+	const StatRow d = fold_hours(hours, 3);
+	if(d.minutes != 30 + 22 * 60 || d.psum != 30 * 4 + 22 * 60 * 2 + 5 ||
+			d.pmin != 2 || d.pmax != 7 || d.joins != 23 || d.made != 1 ||
+			d.names != 3 || d.gap_ms != 500 || d.mem != 1023)
+		throw Exception("accounts: statistics self-check failed: "+d.str());
+}
+
 struct Account
 {
 	ss_ salt;
@@ -430,6 +520,7 @@ struct Peer
 	ss_ address;
 	bool web = false;
 	int failures = 0;
+	int64_t since_s = 0; // [SERVER_STATS] time joined counted from
 };
 
 struct Module: public interface::Module, public Interface
@@ -453,6 +544,11 @@ struct Module: public interface::Module, public Interface
 	bool m_lan_account = true;
 	std::set<PeerId> m_owners;
 	std::map<PeerId, Peer> m_peers;
+	// [SERVER_STATS] The hour in progress, written at each minute's sample
+	StatRow m_hour;
+	int64_t m_hour_no = -1;
+	std::set<ss_> m_hour_names;
+	int64_t m_next_sample_us = 0;
 	// A logged in account's wrong old passwords, by its name
 	std::map<ss_, Failures> m_name_failures;
 	// Failed logins, by network::address_bin()
@@ -542,6 +638,7 @@ struct Module: public interface::Module, public Interface
 	{
 		check_pbkdf2();
 		totp_self_check();
+		stats_self_check();
 		rate_limit_self_check();
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("network:client_connected"));
@@ -605,7 +702,7 @@ struct Module: public interface::Module, public Interface
 			for(const char *name : {"accounts:hello", "accounts:login_result",
 					"accounts:users", "accounts:admin_result",
 					"accounts:passwd_result", "accounts:totp_result",
-					"accounts:link_result"})
+					"accounts:link_result", "accounts:stats"})
 				inetwork->declare(name,
 						network::Interface::Channel::LatestOnly);
 		});
@@ -649,6 +746,8 @@ struct Module: public interface::Module, public Interface
 		if(it == m_peers.end())
 			return;
 		const bool joined = !it->second.name.empty();
+		if(joined)
+			add_time_joined(it->second);
 		m_peers.erase(it);
 		if(joined)
 			send_users_to_staff();
@@ -1054,8 +1153,10 @@ struct Module: public interface::Module, public Interface
 	{
 		// [FP_ABUSE] 5: when it was made, for the newest first
 		ss_ x;
-		if(!m_store->get("auth/"+name, x))
+		if(!m_store->get("auth/"+name, x)){
 			m_store->set("made/"+name, itos(interface::os::wall_us() / 1000000));
+			stats_hour().made++;
+		}
 		m_store->set("auth/"+name, pack(account));
 	}
 
@@ -1100,6 +1201,7 @@ struct Module: public interface::Module, public Interface
 	void account_deleted(const ss_ &name)
 	{
 		m_store->remove("made/"+name);
+		m_store->remove("seen/"+name);
 		for(auto &app : m_storage)
 			app.second.erase(name);
 		m_server->emit_event("accounts:deleted", new Login(0, name));
@@ -1593,6 +1695,7 @@ struct Module: public interface::Module, public Interface
 		}
 		log_i(MODULE, "%s joined from %s", cs(name), cs(peer.address));
 		peer.name = name;
+		stats_joined(peer);
 		reply("");
 		m_server->emit_event("accounts:login", new Login(packet.sender, name));
 		send_users_to_staff();
@@ -1679,7 +1782,7 @@ struct Module: public interface::Module, public Interface
 		if(by_lv < LV_ADMIN && r.cmd != "list" && r.cmd != "kick" &&
 				r.cmd != "ban" && r.cmd != "unban" && r.cmd != "invite" &&
 				r.cmd != "uninvite" && r.cmd != "approve" &&
-				r.cmd != "turn_away" && r.cmd != "level")
+				r.cmd != "turn_away" && r.cmd != "level" && r.cmd != "stats")
 			return send(packet.sender, "accounts:admin_result",
 					pack(ss_("Only the "+level_name(LV_ADMIN)+" does that")));
 		if((r.cmd == "kick" || r.cmd == "ban") && by_lv < LV_ADMIN &&
@@ -1839,6 +1942,8 @@ struct Module: public interface::Module, public Interface
 					r.cmd == "approve" ? "let in" : "turned away");
 			result(r.cmd == "approve" ? r.name+" may join" :
 					r.name+" was turned away");
+		} else if(r.cmd == "stats"){
+			return send(packet.sender, "accounts:stats", stats_json().stringify());
 		} else if(r.cmd == "health"){
 			// [SERVER_ADMIN_PAGE]: on=1 runs the box check too
 			return send(packet.sender, "accounts:health",
@@ -2279,6 +2384,7 @@ struct Module: public interface::Module, public Interface
 
 	void on_tick(const interface::TickEvent &)
 	{
+		stats_sample();
 		std::vector<std::pair<PeerId, ss_>> r;
 		{
 			std::lock_guard<std::mutex> lock(m_mail_results->m);
@@ -2317,6 +2423,188 @@ struct Module: public interface::Module, public Interface
 		v.set("outside", out_err.empty() ? "a file written at the top of the "
 				"user path: the sandbox is off" : "a file at the top of the user "
 				"path refused ("+out_err+")");
+		return v;
+	}
+
+	// **Statistics** ([SERVER_STATS]). stats/h/<unix hour> an hour's row,
+	// eight days kept; stats/d/<unix day> a day's, folded from its hours
+	// when it ends and kept for ever; stats/n/<unix day>/<name> the day's
+	// names until then; stats/open_day the day the last sample was in.
+	// seen/<name> "<last joined> <seconds joined>"; made/<name> is when.
+	static int64_t now_s(){ return interface::os::wall_us() / 1000000; }
+
+	StatRow stored_row(const ss_ &key)
+	{
+		ss_ v;
+		return m_store->get(key, v) ? StatRow::parse(v) : StatRow();
+	}
+
+	std::pair<int64_t, int64_t> seen(const ss_ &name)
+	{
+		ss_ v;
+		long long last = 0, total = 0;
+		if(m_store->get("seen/"+name, v))
+			sscanf(v.c_str(), "%lld %lld", &last, &total);
+		return std::make_pair((int64_t)last, (int64_t)total);
+	}
+
+	void add_time_joined(Peer &peer)
+	{
+		const int64_t now = now_s();
+		auto sn = seen(peer.name);
+		sn.second += std::max<int64_t>(0, now - peer.since_s);
+		peer.since_s = now;
+		m_store->set("seen/"+peer.name, itos(sn.first)+" "+itos(sn.second));
+	}
+
+	// The hour in progress, rolled over to the current one: the old one
+	// written, the time joined counted to its end, a day ended folded
+	StatRow &stats_hour()
+	{
+		const int64_t h = now_s() / 3600;
+		if(h == m_hour_no)
+			return m_hour;
+		if(m_hour_no >= 0){
+			m_store->set("stats/h/"+itos(m_hour_no), m_hour.str());
+			for(auto &it : m_peers)
+				if(!it.second.name.empty())
+					add_time_joined(it.second);
+		}
+		ss_ v;
+		const int64_t day = h / 24;
+		if(!m_store->get("stats/open_day", v) || atoll(v.c_str()) != day){
+			if(!v.empty() && atoll(v.c_str()) < day)
+				fold_day(atoll(v.c_str()));
+			m_store->set("stats/open_day", itos(day));
+		}
+		for(const ss_ &key : m_store->list("stats/h/"))
+			if(atoll(key.c_str() + 8) < h - 8 * 24)
+				m_store->remove(key);
+		m_hour_no = h;
+		m_hour = stored_row("stats/h/"+itos(h));
+		m_hour_names.clear();
+		return m_hour;
+	}
+
+	// A day's hours, the one in progress among them as it is now
+	StatRow day_row(int64_t day, bool clear_names)
+	{
+		sv_<StatRow> hours;
+		for(int64_t h = day * 24; h < day * 24 + 24; h++)
+			hours.push_back(h == m_hour_no ? m_hour :
+					stored_row("stats/h/"+itos(h)));
+		const ss_ prefix = "stats/n/"+itos(day)+"/";
+		const sv_<ss_> names = m_store->list(prefix);
+		if(clear_names)
+			for(const ss_ &key : names)
+				m_store->remove(key);
+		return fold_hours(hours, names.size());
+	}
+
+	void fold_day(int64_t day)
+	{
+		m_store->set("stats/d/"+itos(day), day_row(day, true).str());
+	}
+
+	// Once a minute: the players joined, the network's peak tick gap over
+	// the last minute and the memory
+	void stats_sample()
+	{
+		const int64_t now = interface::os::wall_us();
+		if(!m_store || now < m_next_sample_us)
+			return;
+		m_next_sample_us = now + 60 * 1000000;
+		json::Value h;
+		network::access(m_server, [&](network::Interface *inetwork){
+			json::json_error_t err;
+			h = json::load_string(inetwork->health_json().c_str(), &err);
+		});
+		int64_t players = 0;
+		for(auto &it : m_peers)
+			players += !it.second.name.empty();
+		StatRow &r = stats_hour();
+		r.sample(players, jint(h, "tick_gap_ms_max"), jint(h, "memory_bytes"));
+		m_store->set("stats/h/"+itos(m_hour_no), r.str());
+	}
+
+	void stats_joined(Peer &peer)
+	{
+		StatRow &r = stats_hour();
+		r.joins++;
+		if(m_hour_names.insert(peer.name).second)
+			r.names++;
+		// The peak between samples too
+		int64_t players = 0;
+		for(auto &it : m_peers)
+			players += !it.second.name.empty();
+		r.pmax = std::max(r.pmax, players);
+		m_store->set("stats/n/"+itos(m_hour_no / 24)+"/"+peer.name, "");
+		peer.since_s = now_s();
+		m_store->set("seen/"+peer.name, itos(peer.since_s)+" "+
+				itos(seen(peer.name).second));
+	}
+
+	// The answer to a moderator's "stats": the last 168 hours and the one
+	// in progress, the last 182 days and today so far, and the accounts
+	json::Value stats_json()
+	{
+		const int64_t now = now_s();
+		stats_hour();
+		const int64_t day = m_hour_no / 24;
+		json::Value v = json::object();
+		json::Value hours = json::array(), days = json::array();
+		for(int64_t h = m_hour_no - 168; h <= m_hour_no; h++){
+			const StatRow r = h == m_hour_no ? m_hour :
+					stored_row("stats/h/"+itos(h));
+			if(r.minutes || r.joins || r.made)
+				hours.append(r.json(h));
+		}
+		for(int64_t d = day - 182; d < day; d++){
+			const StatRow r = stored_row("stats/d/"+itos(d));
+			if(r.minutes || r.joins || r.made)
+				days.append(r.json(d));
+		}
+		days.append(day_row(day, false).json(day));
+		v.set("hour", m_hour_no);
+		v.set("day", day);
+		v.set("hours", hours);
+		v.set("days", days);
+		json::Value levels = json::object();
+		std::map<ss_, int64_t> by_level;
+		struct Row { ss_ name; int64_t made, last, total; };
+		std::vector<Row> rows;
+		int64_t made_30 = 0, idle_90 = 0;
+		for(const ss_ &key : m_store->list("auth/")){
+			const ss_ name = key.substr(5);
+			by_level[level_name(is_admin(name) ? LV_ADMIN : level(name))]++;
+			ss_ m;
+			Row row{name, m_store->get("made/"+name, m) ? atoll(m.c_str()) : 0,
+					seen(name).first, seen(name).second};
+			for(auto &it : m_peers)
+				if(it.second.name == name)
+					row.total += std::max<int64_t>(0, now - it.second.since_s);
+			made_30 += row.made >= now - 30 * 86400;
+			idle_90 += std::max(row.last, row.made) < now - 90 * 86400;
+			rows.push_back(row);
+		}
+		for(auto &it : by_level)
+			levels.set(it.first, it.second);
+		std::stable_sort(rows.begin(), rows.end(), [](const Row &a,
+				const Row &b){ return a.total > b.total; });
+		json::Value top = json::array();
+		for(size_t i = 0; i < rows.size() && i < 10; i++){
+			json::Value t = json::array();
+			t.append(rows[i].name);
+			t.append(rows[i].made);
+			t.append(rows[i].last);
+			t.append(rows[i].total);
+			top.append(t);
+		}
+		v.set("levels", levels);
+		v.set("accounts", (int64_t)rows.size());
+		v.set("made_30", made_30);
+		v.set("idle_90", idle_90);
+		v.set("top", top);
 		return v;
 	}
 

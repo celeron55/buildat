@@ -2014,6 +2014,268 @@ local function duration(s)
 end
 assert(duration(90061) == "1 d 1 h" and duration(3720) == "1 h 2 min")
 
+--
+-- **Statistics** ([SERVER_STATS]): a moderator's and the admin's history of
+-- the server, "accounts:stats" JSON for M.admin("stats"). Its rows are
+-- [unit, minutes, min, average, max, joins, made, names, tick gap ms,
+-- memory], the unit a unix hour or day (UTC).
+--
+local stats = nil
+local stats_page
+buildat.sub_packet("accounts:stats", function(data)
+	local v = buildat.parse_json(data)
+	if type(v) ~= "table" then
+		return
+	end
+	stats = v
+	local h = v.hours and v.hours[#v.hours]
+	local t = v.top and v.top[1]
+	log:info(string.format("stats: %d hours, %d days, %d accounts; the "..
+			"hour in progress max %s; top %s made %s last %s",
+			#(v.hours or {}), #(v.days or {}), tonumber(v.accounts) or 0,
+			h and h[1] == v.hour and tostring(h[5]) or "-",
+			t and t[1] or "-", t and tostring(t[2]) or "-",
+			t and tostring(t[3]) or "-"))
+	if page_kind == "stats" then
+		stats_page(page_back)
+	end
+end)
+
+-- A bar graph's pixels, RGB, `bw` a bar wide and `h` high: each bar
+-- {min, average, max} -- the max faint, the average solid, the min a
+-- line -- or false for a gap. Scaled to the highest max.
+local G_BG, G_FAINT, G_SOLID, G_LINE = "\28\28\28", "\55\75\105",
+		"\95\145\205", "\230\230\230"
+local function bar_pixels(bars, bw, h)
+	local top = 0
+	for _, b in ipairs(bars) do
+		if b and b[3] > top then
+			top = b[3]
+		end
+	end
+	top = top > 0 and top or 1
+	local function px(v)
+		return math.floor(v / top * h + 0.5)
+	end
+	local rows = {}
+	for y = 0, h - 1 do
+		local up = h - y
+		local row = {}
+		for i, b in ipairs(bars) do
+			local c = G_BG
+			if b then
+				if px(b[2]) >= up then
+					c = G_SOLID
+				elseif px(b[3]) >= up then
+					c = G_FAINT
+				end
+				if b[1] and math.max(px(b[1]), 1) == up then
+					c = G_LINE
+				end
+			end
+			row[i] = string.rep(c, bw)
+		end
+		rows[#rows + 1] = table.concat(row)
+	end
+	return table.concat(rows), top
+end
+assert(bar_pixels({{1, 2, 4}, false}, 1, 4) == G_FAINT .. G_BG .. G_FAINT ..
+		G_BG .. G_SOLID .. G_BG .. G_LINE .. G_BG)
+
+-- The page's graphs; the bar under the pointer has its line of text
+local graphs = {}
+magic.SubscribeToEvent("MouseMove", function()
+	if page_kind ~= "stats" then
+		return
+	end
+	local sc = magic.ui.scale or 1
+	local m = magic.input:GetMousePosition()
+	for _, g in ipairs(graphs) do
+		local p = g.el.screenPosition
+		local i = math.floor((m.x / sc - p.x) / g.bw) + 1
+		local y = m.y / sc - p.y
+		if i >= 1 and i <= g.n and y >= 0 and y < g.h then
+			g.label:SetText(g.describe(i))
+		end
+	end
+end)
+
+-- A graph of `bars` into `parent`, the x axis marked under it: marks[i]
+-- a label at bar i. describe(i) is the bar's line under the pointer.
+-- The image is whole pixels a bar, stretched to `width`.
+local function bar_graph(parent, bars, width, h, marks, describe)
+	local bw = math.max(1, math.ceil(width / #bars))
+	local w = bw * #bars
+	local data = bar_pixels(bars, bw, h)
+	local img = magic.Image:new()
+	img:SetSize(w, h, 3)
+	magic.image_set_data(img, w, h, 3, data)
+	local tex = magic.Texture2D:new()
+	tex:SetData(img)
+	local box = parent:CreateChild("UIElement")
+	box:SetFixedSize(width, h + (marks and 16 or 0))
+	local b = box:CreateChild("BorderImage")
+	b.texture = tex
+	b:SetFixedSize(width, h)
+	-- A bar's width as shown
+	bw = width / #bars
+	for i, text in pairs(marks or {}) do
+		local tick = box:CreateChild("BorderImage")
+		tick.color = magic.Color(0.6, 0.6, 0.6)
+		tick:SetFixedSize(1, 4)
+		tick.position = magic.IntVector2(math.floor((i - 1) * bw), h)
+		local t = box:CreateChild("Text")
+		t:SetStyleAuto()
+		t:SetText(text)
+		t.position = magic.IntVector2(math.floor((i - 1) * bw) + 2, h + 1)
+		t:SetColor(DIM)
+	end
+	-- g.label: the line under the graphs, set by the page
+	local g = {el = b, bw = bw, n = #bars, h = h, describe = describe}
+	graphs[#graphs + 1] = g
+	return g
+end
+
+-- The client's offset from UTC in seconds, from its local clock's hour and
+-- minute against the wall clock's: the sandbox has no os.date
+local function utc_offset()
+	local now = math.floor(buildat.get_time_us() / 1e6)
+	local _, h, m = buildat.get_local_time()
+	local d = (h * 60 + m) - math.floor(now % 86400 / 60)
+	d = (d + 720) % 1440 - 720
+	return math.floor(d / 15 + 0.5) * 15 * 60
+end
+
+-- A unix day's year, month and day (Howard Hinnant's civil_from_days)
+local function civil(days)
+	local z = days + 719468
+	local era = math.floor(z / 146097)
+	local doe = z - era * 146097
+	local yoe = math.floor((doe - math.floor(doe / 1460) +
+			math.floor(doe / 36524) - math.floor(doe / 146096)) / 365)
+	local doy = doe - (365 * yoe + math.floor(yoe / 4) - math.floor(yoe / 100))
+	local mp = math.floor((5 * doy + 2) / 153)
+	local d = doy - math.floor((153 * mp + 2) / 5) + 1
+	local m = mp < 10 and mp + 3 or mp - 9
+	return yoe + era * 400 + (m <= 2 and 1 or 0), m, d
+end
+local WEEKDAYS = {"Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"}
+local MONTHS = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug",
+	"Sep", "Oct", "Nov", "Dec"}
+-- A time in seconds, already local: "Sat 10 Oct 14:00", or the day only
+local function when(t, day_only)
+	local day = math.floor(t / 86400)
+	local _, mo, d = civil(day)
+	local s = string.format("%s %d %s", WEEKDAYS[day % 7 + 1], d, MONTHS[mo])
+	if day_only then
+		return s
+	end
+	return s .. string.format(" %02d:%02d", math.floor(t % 86400 / 3600),
+			math.floor(t % 3600 / 60))
+end
+assert(when(0) == "Thu 1 Jan 00:00" and when(20736 * 86400 + 50400) ==
+		"Sat 10 Oct 14:00" and when(11016 * 86400, true) == "Tue 29 Feb")
+
+local function row_text(r, at, span)
+	if not r or r[2] == 0 and r[6] == 0 and r[7] == 0 then
+		return at .. ": nothing sampled"
+	end
+	return string.format("%s: players %d to %d, average %.1f; %d joins by "..
+			"%d names, %d accounts made; tick gap at most %d ms, memory "..
+			"%s; %d of %d minutes sampled", at, r[3], r[5], r[4], r[6], r[8],
+			r[7], r[9], bytes(r[10]), r[2], span)
+end
+
+stats_page = function(back)
+	local w = open_page("stats", "Statistics", back)
+	graphs = {}
+	local r0 = row(w)
+	button(r0, "Refresh", function() M.admin("stats") end)
+	local v = stats
+	if not v then
+		page_text(w, "Waiting for the server...")
+		return
+	end
+	local width = w.width - 32
+	local off = utc_offset()
+	local function by_unit(rows)
+		local t = {}
+		for _, r in ipairs(rows or {}) do
+			t[r[1]] = r
+		end
+		return t
+	end
+
+	page_text(w, "The week, by the hour (players: the most faint, the "..
+			"average solid, the fewest a line)", WARN)
+	local hours, hbars, gbars, hmarks = by_unit(v.hours), {}, {}, {}
+	local first = v.hour - 167
+	for i = 1, 168 do
+		local r = hours[first + i - 1]
+		local sampled = r and r[2] > 0
+		hbars[i] = sampled and {r[3], r[4], r[5]} or false
+		gbars[i] = sampled and {nil, r[9], r[9]} or false
+		local t = (first + i - 1) * 3600 + off
+		if t % 86400 < 3600 then
+			hmarks[i] = when(t, true):sub(1, 3)
+		end
+	end
+	local function hour_line(i)
+		local t = (first + i - 1) * 3600 + off
+		return row_text(hours[first + i - 1], when(t), 60)
+	end
+	local g1 = bar_graph(w, hbars, width, 110, hmarks, hour_line)
+	page_text(w, "The longest tick gap in each hour", DIM)
+	local g2 = bar_graph(w, gbars, width, 40, nil, hour_line)
+	g1.label = page_text(w, "Point at a bar for its hour.", DIM)
+	g2.label = g1.label
+
+	page_text(w, "The half year, by the day", WARN)
+	local days, dbars, nbars, mbars, dmarks = by_unit(v.days), {}, {}, {}, {}
+	local dfirst = v.day - 181
+	for i = 1, 182 do
+		local r = days[dfirst + i - 1]
+		local sampled = r and r[2] > 0
+		dbars[i] = sampled and {r[3], r[4], r[5]} or false
+		nbars[i] = r and {nil, r[8], r[8]} or false
+		mbars[i] = r and {nil, r[7], r[7]} or false
+		local _, _, d = civil(dfirst + i - 1)
+		if d == 1 then
+			local _, mo = civil(dfirst + i - 1)
+			dmarks[i] = MONTHS[mo]
+		end
+	end
+	local function day_line(i)
+		local r = days[dfirst + i - 1]
+		return row_text(r, when((dfirst + i - 1) * 86400, true), 1440)
+	end
+	local d1 = bar_graph(w, dbars, width, 110, dmarks, day_line)
+	page_text(w, "Different players each day, and accounts made", DIM)
+	local d2 = bar_graph(w, nbars, width, 40, nil, day_line)
+	local d3 = bar_graph(w, mbars, width, 30, nil, day_line)
+	d1.label = page_text(w, "Point at a bar for its day (UTC days).", DIM)
+	d2.label, d3.label = d1.label, d1.label
+
+	page_text(w, "Accounts", WARN)
+	local parts = {}
+	for name, n in pairs(v.levels or {}) do
+		parts[#parts + 1] = n .. " " .. name
+	end
+	table.sort(parts)
+	page_text(w, string.format("%d accounts: %s", tonumber(v.accounts) or 0,
+			table.concat(parts, ", ")))
+	page_text(w, string.format("Made in the last 30 days: %d. Not joined "..
+			"in 90 days: %d.", tonumber(v.made_30) or 0,
+			tonumber(v.idle_90) or 0))
+	page_text(w, "The most time joined", WARN)
+	for _, t in ipairs(v.top or {}) do
+		page_text(w, string.format("%s: %s; last joined %s, made %s", t[1],
+				duration(t[4]), t[3] > 0 and when(t[3] + off) or "never",
+				t[2] > 0 and when(t[2] + off, true) or "before 0.6.75"))
+	end
+end
+M.stats_page = function(back) stats_page(back) end
+
 health_page = function(back)
 	local w = open_page("health", "Health", back)
 	local h = health
@@ -2239,6 +2501,12 @@ local function server_entries()
 			M.admin("list")
 			users_page(top_back())
 		end, #(M.users.approvals or {}))
+		if not admin then
+			add("Moderation", "Statistics", "stats", function()
+				M.admin("stats")
+				stats_page(top_back())
+			end)
+		end
 	end
 	if M.users and M.users.level >= 40 then
 		if M.hello.announce == 1 then
@@ -2249,6 +2517,10 @@ local function server_entries()
 				end)
 			end
 		end
+		add("Admin", "Statistics", "stats", function()
+			M.admin("stats")
+			stats_page(top_back())
+		end)
 		add("Admin", "Health", "health", function()
 			M.health_page(top_back())
 		end)
