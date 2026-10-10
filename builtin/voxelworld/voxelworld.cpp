@@ -20,6 +20,8 @@
 #include "interface/polyvox_cereal.h"
 #include "interface/polyvox_std.h"
 #include "interface/os.h"
+#include "interface/fs.h"
+#include "interface/server_config.h"
 #include <cstring>
 #include <set>
 #include <PolyVoxCore/RawVolume.h>
@@ -402,6 +404,15 @@ struct CInstance: public voxelworld::Instance
 	// this existed and what an arena game wants.
 	storage::Store *m_store = nullptr;
 	ss_ m_world_name;
+	// [SERVER_CAPS]: the operator's max_world_mb. The save's directory,
+	// measured every ten seconds; at the cap nothing new is generated, and
+	// what is there -- the players' edits too -- is saved as before.
+	// simplified: the bytes on disk, so what is generated and not yet
+	// saved (sections are written as they unload and at a save) goes over
+	// by up to the loaded part; counting unsaved sections would close that
+	ss_ m_save_path;
+	bool m_world_full = false;
+	int64_t m_world_measured_us = 0;
 	// The save's voxel name table: save id -> name, append-only and never
 	// renumbered. The running game owns the numbering and the save stores
 	// names -- the game is the only thing that can decide whether a name
@@ -619,6 +630,11 @@ struct CInstance: public voxelworld::Instance
 		// (the radius is clamped to what is loaded further on anyway)
 		if(distance_voxels > 1000000)
 			distance_voxels = 1000000;
+		// [SERVER_CAPS]: the operator's max_view_range, 0 none
+		const int64_t cap =
+				atoll(m_server->get_config().get<ss_>("max_view_range").c_str());
+		if(cap > 0 && distance_voxels > cap)
+			distance_voxels = (int)cap;
 		int section_w = m_chunk_size_voxels.getX() *
 				m_section_size_chunks.getX();
 		// A section the point is anywhere in is one the client can see into;
@@ -637,8 +653,26 @@ struct CInstance: public voxelworld::Instance
 		});
 	}
 
+	void measure_world()
+	{
+		const int64_t now = interface::os::time_us();
+		if(m_save_path.empty() || now - m_world_measured_us < 10000000)
+			return;
+		m_world_measured_us = now;
+		const int64_t max_mb =
+				atoll(m_server->get_config().get<ss_>("max_world_mb").c_str());
+		const bool full = max_mb > 0 && (int64_t)interface::fs::
+				directory_tree_size(m_save_path) >= max_mb * 1000000;
+		if(full != m_world_full)
+			log_w(MODULE, full ? "World \"%s\" is at max_world_mb: nothing "
+					"new is generated" : "World \"%s\" is under max_world_mb "
+					"again", cs(m_world_name));
+		m_world_full = full;
+	}
+
 	void stream_pass()
 	{
+		measure_world();
 		size_t budget = m_stream_budget;
 		for(const voxelworld::LoadPoint &lp : m_load_points){
 			if(budget == 0)
@@ -684,7 +718,7 @@ struct CInstance: public voxelworld::Instance
 			if(!is_in_bounds(sp))
 				return true;
 			bool generate = (r <= lp.generate_xz &&
-					dist(dy, 0) <= lp.generate_y);
+					dist(dy, 0) <= lp.generate_y && !m_world_full);
 			if(!stream_section(sp, generate))
 				return true;
 			return --budget != 0;
@@ -2265,6 +2299,9 @@ struct CInstance: public voxelworld::Instance
 	void set_save(storage::Save *save, const ss_ &world_name)
 	{
 		m_aliased_save_ids.clear();
+		m_save_path = save ? save->path() : ss_();
+		m_world_full = false;
+		m_world_measured_us = 0;
 		if(!save){
 			m_store = nullptr;
 			m_world_name = "";

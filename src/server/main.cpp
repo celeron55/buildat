@@ -17,6 +17,7 @@
 #include <c55/os.h>
 #include <iostream>
 #include <fstream>
+#include <algorithm>
 #include <climits>
 #include <cstdlib> // srand()
 #include <signal.h>
@@ -129,6 +130,20 @@ int main(int argc, char *argv[])
 		} else if(ss_(argv[i]) == "--connect-ports" && i + 1 < argc){
 			config.set("connect_ports", ss_(argv[i + 1]));
 			take = 2;
+		} else if((ss_(argv[i]) == "--max-players" ||
+				ss_(argv[i]) == "--max-view-range" ||
+				ss_(argv[i]) == "--max-world-mb") && i + 1 < argc){
+			// [SERVER_CAPS]: --max-players N -> max_players, a number
+			ss_ key = ss_(argv[i]).substr(2);
+			std::replace(key.begin(), key.end(), '-', '_');
+			const ss_ v = argv[i + 1];
+			if(v.empty() || v.size() > 12 ||
+					v.find_first_not_of("0123456789") != ss_::npos){
+				std::cerr<<argv[i]<<" takes a number"<<std::endl;
+				return 1;
+			}
+			config.set(key, v);
+			take = 2;
 		}
 		if(!take)
 			continue;
@@ -175,6 +190,10 @@ int main(int argc, char *argv[])
 			"                       BUILDAT_CONNECT_PORTS)\n"
 			"  --lan-announce NAME  Announce this server to the LAN under\n"
 			"                       NAME (also BUILDAT_LAN_ANNOUNCE)\n"
+			"  --max-players N      Players at once; admins join over it\n"
+			"  --max-view-range N   The world sent to a client, in voxels\n"
+			"  --max-world-mb N     A world's save size past which nothing\n"
+			"                       new is generated\n"
 			"  --unconfined         Run without the sandbox (also\n"
 			"                       BUILDAT_UNCONFINED=1): the app reaches\n"
 			"                       all of your files\n"

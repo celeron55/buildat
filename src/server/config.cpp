@@ -40,6 +40,11 @@ Config::Config()
 	set_default("owner_token", "");
 	// <user>/first_admin's line, read by main() ([FIRST_ADMIN])
 	set_default("first_admin", "");
+	// [SERVER_CAPS]: the operator's --max-players, --max-view-range
+	// (voxels) and --max-world-mb; "0" is none
+	set_default("max_players", "0");
+	set_default("max_view_range", "0");
+	set_default("max_world_mb", "0");
 	// The web client's build ([WEB_CLIENT]); empty is <share_path>/web
 	set_default("web_client_path", "");
 	// Whose X-Forwarded-For is believed for a WebSocket client's address

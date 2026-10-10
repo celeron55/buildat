@@ -1563,6 +1563,23 @@ struct Module: public interface::Module, public Interface
 					"blocklist", cs(name));
 			return reply("Banned by a blocklist this server follows");
 		}
+		// [SERVER_CAPS]: the operator's --max-players; an admin, a
+		// moderator and the local user join over it, to do something
+		// about it
+		const int max_players = atoi(m_server->get_config().get<ss_>(
+				"max_players").c_str());
+		if(max_players > 0 && !local && !account.has("admin") &&
+				level(name) < LV_MODERATOR){
+			int joined = 0;
+			for(auto &it : m_peers)
+				joined += !it.second.name.empty();
+			if(joined >= max_players){
+				log_i(MODULE, "Login of %s refused: the server is full",
+						cs(name));
+				return reply("The server is full ("+itos(max_players)+
+						" players)");
+			}
+		}
 		update_setup_code();
 		if(cred.keep && !local && cred.token.empty()){
 			token = random_code(32);
