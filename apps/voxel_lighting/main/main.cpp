@@ -821,7 +821,7 @@ struct Module: public interface::Module
 				mismatches++;
 			}
 			if(mismatches == 0){
-				log_v(MODULE, "skylight verify: ok");
+				log_i(MODULE, "skylight verify: ok");
 			} else {
 				log_w(MODULE, "skylight verify: %zu voxels differ from a "
 						"fresh fill, %zu of them brighter and %zu darker; "

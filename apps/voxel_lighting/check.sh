@@ -118,6 +118,18 @@ if ! shoot "$run"; then
 	tail -3 "$out/cli.log"
 	exit 1
 fi
+# **The light and the framings, which a look within the bar can hide**
+# ([VOXEL_LIGHTING_CAVE]): check.txt's V after each edit finds the stored
+# skylight a fresh fill's, and every benchmark view had its cave data
+if grep -a "skylight verify: [0-9]* voxels differ" "$out/server.log" ||
+		! grep -aq "skylight verify: ok" "$out/server.log"; then
+	echo "FAIL: voxelworld's skylight is not a fresh fill's"
+	exit 1
+fi
+if grep -a "no cave data" "$out/cli.log"; then
+	echo "FAIL: a benchmark view was shot before its cave data"
+	exit 1
+fi
 
 if [ -n "$accept" ]; then
 	# **Twice, so the reference carries this machine's noise**: the

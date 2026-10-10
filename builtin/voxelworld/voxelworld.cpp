@@ -845,6 +845,15 @@ struct CInstance: public voxelworld::Instance
 		announce_committed_nodes();
 		t_announce = interface::os::time_us() - tick_t0;
 
+
+		// A flood the commit's budget left is carried on here when no game
+		// does it by relight_stale() (luanti does, every step): a world
+		// generated in one piece stayed dark below the sky's seeds, its
+		// flood pending for good ([VOXEL_LIGHTING_CAVE])
+		if(m_relight_pending &&
+				tick_t0 - m_relight_stale_us > RELIGHT_IDLE_US)
+			relight_continue(tick_t0 + TICK_RELIGHT_BUDGET_US);
+
 		if(m_initial_sections_pending){
 			// A world that streams says where it wants sections; the region
 			// is then its bounds and its sky and not a thing to fill
@@ -2129,10 +2138,17 @@ struct CInstance: public voxelworld::Instance
 		}
 	}
 
+	// When a game last called relight_stale(): until a second after, the
+	// tick leaves a pending flood to it
+	int64_t m_relight_stale_us = 0;
+	static const int64_t RELIGHT_IDLE_US = 1000000;
+	static const int64_t TICK_RELIGHT_BUDGET_US = 20000;
+
 	size_t relight_stale(int64_t budget_us, int64_t near_budget_us = 0,
 			int near_sections = 2)
 	{
 		const int64_t t0 = interface::os::time_us();
+		m_relight_stale_us = t0;
 		int64_t deadline = t0 + budget_us;
 		// The near budget while the nearest stale section is close to a
 		// load point (the pending flood counts as near: it was picked so)
