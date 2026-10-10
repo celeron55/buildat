@@ -405,21 +405,35 @@ local base_top = nil
 local function can_exit()
 	return buildat.can_leave_to_launcher and buildat.can_leave_to_launcher()
 end
+-- [HEARTH_WEB_BACK] On the web page the dialog is "Leave Hearth?", the
+-- browser's Back at the top reaching it as Escape; Leave goes to the page
+-- before and keeps the login (a page left, not a Log out). A client from
+-- before leave_web_page has none of it.
+local on_web = buildat.leave_web_page and buildat.leave_web_page(false) ~= nil
 local function ask_exit()
 	local root = uistack.main:push({desc = "hearth exit"})
 	-- Over the frame, a page window's 100
 	root.priority = 200
 	local function close() uistack.main:pop(root) end
-	local menu = ui.vertical_menu(root, {on_key = function(key)
-		if key == magic.KEY_E or key == magic.KEY_Q then
+	local t
+	local function leave()
+		if not on_web then
 			accounts.logout()
+		elseif not buildat.leave_web_page(true) then
+			t.text = "No page before this one to go back to"
+		end
+	end
+	local menu = ui.vertical_menu(root, {on_key = function(key)
+		if key == magic.KEY_E or key == magic.KEY_Q or
+				key == magic.KEY_SPACE then
+			leave()
 			return true
 		end
 	end})
-	local t = menu.window:CreateChild("Text")
+	t = menu.window:CreateChild("Text")
 	t:SetStyleAuto()
-	t.text = "Exit to launcher?"
-	menu:add("Exit", function() accounts.logout() end, true):SetFocus(true)
+	t.text = on_web and "Leave Hearth?" or "Exit to launcher?"
+	menu:add(on_web and "Leave" or "Exit", leave, true):SetFocus(true)
 	menu:add("My account", function()
 		close()
 		accounts.show_account()
@@ -1539,25 +1553,27 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 	elseif area.visible and selected and composer and not touch then
 		composer:SetFocus(true)
 	elseif area.visible and (#history > 0 or narrow) then
+		log:info("hearth: Escape, back" .. (#history > 0 and "" or " to the sidebar"))
 		back()
 	elseif area.visible and section ~= "home" then
 		-- A section's first page: Back is to the top ([PLAYTEST_1008])
 		enter("home", function() show_home() end)
-	elseif can_exit() then
+	elseif can_exit() or on_web then
 		ask_exit()
 	else
 		accounts.show_account()
 	end
 end)
 -- [PLAYTEST_1008] The browser's Back is Escape while the handler above has
--- a page to go back from (the web page's depth, [TAP_BACK]); at the top it
--- leaves the page. A client from before set_back_depth_extra has none.
+-- a page to go back from (the web page's depth, [TAP_BACK]), and on the
+-- web at the top too, to "Leave Hearth?" ([HEARTH_WEB_BACK]). A client
+-- from before set_back_depth_extra has none.
 local back_extra = nil
 magic.SubscribeToEvent("Update", function()
 	if not buildat.set_back_depth_extra then
 		return
 	end
-	local n = frame and frame.visible and (accounts.page or
+	local n = frame and frame.visible and (accounts.page or on_web or
 			(area.visible and (#history > 0 or narrow or
 			section ~= "home"))) and 1 or 0
 	if n ~= back_extra then

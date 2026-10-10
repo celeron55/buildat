@@ -1405,11 +1405,26 @@
 	{
 		const int n = (int)luaL_checkinteger(L, 1);
 #ifdef __EMSCRIPTEN__
-		EM_ASM({ Module.buildatBackDepth = $0; }, n);
+		EM_ASM({ Module.buildatSetBackDepth($0); }, n);
 #else
 		(void)n;
 #endif
 		return 0;
+	}
+
+	// [HEARTH_WEB_BACK] leave_web_page(go) -> on the web, whether there is
+	// a page before this one, and with go, back to it past the page's own
+	// entries; nil natively
+	static int l_leave_web_page(lua_State *L)
+	{
+#ifdef __EMSCRIPTEN__
+		lua_pushboolean(L, EM_ASM_INT({ return Module.buildatLeavePage($0); },
+				lua_toboolean(L, 1) ? 1 : 0));
+		return 1;
+#else
+		(void)L;
+		return 0;
+#endif
 	}
 
 	// list_preferences() -> {name, ...}

@@ -159,24 +159,63 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	// on a desktop
 	document.addEventListener('touchend', sync_fullscreen, true);
 	document.addEventListener('mouseup', sync_fullscreen, true);
-	// **The browser's Back is the client's** ([TAP_BACK]): one entry of
-	// this page's own sits on the history, and Back onto the page's first
-	// one is Escape on the client's top screen (app.cpp reads buildatBack)
-	// with the entry put back -- while a screen is over the first one
-	// (buildatBackDepth, uistack). On the first screen Back leaves.
-	// simplified: a browser skips an entry the page got no tap or key on,
-	// so Back before any input leaves at once, and two Backs with no input
-	// between them may leave too
-	history.pushState({buildat: 1}, '');
+	// **The browser's Back is the client's** ([TAP_BACK]): entries of this
+	// page's own sit on the history, {buildat: n} the n-th over the one the
+	// page was loaded on, and Back onto one of them is Escape on the
+	// client's top screen (app.cpp reads buildatBack) while a screen is
+	// over the first one (buildatBackDepth, uistack). On the first screen
+	// Back leaves, past the page's own entries.
+	// [HEARTH_WEB_BACK] A browser skips an entry pushed with no tap or key
+	// after it, so the entries are pushed while the page has one -- on a
+	// tap, a click or a key, and when the depth changes -- one more than
+	// the depth, so the screen a tap opens has its entry already. One
+	// pushed in a popstate is only for a Back that ran out of them.
+	// simplified: a depth that rises with no input (a game's own timer)
+	// has no entry until the next tap or key; Back then leaves
+	// The entries before this page's first, one of them its own load
+	var history_base = history.length - back_pos();
+	function back_pos(){
+		return (history.state && history.state.buildat) | 0;
+	}
+	function fill_back(){
+		var m = window.Module;
+		var want = Math.max(1, m ? m.buildatBackDepth | 0 : 0);
+		for(var n = back_pos() + 1; n <= want; n++)
+			history.pushState({buildat: n}, '');
+	}
+	['touchend', 'mousedown', 'keydown'].forEach(function(e){
+		document.addEventListener(e, fill_back, true);
+	});
+	fill_back();
+	var leaving = false;
 	window.addEventListener('popstate', function(){
 		var m = window.Module;
+		if(leaving)
+			return;
 		if(m && (m.buildatBackDepth | 0) > 1){
-			history.pushState({buildat: 1}, '');
+			if(back_pos() == 0)
+				history.pushState({buildat: 1}, '');
 			m.buildatBack = (m.buildatBack | 0) + 1;
-		} else {
-			history.back();
+		} else if(history_base > 1){
+			leaving = true;
+			history.go(-(back_pos() + 1));
 		}
 	});
+	function set_back_depth(n){
+		window.Module.buildatBackDepth = n;
+		fill_back();
+	}
+	// The client's leave_web_page(go): whether there is a page before this
+	// one (the history it was loaded on had one), and with go, back to it
+	function leave_page(go){
+		if(history_base < 2)
+			return 0;
+		if(go){
+			leaving = true;
+			history.go(-(back_pos() + 1));
+		}
+		return 1;
+	}
 	window.Module = {
 		canvas: canvas,
 		arguments: args,
@@ -231,6 +270,8 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 						'ws://') + location.host + '/luanti';
 		}],
 		buildatSyncFullscreen: sync_fullscreen,
+		buildatSetBackDepth: set_back_depth,
+		buildatLeavePage: leave_page,
 		buildatHideBarByDefault: function(){ return hide_by_default() ? 1 : 0; },
 		buildatInputAt: Date.now(),
 		print: function(t){ console.log(t); },

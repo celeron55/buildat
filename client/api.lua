@@ -203,6 +203,12 @@ buildat.safe.set_back_depth_extra = function(n)
 	back_extra = math.max(0, math.floor(tonumber(n) or 0))
 	buildat.set_back_depth(back_depth)
 end
+-- [HEARTH_WEB_BACK] leave_web_page(go) -> on the web, whether there is a
+-- page before this one, and with go, back to it (the browser's Back past
+-- the page's own entries); nil natively
+buildat.safe.leave_web_page = function(go)
+	return __buildat_leave_web_page(go and true or false)
+end
 -- Back to the launcher, true when there was one to go back to; `why`, a
 -- dialog over it. A launcher with no game running under it (a client
 -- started straight into a server) answers false

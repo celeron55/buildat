@@ -2500,6 +2500,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(is_scripted)
 		DEF_BUILDAT_FUNC(press_back)
 		DEF_BUILDAT_FUNC(set_back_depth)
+		DEF_BUILDAT_FUNC(leave_web_page)
 		DEF_BUILDAT_FUNC(leave_to_menu)
 		DEF_BUILDAT_FUNC(http_get)
 		DEF_BUILDAT_FUNC(http_poll)

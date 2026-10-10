@@ -432,6 +432,10 @@ buildat.set_back_depth_extra(n)
 - Screens of the app's own inside one of the main stack's (Hearth's
   pages), so the web page's Back is Escape while there is one to go back
   from ([TAP_BACK]). Cleared when the app is left for the launcher.
+buildat.leave_web_page(go) -> bool or nil
+- On the web, whether there is a page before this one, and with go, back
+  to it, past the web page's own history entries ([HEARTH_WEB_BACK]); nil
+  natively.
 buildat.feedback() -> {subject, package, version, engine, platform, place}
     or nil
 - The Hearth's side of set_feedback(), once; place is true for "Discuss"
