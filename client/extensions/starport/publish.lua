@@ -119,7 +119,7 @@ local function refresh_menu()
 	end
 end
 
-local page_package, page_publish
+local page_package, page_publish, page_page
 
 -- "New app..." and "New extension...": the name, then the folder
 local function ask_new(kind, back)
@@ -525,6 +525,62 @@ page_publish = function(message)
 			page_publish()
 		end)
 	end
+	-- [AITTA_PACKAGE_PAGE] Its page on that Aitta, last in
+	-- the row
+	if url and pub then
+		add_button(pr, "The page on " .. url .. "...", function()
+			uistack.main:pop(root)
+			page_page()
+		end)
+	end
+end
+
+-- **Page 3: the package's page on the Aitta** ([AITTA_PACKAGE_PAGE]): not
+-- in any release, the same whichever is shown; its files in the package's
+-- aitta_page/, which pack leaves out
+page_page = function(message)
+	local name, url = st.selected, st.aitta
+	local m = read_meta(name)
+	local pkg = tostring(m.author) .. "/" .. tostring(m.name)
+	local root, w = open_window("aitta page", 780)
+	add_text(w, "The page of " .. pkg .. " on " .. tostring(url))
+	local desc, shots, dir = __buildat_aitta_dev("page_read", name)
+	add_text(w, "On the package's page on the Aitta, not in any release. " ..
+			"The description: 20000 characters at most, a blank line " ..
+			"between paragraphs, an http(s):// address a link.", DIM)
+	local e = add_edit(w, desc or "")
+	e.multiLine = true
+	e:SetFixedHeight(220)
+	shots = shots or {}
+	add_text(w, #shots .. " screenshots (PNG or JPEG, 8 at most, 1920 px " ..
+			"and 2 MB each, in the order of their names) in " ..
+			tostring(dir) .. (#shots > 0 and ": " ..
+			table.concat(shots, ", ") or ""), DIM)
+	local result = add_text(w, message or "", st.page_ok and OK or WARN)
+	local r = add_row(w)
+	add_button(r, "Back", function()
+		uistack.main:pop(root)
+		page_publish()
+	end)
+	add_button(r, "Show the folder", function()
+		__buildat_create_directories(dir)
+		__buildat_aitta_dev("open", dir)
+	end)
+	add_button(r, "Send", function()
+		local zip, err = __buildat_aitta_dev("page_pack", name, e:GetText())
+		if not zip then
+			result.text = "Not sent: " .. tostring(err)
+			result.color = WARN
+			return
+		end
+		result.text = "Sending to " .. url .. "..."
+		result.color = DIM
+		upload(url, zip, function(id, why)
+			st.page_ok = id ~= nil
+			uistack.main:pop(root)
+			page_page(id and "Sent: " .. id or "Not sent: " .. tostring(why))
+		end)
+	end, nil, true)
 end
 
 function M.safe.open_publish()

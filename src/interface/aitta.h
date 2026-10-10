@@ -25,14 +25,20 @@ namespace interface
 		void keygen(ss_ &key_file_text, ss_ &public_hex);
 		// The public half of a key file's text; throws on a bad one
 		ss_ public_of(const ss_ &key_file_text);
+		// A .sig's "format", which the signature covers with the hash: a
+		// release's never verifies as a page's ([AITTA_PACKAGE_PAGE])
+		static const char *const RELEASE_FORMAT = "aitta-release-1";
+		static const char *const PAGE_FORMAT = "aitta-page-1";
+
 		// The key's signature over data's sha256, as hex
-		ss_ sign(const ss_ &key_file_text, const ss_ &data);
+		ss_ sign(const ss_ &key_file_text, const ss_ &data,
+				const char *format = RELEASE_FORMAT);
 		bool verify(const ss_ &public_hex, const ss_ &data,
-				const ss_ &signature_hex);
+				const ss_ &signature_hex, const char *format = RELEASE_FORMAT);
 		// The same, given the data's sha256 as hex: a registry checks who
 		// signed a release before the archive has arrived
 		bool verify_hash(const ss_ &public_hex, const ss_ &sha256_hex,
-				const ss_ &signature_hex);
+				const ss_ &signature_hex, const char *format = RELEASE_FORMAT);
 
 		// The manifest's fields checked; "" or why not
 		ss_ check_manifest(const json::Value &m);
@@ -49,13 +55,25 @@ namespace interface
 		// The manifest's "icon" and "screenshot" in dir checked: "" or why
 		// not
 		ss_ check_media(const json::Value &m, const ss_ &dir);
+		// [AITTA_PACKAGE_PAGE] A package's page on Aitta, its page.json
+		// ({package, time_ms, description, screenshots: [names]}) and the
+		// files it names: "" or why not. The description 20000 characters
+		// at most, up to 8 screenshots, each as the manifest's.
+		ss_ check_page(const json::Value &page, const sm_<ss_, ss_> &files);
+		// page_dir's description.txt and its PNG and JPEG screenshots (in
+		// the order of their names) as <author>-<name>-page.zip in
+		// out_dir, signed in PAGE_FORMAT with the key in key_path: the
+		// zip's path; throws why not
+		ss_ pack_page(const ss_ &page_dir, const ss_ &package,
+				const ss_ &key_path, const ss_ &out_dir);
 		// "app", or "extension" ([AITTA] step 3's second kind): a client
 		// extension, run in the client's sandbox under the name
 		// "<author>__<name>"
 		ss_ kind_of(const json::Value &m);
 
 		// What pack() puts in the archive: every file under dir, '/'
-		// separated, the names starting with '.' left out
+		// separated, the names starting with '.' and aitta_page/ (the
+		// package's page, pack_page()'s) left out
 		sv_<ss_> package_files(const ss_ &dir);
 
 		// Packs app_dir (meta.json at its root) into out_dir and signs it

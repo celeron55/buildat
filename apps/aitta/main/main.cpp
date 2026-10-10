@@ -450,9 +450,11 @@ struct Module: public interface::Module, public moderation::Host
 		if(!m_hits.ok("report", net, 10, 3600))
 			return answer("too many reports from your network; try later", "");
 		const ss_ id = jstr(b, "release");
-		const json::Value rel = load("releases", id);
+		// [AITTA_PACKAGE_PAGE] Or "author/name": the package's page
+		const json::Value rel = is_page(id) ? shown_page(id) :
+				load("releases", id);
 		if(!rel.is_object() || rel.get("delisted").is_true())
-			return answer("no such release", "");
+			return answer(is_page(id) ? "no such page" : "no such release", "");
 		const ss_ reason = jstr(b, "reason");
 		if(!REASONS.count(reason))
 			return answer("reason: one of csam, malware, illegal, scam, "
@@ -671,6 +673,54 @@ struct Module: public interface::Module, public moderation::Host
 		return b+"</div>\n";
 	}
 
+	// [AITTA_PACKAGE_PAGE] A page's description as HTML: escaped, a blank
+	// line a paragraph, a line break a <br>, an http(s):// address a link
+	static ss_ page_text(ss_ t)
+	{
+		using interface::web_brand::html;
+		ss_ out, para;
+		t.erase(std::remove(t.begin(), t.end(), '\r'), t.end());
+		auto flush = [&](){
+			if(!para.empty())
+				out += "<p>"+para+"</p>\n";
+			para.clear();
+		};
+		size_t at = 0;
+		while(at < t.size()){
+			const size_t nl = t.find('\n', at);
+			const ss_ line = t.substr(at, nl == ss_::npos ? ss_::npos : nl - at);
+			at = nl == ss_::npos ? t.size() : nl + 1;
+			if(line.find_first_not_of(" \t") == ss_::npos){
+				flush();
+				continue;
+			}
+			if(!para.empty())
+				para += "<br>";
+			size_t i = 0;
+			while(i < line.size()){
+				size_t u = std::min(line.find("http://", i),
+						line.find("https://", i));
+				if(u == ss_::npos){
+					para += html(line.substr(i));
+					break;
+				}
+				size_t e = line.find_first_of(" \t\"<>", u);
+				if(e == ss_::npos)
+					e = line.size();
+				while(e > u && ss_(".,;:!?)'").find(line[e - 1]) != ss_::npos)
+					e--;
+				const ss_ url = line.substr(u, e - u);
+				para += html(line.substr(i, u - i));
+				para += url.find("://") + 3 < url.size() ? "<a href=\""+
+						html(url)+"\" rel=\"nofollow noopener\">"+html(url)+
+						"</a>" : html(url);
+				i = e;
+			}
+		}
+		flush();
+		return out;
+	}
+
 	void html_page(const network::HttpRequest &r)
 	{
 		auto send = [&](int status, const ss_ &type, const ss_ &body,
@@ -774,6 +824,10 @@ struct Module: public interface::Module, public moderation::Host
 				if(pkg(rel) == want)
 					f += "<option>"+html(pkg(rel)+"/"+jstr(rel, "version"))+
 							"</option>";
+			// [AITTA_PACKAGE_PAGE] And the page
+			const json::Value pg = shown_page(want);
+			if(pg.is_object())
+				f += "<option value=\""+html(want)+"\">The page</option>";
 			f += "</select> <select name=\"reason\">";
 			for(const auto &x : REASON_NAMES)
 				f += "<option value=\""+ss_(x[0])+"\">"+x[1]+"</option>";
@@ -781,17 +835,34 @@ struct Module: public interface::Module, public moderation::Host
 					"rows=\"3\" cols=\"60\" placeholder=\"What is wrong "
 					"(optional)\"></textarea></p><p><button>Send the report"
 					"</button></p></form>\n";
-			// [PACKAGE_MEDIA] The newest's icon by the heading, its
-			// screenshot a link to the image
-			const ss_ icon = jstr(*mine[0], "icon"),
-					shot = jstr(*mine[0], "screenshot");
-			const ss_ head = "<h1>"+(is_hex(icon, 64) ? "<img src=\""
+			// [PACKAGE_MEDIA] The newest's icon by the heading;
+			// [AITTA_PACKAGE_PAGE] its description, its screenshot and
+			// the page's, each a link to the image, the page's text
+			const ss_ icon = jstr(*mine[0], "icon");
+			sv_<ss_> shots;
+			if(is_hex(jstr(*mine[0], "screenshot"), 64))
+				shots.push_back(jstr(*mine[0], "screenshot"));
+			const json::Value &ps = pg.get("screenshots");
+			for(unsigned i = 0; ps.is_array() && i < ps.size(); i++)
+				if(ps.at(i).is_string() && is_hex(ps.at(i).as_string(), 64))
+					shots.push_back(ps.at(i).as_string());
+			ss_ head = "<h1>"+(is_hex(icon, 64) ? "<img src=\""
 					"/api/aitta/media/"+icon+"\" alt=\"\" width=\"48\" "
 					"height=\"48\" style=\"vertical-align:middle\"> " : "")+
-					html(want)+"</h1>"+(is_hex(shot, 64) ? "<p><a href=\""
-					"/api/aitta/media/"+shot+"\"><img src=\"/api/aitta/media/"+
-					shot+"\" alt=\"A screenshot\" style=\"max-width:100%;"
-					"max-height:360px\"></a></p>" : "");
+					html(want)+"</h1><p>"+html(jstr(*mine[0], "description"))+
+					"</p>\n";
+			if(!shots.empty()){
+				head += "<p class=\"shots\">";
+				for(const ss_ &h : shots)
+					head += "<a href=\"/api/aitta/media/"+h+"\"><img src=\""
+							"/api/aitta/media/"+h+"\" alt=\"A screenshot\" "
+							"style=\"max-width:100%;max-height:180px;"
+							"margin:0 6px 6px 0\"></a>";
+				head += "</p>\n";
+			}
+			if(pg.is_object())
+				head += "<div class=\"page\">"+page_text(jstr(pg,
+						"description"))+"</div>\n";
 			return send(200, html_type, interface::web_brand::page(want+
 					" - Aitta", "Aitta", head+"<p class=\""
 					"meta\">Every listed release, the newest first.</p>\n"+
@@ -865,6 +936,15 @@ struct Module: public interface::Module, public moderation::Host
 						!rel.get("hidden").is_true())
 					listed = true;
 			}
+		// [AITTA_PACKAGE_PAGE] Or a shown page's screenshot
+		if(is_hex(sha, 64) && !listed)
+			for(const ss_ &k : store("pages")->list("")){
+				const json::Value pg = shown_page(k);
+				const json::Value &sl = pg.get("screenshots");
+				for(unsigned i = 0; sl.is_array() && i < sl.size(); i++)
+					if(sl.at(i).is_string() && sl.at(i).as_string() == sha)
+						listed = true;
+			}
 		ss_ data, type;
 		if(listed)
 			data = read_file(m_archives+"/media/"+sha);
@@ -885,7 +965,10 @@ struct Module: public interface::Module, public moderation::Host
 		const json::Value sig = json::load_string(r.body.c_str());
 		const ss_ sha = jstr(sig, "sha256"), key = jstr(sig, "key");
 		const int64_t size = atoll(r.param("size").c_str());
-		if(jstr(sig, "format") != "aitta-release-1" || !is_hex(sha, 64))
+		// [AITTA_PACKAGE_PAGE] Or a package's page, sent the same way
+		const bool page = jstr(sig, "format") == interface::aitta::PAGE_FORMAT;
+		if((!page && jstr(sig, "format") != interface::aitta::RELEASE_FORMAT) ||
+				!is_hex(sha, 64))
 			return refuse(r, "the body is not a release's .sig");
 		const ss_ author = get("keys", key);
 		if(author.empty())
@@ -897,13 +980,15 @@ struct Module: public interface::Module, public moderation::Host
 				bar.as_number() > now_s()))
 			return refuse(r, "the author "+author+" is barred from "
 					"publishing here: see your statements on Aitta's page");
-		if(!interface::aitta::verify_hash(key, sha, jstr(sig, "signature")))
+		if(!interface::aitta::verify_hash(key, sha, jstr(sig, "signature"),
+				page ? interface::aitta::PAGE_FORMAT :
+				interface::aitta::RELEASE_FORMAT))
 			return refuse(r, "the signature does not match the hash");
 		const json::Value &max = m_settings.get("max_size");
 		if(size <= 0 || (max.is_number() && size > max.as_number()))
 			return refuse(r, "the archive's size is 1 byte to "+
 					itos((int64_t)max.as_number())+" bytes here");
-		if(interface::fs::path_exists(m_archives+"/"+sha+".zip"))
+		if(!page && interface::fs::path_exists(m_archives+"/"+sha+".zip"))
 			return refuse(r, "this archive is here already");
 		// simplified: at most four uploads at once and ten minutes each,
 		// in memory; an upload server's worth of resumable uploads is the
@@ -1017,6 +1102,8 @@ struct Module: public interface::Module, public moderation::Host
 			return refuse(r, "the archive is not whole");
 		if(interface::sha256::hex(interface::sha256::calculate(u.data)) != sha)
 			return refuse(r, "the archive is not the one the .sig is for");
+		if(jstr(u.sig, "format") == interface::aitta::PAGE_FORMAT)
+			return page_end(r, u);
 		// The manifest, out of the archive
 		// Beside where it goes, so the move is a rename; unpacked under
 		// the cache
@@ -1133,6 +1220,126 @@ struct Module: public interface::Module, public moderation::Host
 		v.set("result", id);
 		v.set("warning", "The web client's Lua 5.1 cannot load this:\n"+lua51);
 		respond(r, v);
+	}
+
+	// [AITTA_PACKAGE_PAGE] "author/name": a package's page; a release's
+	// id has its version too
+	static bool is_page(const ss_ &id)
+	{
+		return std::count(id.begin(), id.end(), '/') == 1;
+	}
+	// The page shown on the package's page: there, not delisted or hidden
+	json::Value shown_page(const ss_ &pkg)
+	{
+		const json::Value pg = load("pages", pkg);
+		return pg.is_object() && !pg.get("delisted").is_true() &&
+				!pg.get("hidden").is_true() ? pg : json::Value();
+	}
+
+	// [AITTA_PACKAGE_PAGE] A package's page: page.json and its
+	// screenshots, signed by a key bound to the package's author, newer
+	// than the last, which it replaces whole. After a moderator delisted
+	// the page, a new one waits for a moderator: hidden, with a report of
+	// its own in the queue, shown when that is dismissed.
+	void page_end(const network::HttpRequest &r, const Upload &u)
+	{
+		const ss_ sha = jstr(u.sig, "sha256");
+		const ss_ zip = m_tmp+"/"+sha+".page.zip", dir = m_tmp+"/"+sha+".page";
+		json::Value p;
+		sm_<ss_, ss_> files;
+		ss_ failed;
+		try {
+			if(!write_file(zip, u.data))
+				throw Exception("cannot store it");
+			interface::fs::create_directories(dir);
+			interface::zip_extract(zip, dir);
+			p = json::load_string(read_file(dir+"/page.json").c_str());
+			// The names check_page() takes: none leaves the directory
+			const json::Value &sl = p.get("screenshots");
+			for(unsigned i = 0; sl.is_array() && i < sl.size() && i < 8; i++){
+				if(sl.at(i).is_string() && !sl.at(i).as_string().empty() &&
+						sl.at(i).as_string()[0] != '.' &&
+						sl.at(i).as_string().find_first_of("/\\") == ss_::npos)
+					files[sl.at(i).as_string()] = read_file(dir+"/"+
+							sl.at(i).as_string());
+			}
+		} catch(std::exception &e){
+			failed = ss_("the archive: ")+e.what();
+		}
+		interface::fs::remove_all(dir);
+		interface::fs::remove_all(zip);
+		if(!failed.empty())
+			return refuse(r, failed);
+		const ss_ why = interface::aitta::check_page(p, files);
+		if(!why.empty())
+			return refuse(r, "page.json: "+why);
+		const ss_ pkg = jstr(p, "package");
+		if(pkg.substr(0, pkg.find('/')) != u.author)
+			return refuse(r, "the key is bound to the author \""+u.author+
+					"\", and the page is for "+pkg);
+		if(!get("delisted_packages", pkg).empty())
+			return refuse(r, pkg+" is delisted here: see your statements on "
+					"Aitta's page");
+		if(store("releases")->list(pkg+"/").empty())
+			return refuse(r, "no release of "+pkg+" here: publish one first");
+		const json::Value old = load("pages", pkg);
+		if(old.is_object() && p.get("time_ms").as_number() <=
+				old.get("time_ms").as_number())
+			return refuse(r, "the page here is as new as this or newer");
+		json::Value pg = json::object();
+		pg.set("package", pkg);
+		pg.set("author", u.author);
+		pg.set("name", pkg.substr(pkg.find('/') + 1));
+		pg.set("description", jstr(p, "description"));
+		// simplified: a replaced page's screenshots stay on disk, unserved;
+		// the uploads' rate and a bound key bound it. A sweep of the hashes
+		// nothing names is the upgrade, when a disk fills
+		json::Value hashes = json::array();
+		interface::fs::create_directories(m_archives+"/media");
+		const json::Value &sl = p.get("screenshots");
+		for(unsigned i = 0; i < sl.size(); i++){
+			const ss_ &data = files[sl.at(i).as_string()];
+			const ss_ h = interface::sha256::hex(
+					interface::sha256::calculate(data));
+			if(!write_file(m_archives+"/media/"+h, data))
+				return refuse(r, "cannot store a screenshot");
+			hashes.append(json::Value(h));
+		}
+		pg.set("screenshots", hashes);
+		// An integer: a real is stringified to six digits
+		pg.set("time_ms", (int64_t)p.get("time_ms").as_number());
+		pg.set("time", now_s());
+		pg.set("key", jstr(u.sig, "key"));
+		pg.set("delisted", false);
+		const bool held = old.get("moderated").is_true();
+		pg.set("moderated", held);
+		pg.set("hidden", held);
+		pg.set("status_auto", held);
+		pg.set("delisted_why", held ? "waits for a moderator: the last page "
+				"was delisted" : "");
+		put("pages", pkg, pg);
+		if(held){
+			json::Value rep = json::object();
+			rep.set("id", interface::sha256::hex(
+					interface::bignum::random_bytes(8)).substr(0, 16));
+			rep.set("listing", pkg);
+			rep.set("reason", "other");
+			rep.set("text", "A new page after a delisted one: dismiss to "
+					"show it");
+			rep.set("key", "");
+			rep.set("address", "");
+			rep.set("ts", now_s());
+			rep.set("weight", 0.0);
+			rep.set("group", pkg+"|other");
+			rep.set("state", "open");
+			moderation::access(m_server, [&](moderation::Interface *m){
+				m->add_report(this, rep, json::object());
+			});
+		}
+		log_i(MODULE, "The page of %s (%u screenshots) from %s%s", cs(pkg),
+				hashes.size(), cs(r.address), held ? ", held" : "");
+		ok(r, held ? pkg+": it waits for a moderator, as the last page was "
+				"delisted" : pkg);
 	}
 
 	// "GPL-3.0-only", "GPL-3.0-or-later" and "GPL-3.0+" are GPL-3.0's
@@ -1520,12 +1727,12 @@ struct Module: public interface::Module, public moderation::Host
 	ss_ name(){ return "Aitta"; }
 	json::Value subject(const ss_ &id)
 	{
-		const json::Value rel = load("releases", id);
+		const json::Value rel = load(is_page(id) ? "pages" : "releases", id);
 		if(!rel.is_object())
 			return json::Value();
 		json::Value s = json::object();
 		s.set("id", id);
-		s.set("name", id);
+		s.set("name", is_page(id) ? "the page of "+id : id);
 		s.set("owner", jstr(load("authors", jstr(rel, "author")), "account"));
 		return s;
 	}
@@ -1553,7 +1760,8 @@ struct Module: public interface::Module, public moderation::Host
 	json::Value auto_act(const json::Value &g, const ss_ &id,
 			const ss_ &want)
 	{
-		json::Value rel = load("releases", id);
+		const char *st = is_page(id) ? "pages" : "releases";
+		json::Value rel = load(st, id);
 		if(!rel.is_object())
 			return json::Value();
 		if(want == "delist")
@@ -1563,7 +1771,7 @@ struct Module: public interface::Module, public moderation::Host
 		rel.set("status_auto", true);
 		rel.set("delisted_why", "reported for "+jstr(g, "reason")+
 				"; out of the list until a moderator looks");
-		put("releases", id, rel);
+		put(st, id, rel);
 		return subject(id);
 	}
 	// q: {action (unreview, delist, delist_package, bar), text, days (a
@@ -1573,16 +1781,33 @@ struct Module: public interface::Module, public moderation::Host
 	{
 		const ss_ id = jstr(g, "listing"), reason = jstr(g, "reason"),
 				action = jstr(q, "action"), text = jstr(q, "text");
-		json::Value rel = load("releases", id);
+		// [AITTA_PACKAGE_PAGE] A page is delisted, or its author barred
+		const bool page = is_page(id);
+		json::Value rel = load(page ? "pages" : "releases", id);
 		if(!rel.is_object())
-			throw Exception("the release has gone");
+			throw Exception(page ? "the page has gone" : "the release has gone");
 		if(action != "unreview" && action != "delist" &&
 				action != "delist_package" && action != "bar")
 			throw Exception("action: unreview, delist, delist_package or bar");
+		if(page && action != "delist" && action != "bar")
+			throw Exception("a page is delisted, or its author barred");
 		const ss_ pkg = jstr(rel, "author")+"/"+jstr(rel, "name")+"/";
 		ss_ stated = action == "unreview" ? "unreviewed" : action == "bar" ?
-				"barred" : action == "delist" ? "delisted" : "package delisted";
-		for(const ss_ &k : store("releases")->list(pkg)){
+				"barred" : action == "delist" ? (page ? "page delisted" :
+				"delisted") : "package delisted";
+		if(page){
+			rel.set("hidden", false);
+			rel.set("status_auto", false);
+			rel.set("delisted_why", "");
+			if(action == "delist"){
+				rel.set("delisted", true);
+				// Its next waits for a moderator
+				rel.set("moderated", true);
+				rel.set("delisted_why", reason+(text.empty() ? "" : ": "+text));
+			}
+			put("pages", id, rel);
+		}
+		for(const ss_ &k : page ? sv_<ss_>() : store("releases")->list(pkg)){
 			json::Value o = load("releases", k);
 			if(k != id && action != "delist_package")
 				continue;
@@ -1615,14 +1840,18 @@ struct Module: public interface::Module, public moderation::Host
 	}
 	bool undo_auto(const ss_ &id, const json::Value &g)
 	{
-		json::Value rel = load("releases", id);
+		const char *st = is_page(id) ? "pages" : "releases";
+		json::Value rel = load(st, id);
 		if(!rel.get("status_auto").is_true())
 			return false;
 		rel.set("hidden", false);
 		rel.set("delisted", false);
 		rel.set("status_auto", false);
 		rel.set("delisted_why", "");
-		put("releases", id, rel);
+		// A held page ([AITTA_PACKAGE_PAGE]): a moderator has let it be
+		if(is_page(id))
+			rel.set("moderated", false);
+		put(st, id, rel);
 		return true;
 	}
 	// An appeal reversed: what its statement said was done, undone
@@ -1630,13 +1859,21 @@ struct Module: public interface::Module, public moderation::Host
 			const json::Value &a, const ss_ &text)
 	{
 		const ss_ id = jstr(a, "listing");
-		json::Value rel = load("releases", id);
+		const bool page = is_page(id);
+		json::Value rel = load(page ? "pages" : "releases", id);
 		if(!rel.is_object())
 			return;
 		const ss_ action = jstr(load("statements", jstr(a, "statement")),
 				"action");
 		const ss_ pkg = jstr(rel, "author")+"/"+jstr(rel, "name")+"/";
-		for(const ss_ &k : store("releases")->list(pkg)){
+		if(page && action == "page delisted"){
+			for(const char *k : {"delisted", "hidden", "status_auto",
+					"moderated"})
+				rel.set(k, false);
+			rel.set("delisted_why", "");
+			put("pages", id, rel);
+		}
+		for(const ss_ &k : page ? sv_<ss_>() : store("releases")->list(pkg)){
 			json::Value o = load("releases", k);
 			if(k != id && action != "package delisted")
 				continue;

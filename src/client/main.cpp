@@ -82,14 +82,24 @@ static int aitta_main(int argc, char *argv[])
 					argv[3]).c_str());
 			return 0;
 		}
-		if(verb == "publish" && argc == 3){
+		// [AITTA_PACKAGE_PAGE] The package's page, packed beside its files
+		// in .packed/ and sent as a release is
+		ss_ zip_path, aitta;
+		if(verb == "page" && argc == 5){
+			aitta = argv[1];
+			zip_path = interface::aitta::pack_page(argv[3], argv[2], argv[4],
+					ss_(argv[3])+"/.packed");
+		} else if(verb == "publish" && argc == 3){
+			zip_path = argv[1];
+			aitta = argv[2];
+		}
+		if(!zip_path.empty()){
 			// The release to an Aitta: its .sig first, which says who
 			// signed what, then the archive in pieces under the server's
 			// 64 KiB POST limit
-			const ss_ zip_path = argv[1];
 			const ss_ sig_path =
 					interface::fs::strip_file_extension(zip_path)+".sig";
-			ss_ base = argv[2];
+			ss_ base = aitta;
 			if(base.find("://") == ss_::npos)
 				base = "http://"+base;
 			while(!base.empty() && base.back() == '/')
@@ -124,7 +134,8 @@ static int aitta_main(int argc, char *argv[])
 						zip.substr(at, piece), "application/octet-stream");
 			const json::Value v = call(base+"upload_end?sha256="+sha, "",
 					"application/octet-stream");
-			printf("listed: %s\n", v.get("result").is_string() ?
+			printf("%s: %s\n", verb == "page" ? "page" : "listed",
+					v.get("result").is_string() ?
 					v.get("result").as_cstring() : "?");
 			if(v.get("warning").is_string())
 				printf("warning: %s", v.get("warning").as_cstring());
@@ -228,6 +239,8 @@ static int aitta_main(int argc, char *argv[])
 			"       buildat aitta install <release .zip> <user path>\n"
 			"       buildat aitta install <Aitta> <author>/<name>[@<version>] <user path>\n"
 			"       buildat aitta publish <release .zip> <Aitta's host:port>\n"
+			"       buildat aitta page <Aitta's host:port> <author>/<name> <dir> <key file>\n"
+			"         the package's page: <dir>'s description.txt and screenshots\n"
 			"An app's meta.json: doc/aitta.txt\n");
 	return 1;
 }

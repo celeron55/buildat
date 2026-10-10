@@ -5,12 +5,14 @@
 #include "interface/bignum.h"
 #include "interface/compress.h"
 #include "interface/fs.h"
+#include "interface/os.h"
 #include "interface/sha256.h"
 #include "interface/zip.h"
 #include "core/log.h"
 #include "zlib.h"
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/ecp.h>
+#include <algorithm>
 #include <cctype>
 #include <cstring>
 #include <fstream>
@@ -24,7 +26,7 @@ namespace interface {
 namespace aitta {
 
 static const char *KEY_HEADER = "aitta-key-1 ";
-static const char *SIG_FORMAT = "aitta-release-1";
+static const char *SIG_FORMAT = RELEASE_FORMAT;
 
 static ss_ read_file(const ss_ &path)
 {
@@ -53,13 +55,9 @@ static int rng(void*, unsigned char *out, size_t len)
 
 // What is signed: the format and the data's hash, so that a signature
 // over something else is never one over a release
-static ss_ digest_of_hash(const ss_ &sha256_hex)
+static ss_ digest_of_hash(const ss_ &sha256_hex, const char *format)
 {
-	return sha256::calculate(ss_(SIG_FORMAT)+"\n"+sha256_hex);
-}
-static ss_ digest(const ss_ &data)
-{
-	return digest_of_hash(sha256::hex(sha256::calculate(data)));
+	return sha256::calculate(ss_(format)+"\n"+sha256_hex);
 }
 
 struct Keypair {
@@ -111,13 +109,14 @@ ss_ public_of(const ss_ &key_file_text)
 	return k.public_hex();
 }
 
-ss_ sign(const ss_ &key_file_text, const ss_ &data)
+ss_ sign(const ss_ &key_file_text, const ss_ &data, const char *format)
 {
 	Keypair k;
 	load_key(k, key_file_text);
 	mbedtls_ecdsa_context ctx;
 	mbedtls_ecdsa_init(&ctx);
-	const ss_ h = digest(data);
+	const ss_ h = digest_of_hash(sha256::hex(sha256::calculate(data)),
+			format);
 	unsigned char sig[MBEDTLS_ECDSA_MAX_LEN];
 	size_t n = 0;
 	int r = mbedtls_ecdsa_from_keypair(&ctx, &k.kp);
@@ -131,14 +130,15 @@ ss_ sign(const ss_ &key_file_text, const ss_ &data)
 	return sha256::hex(ss_((char*)sig, n));
 }
 
-bool verify(const ss_ &public_hex, const ss_ &data, const ss_ &signature_hex)
+bool verify(const ss_ &public_hex, const ss_ &data, const ss_ &signature_hex,
+		const char *format)
 {
 	return verify_hash(public_hex, sha256::hex(sha256::calculate(data)),
-			signature_hex);
+			signature_hex, format);
 }
 
 bool verify_hash(const ss_ &public_hex, const ss_ &sha256_hex,
-		const ss_ &signature_hex)
+		const ss_ &signature_hex, const char *format)
 {
 	ss_ q, sig;
 	try {
@@ -154,7 +154,7 @@ bool verify_hash(const ss_ &public_hex, const ss_ &sha256_hex,
 	mbedtls_ecp_point_init(&pt);
 	mbedtls_ecdsa_context ctx;
 	mbedtls_ecdsa_init(&ctx);
-	const ss_ h = digest_of_hash(sha256_hex);
+	const ss_ h = digest_of_hash(sha256_hex, format);
 	bool ok = mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_SECP256R1) == 0 &&
 			mbedtls_ecp_point_read_binary(&grp, &pt,
 				(const unsigned char*)q.data(), q.size()) == 0 &&
@@ -392,17 +392,21 @@ static void le(ss_ &o, uint32_t v, int bytes)
 
 sv_<ss_> package_files(const ss_ &dir)
 {
-	sv_<ss_> names;
+	sv_<ss_> names, out;
 	collect(dir, "", names);
-	return names;
+	// [AITTA_PACKAGE_PAGE] The package's page on Aitta is not in a release
+	for(const ss_ &n : names)
+		if(n.compare(0, 11, "aitta_page/") != 0)
+			out.push_back(n);
+	return out;
 }
 
-static ss_ zip_directory(const ss_ &dir)
+// The files' names and data in a zip
+static ss_ zip_entries(const sv_<std::pair<ss_, ss_>> &files)
 {
-	const sv_<ss_> names = package_files(dir);
 	ss_ out, central;
-	for(const ss_ &name : names){
-		const ss_ data = read_file(dir+"/"+name);
+	for(const auto &f : files){
+		const ss_ &name = f.first, &data = f.second;
 		std::ostringstream os(std::ios::binary);
 		compress_deflate_raw(data, os);
 		const ss_ packed = os.str();
@@ -426,9 +430,33 @@ static ss_ zip_directory(const ss_ &dir)
 	const uint32_t at = out.size();
 	out += central;
 	out += "PK\x05\x06";
-	le(out, 0, 4); le(out, names.size(), 2); le(out, names.size(), 2);
+	le(out, 0, 4); le(out, files.size(), 2); le(out, files.size(), 2);
 	le(out, central.size(), 4); le(out, at, 4); le(out, 0, 2);
 	return out;
+}
+
+static ss_ zip_directory(const ss_ &dir)
+{
+	sv_<std::pair<ss_, ss_>> files;
+	for(const ss_ &name : package_files(dir))
+		files.emplace_back(name, read_file(dir+"/"+name));
+	return zip_entries(files);
+}
+
+// <base>.zip and its <base>.sig: the hash, the key and its signature in
+// the format given; the .zip's path
+static ss_ write_signed(const ss_ &zip, const ss_ &key, const char *format,
+		const ss_ &base)
+{
+	json::Value sig = json::object();
+	sig.set("format", format);
+	sig.set("sha256", sha256::hex(sha256::calculate(zip)));
+	sig.set("key", public_of(key));
+	sig.set("signature", sign(key, zip, format));
+	fs::create_directories(fs::strip_file_name(base));
+	write_file(base+".zip", zip);
+	write_file(base+".sig", sig.stringify()+"\n");
+	return base+".zip";
 }
 
 ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir)
@@ -448,19 +476,97 @@ ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir)
 	const ss_ media = check_media(m, app_dir);
 	if(!media.empty())
 		throw Exception(app_dir+"/meta.json: "+media);
-	const ss_ key = read_file(key_path);
-	const ss_ zip = zip_directory(app_dir);
-	const ss_ base = out_dir+"/"+m.get("author").as_string()+"-"+
-			m.get("name").as_string()+"-"+m.get("version").as_string();
-	json::Value sig = json::object();
-	sig.set("format", SIG_FORMAT);
-	sig.set("sha256", sha256::hex(sha256::calculate(zip)));
-	sig.set("key", public_of(key));
-	sig.set("signature", sign(key, zip));
-	fs::create_directories(out_dir);
-	write_file(base+".zip", zip);
-	write_file(base+".sig", sig.stringify()+"\n");
-	return base+".zip";
+	return write_signed(zip_directory(app_dir), read_file(key_path),
+			SIG_FORMAT, out_dir+"/"+m.get("author").as_string()+"-"+
+			m.get("name").as_string()+"-"+m.get("version").as_string());
+}
+
+// [AITTA_PACKAGE_PAGE]
+static size_t utf8_chars(const ss_ &s)
+{
+	size_t n = 0;
+	for(unsigned char c : s)
+		if((c & 0xc0) != 0x80)
+			n++;
+	return n;
+}
+
+ss_ check_page(const json::Value &p, const sm_<ss_, ss_> &files)
+{
+	if(!p.is_object())
+		return "page.json is not an object";
+	const ss_ pkg = p.get("package").is_string() ?
+			p.get("package").as_string() : "";
+	const size_t slash = pkg.find('/');
+	if(slash == ss_::npos || !plain_name(pkg.substr(0, slash), false) ||
+			!plain_name(pkg.substr(slash + 1), false))
+		return "\"package\": <author>/<name>";
+	if(!p.get("time_ms").is_number())
+		return "\"time_ms\": a number";
+	const json::Value &d = p.get("description");
+	if(!d.is_string() || utf8_chars(d.as_string()) > 20000)
+		return "the description: text, 20000 characters at most";
+	const json::Value &shots = p.get("screenshots");
+	if(!shots.is_array() || shots.size() > 8)
+		return "the screenshots: 8 at most";
+	for(unsigned i = 0; i < shots.size(); i++){
+		const ss_ n = shots.at(i).is_string() ? shots.at(i).as_string() : "";
+		auto it = files.find(n);
+		if(n.find('/') != ss_::npos || !archive_path_ok(n) ||
+				it == files.end())
+			return "the screenshot \""+n+"\" is not there";
+		const ss_ why = media_check("screenshot", it->second);
+		if(!why.empty())
+			return n+": "+why.substr(why.find(": ") + 2);
+	}
+	return "";
+}
+
+ss_ pack_page(const ss_ &page_dir, const ss_ &package, const ss_ &key_path,
+		const ss_ &out_dir)
+{
+	json::Value p = json::object();
+	p.set("package", package);
+	p.set("time_ms", os::wall_us() / 1000);
+	p.set("description", "");
+	sv_<ss_> shots;
+	sm_<ss_, ss_> files;
+	for(const fs::Node &n : fs::list_directory(page_dir)){
+		if(n.name.empty() || n.name[0] == '.')
+			continue;
+		ss_ low = n.name;
+		for(char &c : low)
+			c = tolower((unsigned char)c);
+		auto ends = [&](const char *e){
+			const size_t k = strlen(e);
+			return low.size() > k && low.compare(low.size() - k, k, e) == 0;
+		};
+		if(!n.is_directory && n.name == "description.txt")
+			p.set("description", read_file(page_dir+"/"+n.name));
+		else if(!n.is_directory && (ends(".png") || ends(".jpg") ||
+				ends(".jpeg"))){
+			shots.push_back(n.name);
+			files[n.name] = read_file(page_dir+"/"+n.name);
+		} else
+			throw Exception(page_dir+"/"+n.name+": a page's directory holds "
+					"description.txt and PNG or JPEG screenshots only");
+	}
+	std::sort(shots.begin(), shots.end());
+	json::Value sl = json::array();
+	for(const ss_ &n : shots)
+		sl.append(json::Value(n));
+	p.set("screenshots", sl);
+	const ss_ why = check_page(p, files);
+	if(!why.empty())
+		throw Exception(page_dir+": "+why);
+	sv_<std::pair<ss_, ss_>> entries;
+	entries.emplace_back("page.json", p.stringify()+"\n");
+	for(const ss_ &n : shots)
+		entries.emplace_back(n, files[n]);
+	ss_ base = package;
+	base[base.find('/')] = '-';
+	return write_signed(zip_entries(entries), read_file(key_path),
+			PAGE_FORMAT, out_dir+"/"+base+"-page");
 }
 
 ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,

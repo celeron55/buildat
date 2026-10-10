@@ -391,6 +391,12 @@
 	//   "pack", name            packed and signed with its author's key
 	//                           into <user>/aitta_releases -> the .zip's
 	//                           path, or nil and why
+	//   "page_read", name       [AITTA_PACKAGE_PAGE] its aitta_page/: the
+	//                           description, {screenshot names} and the
+	//                           directory's path
+	//   "page_pack", name, text the description written there and the
+	//                           page packed and signed -> the .zip's
+	//                           path, or nil and why
 	//   "open", path            the system's file manager there
 	static bool plain_aitta_name(const ss_ &s)
 	{
@@ -570,6 +576,47 @@
 							keys);
 				lua_pushstring(L, interface::aitta::pack(dir, key,
 						user+"/aitta_releases").c_str());
+				return 1;
+			}
+			if(op == "page_read" || op == "page_pack"){
+				const ss_ dir = dev_app_dir("dev:"+arg);
+				if(dir.empty() || !interface::fs::path_exists(dir))
+					throw Exception("no "+arg+" in "+dev_apps_path());
+				const ss_ page = dir+"/aitta_page";
+				if(op == "page_read"){
+					lua_pushstring(L, read_text(page+"/description.txt").c_str());
+					sv_<ss_> shots;
+					if(interface::fs::path_exists(page))
+						for(const auto &n : interface::fs::list_directory(page))
+							if(!n.is_directory && n.name != "description.txt" &&
+									n.name[0] != '.')
+								shots.push_back(n.name);
+					std::sort(shots.begin(), shots.end());
+					lua_newtable(L);
+					for(size_t i = 0; i < shots.size(); i++){
+						lua_pushstring(L, shots[i].c_str());
+						lua_rawseti(L, -2, i + 1);
+					}
+					lua_pushstring(L, interface::fs::get_absolute_path(page).c_str());
+					return 3;
+				}
+				json::json_error_t err;
+				const json::Value m = json::load_file((dir+"/meta.json").c_str(),
+						&err);
+				const ss_ author = m.get("author").is_string() ?
+						m.get("author").as_string() : "";
+				const ss_ name = m.get("name").is_string() ?
+						m.get("name").as_string() : "";
+				const ss_ key = keys+"/"+author+".key";
+				if(!plain_aitta_name(author) || !plain_aitta_name(name) ||
+						!interface::fs::path_exists(key))
+					throw Exception("no key for the author \""+author+"\" in "+
+							keys);
+				interface::fs::create_directories(page);
+				write_text(page+"/description.txt", lua_isstring(L, 3) ?
+						lua_bindings::lua_tocppstring(L, 3) : "");
+				lua_pushstring(L, interface::aitta::pack_page(page, author+"/"+
+						name, key, user+"/aitta_releases").c_str());
 				return 1;
 			}
 			if(op == "open"){
