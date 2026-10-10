@@ -360,7 +360,11 @@ def hold_for(name):
     # (a jungle log at 600 ms was aimed at, held, and never went)
     if any(w in base for w in ("tree", "log", "wood", "planks", "table", "chest")):
         return 3800
-    if "stone" in base or "ore" in base or "cobble" in base or "deepslate" in base:
+    # Stone by another name is stone's hardness: granite at 600 ms was
+    # aimed at 650 turns on seed 10 and never went (2026-10-10)
+    if any(w in base for w in ("stone", "ore", "cobble", "deepslate", "granite",
+                               "diorite", "andesite", "tuff", "basalt",
+                               "netherrack", "calcite")):
         return 1800
     # Bamboo and cactus are a second and a half by hand
     if "bamboo" in base or "cactus" in base:
@@ -1563,6 +1567,7 @@ done, 8 lines""".splitlines()
     cs.crosshair = ("mcl_core:stone", 10, 21, 11)
     name, cmds, exp = stair_step(cs, m, 1, down=True)
     assert name == "stair_dig" and "delay 1800" in cmds, (name, cmds)
+    assert hold_for("mcl_core:granite") == 1800
     # pointed elsewhere instead: set aside, the next target aimed at
     m["aimed"] = (10, 21, 11)
     cs.crosshair = ("mcl_core:dirt", 10, 20, 11)
