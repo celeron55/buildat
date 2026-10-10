@@ -1276,25 +1276,126 @@ struct Module: public interface::Module, public luanti::Interface
 	// costs nothing: a section that has not changed is not written.
 	void on_shutdown()
 	{
-		if(!m_game_running)
+		checkpoint();
+	}
+
+	// [SAVE_CHECKPOINT] Every save_interval_s and at shutdown: the node
+	// writes, the clock, the players and the loaded sections' metadata,
+	// and the world's changed sections, as one transaction -- so a copy of
+	// the save taken at any moment has a chest's items in the chest or in
+	// the inventory, never both or neither. The writes here are collected
+	// on this thread and made by voxelworld inside its save, on its thread:
+	// a batch() held here around world->save() would hold the save's lock
+	// while voxelworld's thread waits for it.
+	sv_<std::pair<ss_, ss_>> *m_save_sink = nullptr;
+	// What the last checkpoint wrote for a loaded section's metadata, so an
+	// unchanged one is not written again; a section that unloads writes its
+	// own and leaves this
+	std::map<ss_, ss_> m_meta_written;
+	float m_checkpoint_accum = 0.0f;
+	ss_ m_players_written;
+
+	void store_set(const ss_ &key, const ss_ &value)
+	{
+		if(m_save_sink)
+			m_save_sink->push_back(std::make_pair(key, value));
+		else
+			m_store->set(key, value);
+	}
+
+	void checkpoint()
+	{
+		if(!m_game_running || !m_store)
 			return;
+		const int64_t t0 = interface::os::time_us();
 		flush_node_writes();
+		sv_<std::pair<ss_, ss_>> writes;
+		m_save_sink = &writes;
 		save_clock();
-		save_loaded_sections_meta();
 		save_players();
+		copy_loaded_meta();
+		m_save_sink = nullptr;
+		const int64_t t1 = interface::os::time_us();
+		storage::Store *store = m_store;
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
-			world->save();
+			world->save([&](){
+				for(const auto &w : writes)
+					store->set(w.first, w.second);
+			});
 		});
+		const int64_t t2 = interface::os::time_us();
+		if(t2 - t0 > 100000)
+			log_w(MODULE, "checkpoint: %i ms (%i ms ours, %zu writes)",
+					(int)((t2 - t0) / 1000), (int)((t1 - t0) / 1000),
+					writes.size());
+		else
+			log_v(MODULE, "checkpoint: %i ms (%i ms ours, %zu writes)",
+					(int)((t2 - t0) / 1000), (int)((t1 - t0) / 1000),
+					writes.size());
+	}
+
+	// The metadata of every loaded section, left in memory (unlike
+	// save_section_meta(), which is the section leaving)
+	void copy_loaded_meta()
+	{
+		if(!m_store || !m_lua || !m_scene || m_section_size.getX() <= 0)
+			return;
+		sv_<pv::Vector3DInt16> sections;
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
+			sections = world->get_loaded_sections();
+		});
+		std::map<ss_, ss_> now;
+		{
+			interface::MutexScope ms(m_lua_mutex);
+			lua_State *L = m_lua;
+			int base = lua_gettop(L);
+			lua_getglobal(L, "core");
+			lua_getfield(L, -1, "__regroup_node_meta");
+			lua_pushinteger(L, m_section_size.getX());
+			if(lua_pcall(L, 1, 2, 0) != 0){
+				log_w(MODULE, "__regroup_node_meta(): %s",
+						lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+				lua_settop(L, base);
+				return;
+			}
+			if(lua_istable(L, -2)){
+				const size_t count = lua_objlen(L, -2);
+				for(size_t i = 1; i + 1 <= count; i += 2){
+					size_t kl = 0, vl = 0;
+					lua_rawgeti(L, -2, (int)i);
+					const char *k = lua_tolstring(L, -1, &kl);
+					lua_rawgeti(L, -3, (int)i + 1);
+					const char *v = lua_tolstring(L, -1, &vl);
+					now["node_meta/"+ss_(k ? k : "", kl)] = ss_(v ? v : "", vl);
+					lua_pop(L, 2);
+				}
+			}
+			lua_settop(L, base);
+		}
+		for(const pv::Vector3DInt16 &section_p : sections){
+			const ss_ key = section_meta_key(section_p);
+			auto it = now.find(key);
+			const ss_ data = it == now.end() ? ss_() : it->second;
+			auto was = m_meta_written.find(key);
+			if(was != m_meta_written.end() && was->second == data)
+				continue;
+			// Not known yet and nothing here: clear only what the save has
+			ss_ old;
+			if(was == m_meta_written.end() && data.empty() &&
+					(!m_store->get(key, old) || old.empty())){
+				m_meta_written[key] = "";
+				continue;
+			}
+			store_set(key, data);
+			m_meta_written[key] = data;
+		}
 	}
 
 	// The clock, in the save's object store beside the map: a world put down
 	// at dusk is picked up at dusk. Luanti keeps the same three numbers in
 	// its env_meta.txt.
-	//
-	// simplified: written at shutdown and not before, so a server that is
-	// killed loses the day it was on. Luanti writes its own every 5.3
-	// seconds with the map; the upgrade path is to do the same, once
-	// anything else here is worth a periodic checkpoint.
+	// Written with every checkpoint ([SAVE_CHECKPOINT]), as Luanti writes
+	// its own with the map.
 	// The world's seed, which a mapgen is a function of. Luanti keeps it in
 	// map_meta.txt and makes one up when a world is created; here it is in
 	// the save beside the clock, and the importer takes the imported world's
@@ -1488,6 +1589,7 @@ struct Module: public interface::Module, public luanti::Interface
 		const int n = (int)lua_tonumber(L, -1);
 		lua_settop(L, base);
 		const ss_ key = section_meta_key(section_p);
+		m_meta_written.erase(key);
 		if(n == 0){
 			// Nothing there, and what the save holds is older than that
 			ss_ old;
@@ -1533,22 +1635,6 @@ struct Module: public interface::Module, public luanti::Interface
 		if(!m_game_running || event.scene != m_scene)
 			return;
 		save_section_meta(event.section_p);
-	}
-
-	// Every section that is loaded, which is what a shutdown owes the save:
-	// the ones that have already gone wrote themselves out as they went.
-	void save_loaded_sections_meta()
-	{
-		if(!m_store || !m_scene)
-			return;
-		sv_<pv::Vector3DInt16> sections;
-		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
-			sections = world->get_loaded_sections();
-		});
-		for(const pv::Vector3DInt16 &section_p : sections)
-			save_section_meta(section_p);
-		log_v(MODULE, "Node metadata written for %zu sections",
-				sections.size());
 	}
 
 	// Everything the Lua half holds, grouped by the section each position
@@ -1663,7 +1749,10 @@ struct Module: public interface::Module, public luanti::Interface
 		if(n == 0 && !m_had_players)
 			return; // Nothing to write and nothing there to clear
 		m_had_players = (n != 0);
-		m_store->set("players", data);
+		if(data == m_players_written)
+			return; // A checkpoint with nobody moving
+		m_players_written = data;
+		store_set("players", data);
 		log_v(MODULE, "Players written to the save: %i", n);
 	}
 
@@ -1715,7 +1804,7 @@ struct Module: public interface::Module, public luanti::Interface
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar((uint8_t)1, time_of_day, game_time, day_count);
 		}
-		m_store->set("clock", os.str());
+		store_set("clock", os.str());
 		log_v(MODULE, "Clock written to the save: day %i, time %.4f, "
 				"%.0f seconds played", (int)day_count, time_of_day, game_time);
 	}
@@ -1794,6 +1883,13 @@ struct Module: public interface::Module, public luanti::Interface
 		if(m_time_accum >= TIME_INTERVAL_S){
 			m_time_accum = 0.0f;
 			run_chunk_string("core.__send_time()", "send_time");
+		}
+		const double interval = atof(m_server->get_config().get<ss_>(
+				"save_interval_s").c_str());
+		m_checkpoint_accum += dtime;
+		if(interval > 0 && m_checkpoint_accum >= interval){
+			m_checkpoint_accum = 0.0f;
+			checkpoint();
 		}
 	}
 
@@ -2477,6 +2573,9 @@ struct Module: public interface::Module, public luanti::Interface
 			// doc/plan/world_persistence_plan.md.
 			world->set_name_aliases(node_aliases());
 			world->set_save(m_save, "main");
+			// [SAVE_CHECKPOINT] Nothing to write yet; says this game
+			// checkpoints itself, so voxelworld does not on its own
+			world->save([](){});
 			m_section_size = world->get_section_size_voxels();
 		});
 		// The startup tables are known once the registry is built, and they

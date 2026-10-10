@@ -475,8 +475,14 @@
 						lua_type(L, -1) == LUA_TSTRING){
 					const char *from = lua_tostring(L, -2);
 					const char *to = lua_tostring(L, -1);
+					// A name that is registered is that node, alias or not,
+					// as in Luanti ([SAVE_CHECKPOINT]: VoxeLibre has one,
+					// and it cost every section saved a recompression)
+					lua_getfield(L, -3, from);
+					const bool registered = !lua_isnil(L, -1);
+					lua_pop(L, 1);
 					lua_getfield(L, -3, to);
-					if(!lua_isnil(L, -1))
+					if(!registered && !lua_isnil(L, -1))
 						out[from] = to;
 					lua_pop(L, 1);
 				}

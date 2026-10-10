@@ -177,6 +177,11 @@ namespace voxelworld
 		// Happens by itself when a section is unloaded and at shutdown, so
 		// this is for a game that wants a checkpoint of its own.
 		virtual void save() = 0;
+		// [SAVE_CHECKPOINT] The same, with the game's own writes (also(),
+		// called on voxelworld's thread) in one transaction with the
+		// world's. A game that calls this checkpoints itself; one that does
+		// not has the world saved every save_interval_s by voxelworld.
+		virtual void save(std::function<void()> also) = 0;
 
 		// Voxel types the save holds that this game does not register. They
 		// are kept, drawn with the definitions the save carries and tinted,

@@ -44,6 +44,8 @@ Config::Config()
 	// (voxels) and --max-world-mb; "0" is none
 	set_default("max_players", "0");
 	set_default("max_view_range", "0");
+	// [SAVE_CHECKPOINT]: seconds between writes of a running world, 0 none
+	set_default("save_interval_s", "5.3");
 	set_default("max_world_mb", "0");
 	// The web client's build ([WEB_CLIENT]); empty is <share_path>/web
 	set_default("web_client_path", "");

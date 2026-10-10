@@ -413,6 +413,28 @@ struct CInstance: public voxelworld::Instance
 	ss_ m_save_path;
 	bool m_world_full = false;
 	int64_t m_world_measured_us = 0;
+	// [SAVE_CHECKPOINT]: whether the game saves with its own writes (see
+	// save(also)), and when this saved the world by itself last
+	bool m_game_checkpoints = false;
+	int64_t m_checkpoint_us = 0;
+	// What a save's sections cost, by part: waiting for the scene, copying
+	// the chunks out of it, renumbering them, and the rows written; the
+	// commit is the checkpoint's own. Reset when a checkpoint begins.
+	struct SaveTimes {
+		int64_t wait = 0, copy = 0, compress = 0, write = 0;
+		size_t sections = 0, bytes = 0;
+	} m_save_times;
+	ss_ save_times(int64_t commit_us)
+	{
+		char buf[160];
+		snprintf(buf, sizeof buf, "%zu sections, %zu kB; waiting for the "
+				"scene %i ms, copy %i, renumber %i, rows %i, commit %i",
+				m_save_times.sections, m_save_times.bytes / 1024,
+				(int)(m_save_times.wait / 1000), (int)(m_save_times.copy / 1000),
+				(int)(m_save_times.compress / 1000),
+				(int)(m_save_times.write / 1000), (int)(commit_us / 1000));
+		return buf;
+	}
 	// The save's voxel name table: save id -> name, append-only and never
 	// renumbered. The running game owns the numbering and the save stores
 	// names -- the game is the only thing that can decide whether a name
@@ -970,6 +992,7 @@ struct CInstance: public voxelworld::Instance
 
 		// Send updated voxel registry if needed
 		send_voxel_registry_if_dirty();
+		checkpoint_if_due();
 		const int64_t tick_us = interface::os::time_us() - tick_t0;
 		if(tick_us > 100000)
 			log_w(MODULE, "on_tick(): %i ms -- announce %i, initial %i, "
@@ -980,6 +1003,40 @@ struct CInstance: public voxelworld::Instance
 					physics_nodes, (int)(t_unload / 1000),
 					(int)((tick_us - t_announce - t_initial - t_stream -
 					t_scene - t_unload) / 1000));
+	}
+
+	// [SAVE_CHECKPOINT] A hard stop loses what is not on disk, and a section
+	// is written when it unloads: where players are, never. A game that
+	// checkpoints itself (luanti) is left to it.
+	void checkpoint_if_due()
+	{
+		if(m_game_checkpoints || !m_store)
+			return;
+		const double interval = atof(m_server->get_config().get<ss_>(
+				"save_interval_s").c_str());
+		const int64_t now = interface::os::time_us();
+		if(interval <= 0 || now - m_checkpoint_us < (int64_t)(interval * 1e6))
+			return;
+		if(m_checkpoint_us == 0){ // The first interval starts now
+			m_checkpoint_us = now;
+			return;
+		}
+		m_checkpoint_us = now;
+		storage::Store *store = m_store;
+		int64_t t_commit = 0;
+		m_save_times = SaveTimes();
+		store->batch([&](){
+			save();
+			t_commit = interface::os::time_us();
+		});
+		const int64_t end = interface::os::time_us();
+		const ss_ parts = save_times(end - t_commit);
+		if(end - now > 100000)
+			log_w(MODULE, "checkpoint: %i ms: %s", (int)((end - now) / 1000),
+					cs(parts));
+		else
+			log_v(MODULE, "checkpoint: %i ms: %s", (int)((end - now) / 1000),
+					cs(parts));
 	}
 
 	void on_peer_joined_scene(const replicate::PeerJoinedScene &event)
@@ -1461,7 +1518,10 @@ struct CInstance: public voxelworld::Instance
 		sv_<ss_> values;
 		keys.reserve(section.num_chunks);
 		values.reserve(section.num_chunks);
+		const int64_t t0 = interface::os::time_us();
+		int64_t t_in = 0;
 		main_context::access(m_server, [&](main_context::Interface *imc){
+			t_in = interface::os::time_us();
 			Scene *scene = imc->check_scene(m_scene_ref);
 			auto lc = section.contained_chunks.getLowerCorner();
 			auto uc = section.contained_chunks.getUpperCorner();
@@ -1486,6 +1546,9 @@ struct CInstance: public voxelworld::Instance
 				}
 			}
 		});
+		const int64_t t1 = interface::os::time_us();
+		m_save_times.wait += t_in - t0;
+		m_save_times.copy += t1 - t_in;
 		if(keys.empty()){
 			section.modified = false;
 			return;
@@ -1495,6 +1558,11 @@ struct CInstance: public voxelworld::Instance
 		// waiting for that
 		for(ss_ &value : values)
 			value = chunk_row(prepare_saved_chunk(value));
+		const int64_t t2 = interface::os::time_us();
+		m_save_times.compress += t2 - t1;
+		m_save_times.sections++;
+		for(const ss_ &value : values)
+			m_save_times.bytes += value.size();
 		// One transaction: a row at a time outside one is the classic slow
 		// save, and it is also what leaves half a section on disk after a
 		// crash. The name table goes in with the chunks that made it grow,
@@ -1507,6 +1575,7 @@ struct CInstance: public voxelworld::Instance
 			save_name_table();
 			save_registry();
 		});
+		m_save_times.write += interface::os::time_us() - t2;
 		section.modified = false;
 		// The save has it now, whatever the streamer was told earlier
 		m_save_misses.erase(section_key(section.section_p));
@@ -2646,6 +2715,28 @@ struct CInstance: public voxelworld::Instance
 		}
 		log_v(MODULE, "World \"%s\": saved %zu sections of %zu",
 				cs(m_world_name), n, total);
+	}
+
+	void save(std::function<void()> also)
+	{
+		m_game_checkpoints = true;
+		if(!m_store){
+			also();
+			return;
+		}
+		// save() can drop m_store (a refused save) half way
+		storage::Store *store = m_store;
+		const int64_t t0 = interface::os::time_us();
+		int64_t t_commit = 0;
+		m_save_times = SaveTimes();
+		store->batch([&](){
+			also();
+			save();
+			t_commit = interface::os::time_us();
+		});
+		const int64_t end = interface::os::time_us();
+		log_v(MODULE, "save: %i ms: %s", (int)((end - t0) / 1000),
+				cs(save_times(end - t_commit)));
 	}
 
 	void set_voxel_direct(const pv::Vector3DInt32 &p,

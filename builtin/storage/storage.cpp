@@ -150,6 +150,9 @@ struct CSave: public Save
 	// so this is the simplest thing that is correct. Recursive because
 	// batch()'s callback calls set() on the same store.
 	interface::Mutex m_mutex;
+	// batch() nests: only the outermost begins and commits, so a save made of
+	// batches (a section's) can be one transaction inside a larger one
+	int m_batch_depth = 0;
 	std::map<ss_, up_<CStore>> m_stores;
 	// The prepared statements, finalized before the connection closes
 	StmtCache m_stmts;
@@ -315,16 +318,31 @@ sv_<ss_> CStore::list(const ss_ &prefix)
 void CStore::batch(std::function<void()> writes)
 {
 	interface::MutexScope ms(m_save->m_mutex);
+	if(m_save->m_batch_depth > 0){
+		// Inside another batch: its transaction, its commit or rollback
+		m_save->m_batch_depth++;
+		try {
+			writes();
+		} catch(...){
+			m_save->m_batch_depth--;
+			throw;
+		}
+		m_save->m_batch_depth--;
+		return;
+	}
 	// IMMEDIATE takes the write lock up front rather than half way through,
 	// which is what turns a busy database into an error here instead of a
 	// rollback after the work was done
 	m_save->exec("BEGIN IMMEDIATE");
+	m_save->m_batch_depth = 1;
 	try {
 		writes();
 	} catch(...){
+		m_save->m_batch_depth = 0;
 		sqlite3_exec(m_save->m_db, "ROLLBACK", nullptr, nullptr, nullptr);
 		throw;
 	}
+	m_save->m_batch_depth = 0;
 	m_save->exec("COMMIT");
 }
 
@@ -450,6 +468,22 @@ struct Module: public interface::Module, public Interface
 		}
 		if(s->get("d", v))
 			throw Exception("storage check: a failed batch was not rolled back");
+		// Nested: one transaction, the inner's failure the outer's rollback
+		s->batch([&](){
+			s->set("e", "five");
+			other->batch([&](){ other->set("e", "five"); });
+		});
+		if(!s->get("e", v) || !other->get("e", v))
+			throw Exception("storage check: a nested batch was lost");
+		try {
+			s->batch([&](){
+				s->set("f", "six");
+				other->batch([&](){ throw Exception("deliberate"); });
+			});
+		} catch(Exception &e){
+		}
+		if(s->get("f", v))
+			throw Exception("storage check: a nested failure was not rolled back");
 
 		if(valid_name("..") || valid_name("a/b") || valid_name("") ||
 				valid_name(".hidden") || valid_name("a\\b"))

@@ -144,6 +144,17 @@ int main(int argc, char *argv[])
 			}
 			config.set(key, v);
 			take = 2;
+		} else if(ss_(argv[i]) == "--save-interval" && i + 1 < argc){
+			// [SAVE_CHECKPOINT]: seconds, 0 none
+			const ss_ v = argv[i + 1];
+			char *end = nullptr;
+			const double d = strtod(v.c_str(), &end);
+			if(v.empty() || *end || !(d >= 0) || d > 86400){
+				std::cerr<<"--save-interval takes seconds"<<std::endl;
+				return 1;
+			}
+			config.set("save_interval_s", v);
+			take = 2;
 		}
 		if(!take)
 			continue;
@@ -194,6 +205,8 @@ int main(int argc, char *argv[])
 			"  --max-view-range N   The world sent to a client, in voxels\n"
 			"  --max-world-mb N     A world's save size past which nothing\n"
 			"                       new is generated\n"
+			"  --save-interval S    Seconds between writes of a running\n"
+			"                       world (5.3; 0 only at shutdown)\n"
 			"  --unconfined         Run without the sandbox (also\n"
 			"                       BUILDAT_UNCONFINED=1): the app reaches\n"
 			"                       all of your files\n"
