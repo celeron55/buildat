@@ -484,6 +484,7 @@ function __buildat_run_served_code(code, chunkname)
 			log:warning("the error could not be shown: "..tostring(why))
 		end
 	end
+	__buildat_deliver_held_packets()
 	return status, err, retval
 end
 

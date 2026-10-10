@@ -4,6 +4,17 @@
 local log = buildat.Logger("__client/packet")
 
 local packet_subs = {}
+-- A packet that came before anything subscribed to it, {name, data, time},
+-- in order of arrival, kept for HELD_US: an app's setup packet races the
+-- engine loader's run_script of the script that subscribes to it, the two
+-- sent from separate module threads ([VOXEL_LIGHTING_CAVE]). Handed over
+-- once served code has run (__buildat_deliver_held_packets). HELD_MAX and
+-- HELD_BYTES bound them, past which a packet is dropped as it was before.
+local held = {}
+local held_bytes = 0
+local HELD_US = 10000000
+local HELD_MAX = 256
+local HELD_BYTES = 4 * 1024 * 1024
 
 -- Microseconds the packets' Lua took since the reader last took it, and
 -- the packet that took longest since then: the frame peak's "packets"
@@ -30,6 +41,17 @@ function __buildat_handle_packet(name, data)
 		return
 	end
 	local cb = packet_subs[name]
+	if not cb then
+		local now = buildat.get_time_us()
+		while held[1] and now - held[1][3] > HELD_US do
+			held_bytes = held_bytes - #held[1][2]
+			table.remove(held, 1)
+		end
+		if #held < HELD_MAX and held_bytes + #data <= HELD_BYTES then
+			table.insert(held, {name, data, now})
+			held_bytes = held_bytes + #data
+		end
+	end
 	if cb then
 		local t0 = buildat.get_time_us()
 		cb(data)
@@ -45,6 +67,29 @@ end
 -- Every handler dropped: a menu-only connection left ([MENU_CONTEXT])
 function __buildat_reset_packet_subs()
 	packet_subs = {}
+	held = {}
+	held_bytes = 0
+end
+
+-- The held packets something now subscribes to, in order; after served
+-- code has run (sandbox.lua), so a script's handler is called once the
+-- whole script has
+function __buildat_deliver_held_packets()
+	local i = 1
+	while i <= #held do
+		local name, data = held[i][1], held[i][2]
+		local cb = packet_subs[name]
+		if cb then
+			table.remove(held, i)
+			held_bytes = held_bytes - #data
+			local ok, err = pcall(cb, data)
+			if not ok then
+				log:error("held packet "..name..": "..tostring(err))
+			end
+		else
+			i = i + 1
+		end
+	end
 end
 
 function buildat.sub_packet(name, cb)
