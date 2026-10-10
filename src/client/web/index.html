@@ -57,8 +57,13 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	// [HEARTH_OPEN_HERE] #open=<a page's path>, as a web page's "in the
 	// browser" link writes it: a place for the app to go and nothing else,
 	// so only that shape is taken; the app checks it again
+	// [WEB_RELOAD_APPS] Not on a reload, the page's own or the one a
+	// return after the browser dropped it makes: the app's kept place is
+	// where the user was since
 	var open_ = null;
-	if(location.hash){
+	var nav = performance.getEntriesByType &&
+			performance.getEntriesByType('navigation')[0];
+	if(location.hash && !(nav && nav.type === 'reload')){
 		var om = /^#open=(\/(topic|t|m|p|u)\/[A-Za-z0-9_.\-\/]{1,200})$/
 				.exec(location.hash);
 		if(om)

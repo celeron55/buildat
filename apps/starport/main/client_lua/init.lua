@@ -18,6 +18,9 @@ local log = buildat.Logger("starport")
 local magic = require("buildat/extension/urho3d")
 local ui = require("buildat/extension/ui_utils")
 ui = ui.safe or ui
+-- Light enough to load again by itself when a phone's browser dropped it in
+-- the background (src/client/web/index.html, [WEB_RELOAD_APPS])
+buildat.set_reload_on_return(true)
 
 local _, accounts_err, accounts = buildat.run_script_file("accounts/accounts.lua")
 if type(accounts) ~= "table" then

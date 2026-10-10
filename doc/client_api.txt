@@ -478,7 +478,8 @@ buildat.set_reload_on_return(bool)
 - On the web client: whether a disconnect while the page was away (a phone's
   browser dropping a page in the background) reloads the page when it is in
   front again. Off by default: the page says the connection was lost and
-  offers a reconnect button. Does nothing natively.
+  offers a reconnect button. Does nothing natively. Floorplanner, Hearth,
+  Starport and Aitta turn it on.
 
 buildat.get_cache_path() -> string
 - The directory add_resource_dir() and compose_image() work under. The share

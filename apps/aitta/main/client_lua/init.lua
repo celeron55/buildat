@@ -14,6 +14,9 @@
 -- after the join, and logs each answer as "ai: <json>".
 local log = buildat.Logger("aitta")
 local magic = require("buildat/extension/urho3d")
+-- Light enough to load again by itself when a phone's browser dropped it in
+-- the background (src/client/web/index.html, [WEB_RELOAD_APPS])
+buildat.set_reload_on_return(true)
 
 local _, accounts_err, accounts = buildat.run_script_file("accounts/accounts.lua")
 if type(accounts) ~= "table" then

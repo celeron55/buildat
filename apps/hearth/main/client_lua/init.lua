@@ -25,6 +25,9 @@ end
 -- JSON out; in is buildat.parse_json
 local encode = require("buildat/extension/network").write_json
 local uistack = require("buildat/extension/uistack")
+-- Light enough to load again by itself when a phone's browser dropped it in
+-- the background (src/client/web/index.html, [WEB_RELOAD_APPS])
+buildat.set_reload_on_return(true)
 
 -- BUILDAT_HEARTH_RESUME=1 logs as a scripted client does, for its check
 local scripted = (buildat.get_env("BUILDAT_HEARTH_REQS") or "") ~= "" or
@@ -488,6 +491,10 @@ end
 
 local function back()
 	local p = table.remove(history)
+	-- The page drawn sets its own place again ([WEB_RELOAD_APPS]: Home
+	-- after a thread kept the thread)
+	place = nil
+	state_changed()
 	if p then
 		here = p
 		p()

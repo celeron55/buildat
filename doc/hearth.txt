@@ -82,7 +82,10 @@ package's (/p/<author>/<name>) or an account's (/u/<name>) page as
 /app#open=<that page's path>. The web page takes only that shape
 (/topic, /t, /m, /p or /u and up to 200 of [A-Za-z0-9_.-/]) into the
 client's BUILDAT_OPEN, and Hearth opens that page after the join, over
-home: Back goes home, and a place not there is said on home. The native
+home: Back goes home, and a place not there is said on home. A reload of
+the page leaves #open out, so the page the user was on comes back
+instead ([WEB_RELOAD_APPS]: the web client loads again by itself when a
+phone's browser dropped its connection in the background). The native
 client is not reached by these links.
 
 A topic's or a thread's name has a cyan blob after it when it was
