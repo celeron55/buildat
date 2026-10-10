@@ -11,6 +11,9 @@
 # or leaves it out. Nothing offers to show what does not suit a teen.
 # Both pages hold back what is new for an hour: the check sets that to 0
 # after seeing it hold the release back. An adult release stays off.
+# [AITTA_PAGE_TEXT]: Aitta's pages without the sandbox, signature and
+# commands sentences and the Report form's note, their footer link
+# "Manage your published apps"; the Starport's footer as it was.
 #   util/front_pages_check.sh
 set -u
 . "$(dirname "$0")/check_paths.sh"
@@ -107,7 +110,16 @@ grep -q "tester/grown" <<< "$p" && fail "Aitta's / lists an adult release"
 grep -q "<h1>tester/demo</h1>" <<< "$(page $AI/p/tester/demo)" || fail "the package's page"
 [ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$AI/p/tester/grown")" = 404 ] ||
 	fail "Aitta's /p/ shows an adult release"
-echo "ok: Aitta's / and /p/, the release's text escaped"
+for u in / /p/tester/demo; do
+	p=$(page $AI$u)
+	for x in "reaches only its own" "checks the signature before" \
+			"finds the commands" "weighs little alone"; do
+		grep -q "$x" <<< "$p" && fail "Aitta's $u still says \"$x\""
+	done
+	grep -q '<a href="/index.html">Manage your published apps</a>' <<< "$p" ||
+		fail "Aitta's $u footer"
+done
+echo "ok: Aitta's / and /p/, the release's text escaped, the shorter text"
 
 p=$(page $SP/)
 grep -q "<script>" <<< "$p" && fail "the Starport's / runs a listing's <script>"
@@ -115,6 +127,8 @@ grep -q "Shop &lt;script&gt;alert(1)&lt;/script&gt;" <<< "$p" ||
 	fail "the Starport's / does not show the listing: $p"
 grep -q "Native client only" <<< "$p" || fail "no Native client only"
 grep -q 'href="/id"' <<< "$p" || fail "no link to the ID page"
+grep -q '<a href="/index.html">Open in the Buildat client</a> (in the browser)' <<< "$p" ||
+	fail "the Starport's footer"
 grep -q "Shop &lt;" <<< "$(page "$SP/?kind=app")" || fail "?kind=app lost it"
 grep -q "Shop &lt;" <<< "$(page "$SP/?kind=world")" && fail "?kind=world kept it"
 grep -qi "adult" <<< "$p" && fail "the Starport's / offers adult listings"

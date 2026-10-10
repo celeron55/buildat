@@ -105,7 +105,10 @@ namespace interface
 		// Starport's front page): the header with the logo and the app's
 		// name, linking to /, and the way into the client under it.
 		// content is HTML, its untrusted text already through html().
-		inline ss_ page(const ss_ &title, const ss_ &name, const ss_ &content)
+		// client: the way into the client's text, "" for "Open in the
+		// Buildat client (in the browser)"
+		inline ss_ page(const ss_ &title, const ss_ &name, const ss_ &content,
+				const ss_ &client = "")
 		{
 			return "<!doctype html>\n<html lang=\"en\"><head>"
 					"<meta charset=\"utf-8\"><meta name=\"viewport\" "
@@ -113,8 +116,9 @@ namespace interface
 					html(title)+"</title><style>"+css+"</style></head><body>"
 					"<header><a class=\"brand\" href=\"/\">"+logo+html(name)+
 					"</a></header>\n"+content+"\n<p class=\"meta\">"
-					"<a href=\"/index.html\">Open in the Buildat client</a> "
-					"(in the browser) &middot; <a href=\"https://www.buildat.org/"
+					"<a href=\"/index.html\">"+(client.empty() ?
+					"Open in the Buildat client</a> (in the browser)" :
+					html(client)+"</a>")+" &middot; <a href=\"https://www.buildat.org/"
 					"\">www.buildat.org</a></p></body></html>\n";
 		}
 

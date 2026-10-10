@@ -183,6 +183,9 @@ static json::Value default_settings()
 	return s;
 }
 
+// [AITTA_PAGE_TEXT] The pages' footer link into the client
+static const char *MANAGE = "Manage your published apps";
+
 struct Upload {
 	json::Value sig;
 	ss_ author;
@@ -438,7 +441,7 @@ struct Module: public interface::Module, public moderation::Host
 			network::access(m_server, [&](network::Interface *iface){
 				iface->http_respond(r.peer, 200, "text/html; charset=utf-8",
 						interface::web_brand::page("Report - Aitta", "Aitta",
-						body), "");
+						body, MANAGE), "");
 			});
 		};
 		const ss_ net = network::address_bin(r.address);
@@ -676,7 +679,7 @@ struct Module: public interface::Module, public moderation::Host
 		const ss_ html_type = "text/html; charset=utf-8";
 		if(!m_save)
 			return send(503, html_type, interface::web_brand::page("Aitta",
-					"Aitta", "<p>Starting.</p>"));
+					"Aitta", "<p>Starting.</p>", MANAGE));
 		const json::Value all = listed_releases();
 		// Only what suits a teen, listed "page_delay" seconds (an older
 		// save has none: an hour), with no way to show more
@@ -715,7 +718,7 @@ struct Module: public interface::Module, public moderation::Host
 			if(mine.empty())
 				return send(404, html_type, interface::web_brand::page(
 						"Not found", "Aitta", "<p>No package of that name is "
-						"listed here. <a href=\"/\">The list</a>.</p>"));
+						"listed here. <a href=\"/\">The list</a>.</p>", MANAGE));
 			c = release_box(*mine[0], false);
 			if(mine.size() > 1){
 				c += "<details><summary>Older releases ("+
@@ -770,14 +773,12 @@ struct Module: public interface::Module, public moderation::Host
 			f += "</select></p><p><textarea name=\"text\" maxlength=\"2000\" "
 					"rows=\"3\" cols=\"60\" placeholder=\"What is wrong "
 					"(optional)\"></textarea></p><p><button>Send the report"
-					"</button></p><p class=\"meta\">Anonymous from here, so "
-					"it weighs little alone; the client's carries its report "
-					"key. A moderator of this Aitta decides.</p></form>\n";
+					"</button></p></form>\n";
 			return send(200, html_type, interface::web_brand::page(want+
 					" - Aitta", "Aitta", "<h1>"+html(want)+"</h1><p class=\""
 					"meta\">Every listed release, the newest first.</p>\n"+
 					(pl.empty() ? "" : "<p>"+pl+"</p>\n")+c+
-					f));
+					f, MANAGE));
 		}
 		std::set<ss_> seen;
 		for(const json::Value &rel : rels)
@@ -786,16 +787,12 @@ struct Module: public interface::Module, public moderation::Host
 		ss_ body = "<h1>Aitta</h1><p>A registry of Buildat apps and "
 				"extensions: their authors sign each release with their own "
 				"key, and Aitta lists it. A release is unreviewed until this "
-				"server's reviewers mark it reviewed. An app "
-				"runs in the server's sandbox, where it reaches only its own "
-				"saves.</p><p>To install one, open the Buildat client and "
-				"pick <b>Apps from Aitta</b>; it checks the signature before "
-				"it installs. A dedicated server's admin finds the commands "
-				"on each package's page.</p>\n";
+				"server's reviewers mark it reviewed.</p><p>To install one, "
+				"open the Buildat client and pick <b>Apps from Aitta</b>.</p>\n";
 		body += c.empty() ? "<p>Nothing is published here yet.</p>\n" :
 				"<h2>Packages</h2>\n"+c;
 		send(200, html_type, interface::web_brand::page("Aitta", "Aitta",
-				body));
+				body, MANAGE));
 	}
 
 	void http_release(const network::HttpRequest &r)
