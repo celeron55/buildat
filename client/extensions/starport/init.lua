@@ -2576,7 +2576,8 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		log:info("aitta panel: " .. p.key .. " " .. tostring(rel.version))
 		ptext(p.key, nil, 18)
 		ptext(tostring(rel.version) .. ", " .. (rel.kind == "extension" and
-				"an extension" or "an app") .. ", by " ..
+				"an extension" or "an app") .. (rel.serverless == true and
+				", runs in the browser" or "") .. ", by " ..
 				tostring(rel.author) .. "; " .. (rel.review == "reviewed" and
 				"reviewed" or "unreviewed"), DIM)
 		ptext(tostring(rel.license_code) .. " / " ..

@@ -825,6 +825,10 @@ if(BUILD_CLIENT)
 endif()
 if(BUILD_SERVER)
 	install(TARGETS ${SERVER_EXE_NAME} DESTINATION "${DST_BIN}")
+	# Aitta parses a release's client Lua with it ([AITTA_LUA51])
+	if(TARGET luac51)
+		install(TARGETS luac51 DESTINATION "${DST_BIN}")
+	endif()
 	install(DIRECTORY "${CMAKE_SOURCE_DIR}/builtin" DESTINATION "${DST_SHARE}")
 	# The font and the logo an app's HTML is served with ([HTML_BRAND],
 	# src/interface/web_brand.h), in a server build without the client too

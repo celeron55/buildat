@@ -20,10 +20,19 @@ An app's meta.json, at the app directory's root (apps/<app>/meta.json):
                                       its feedback and news go
         "changelog": "CHANGELOG.md",  optional: a file in the archive
         "kind": "app",                optional: "app" or "extension"
-        "audience": "everyone"        optional: "everyone", "teen" or
+        "audience": "everyone",       optional: "everyone", "teen" or
                                       "adult"; Aitta's page at / lists
                                       only "everyone" and "teen"
+        "serverless": true            optional: its client half runs
+                                      with no server (Play)
     }
+
+Client-side Lua (a client_lua directory's, an extension's every file)
+runs on LuaJIT natively and on Lua 5.1 on the web. Aitta parses it at
+publish with luac51 (installed beside the server) and scans it for
+LuaJIT's \x, \z and \u{ escapes: a "serverless" release that does not
+load is refused, another is listed with the problems as a warning
+(file:line each; the publishers print it).
 
 A package of kind "extension" is a client extension: init.lua at its
 root, run in the client's sandbox like extensions/ (an app's client Lua
@@ -135,7 +144,8 @@ the one who acted decides. A delisted release installed in a client is noted on 
 when the launcher next fetches that Aitta's list.
 
     GET  /api/aitta/list                      the listed releases, JSON, and
-                                              the delisted ones with why
+                                              the delisted ones with why;
+                                              ?serverless=1 those only
     POST /api/aitta/report                    {release, reason, text, key}
     POST /api/aitta/report_status             {key, receipts}: outcomes
     GET  /api/aitta/archive/<sha256>.zip|.sig a listed release's files
@@ -148,6 +158,13 @@ when the launcher next fetches that Aitta's list.
                                               folded), then Install: "On
                                               the client" and "On a
                                               dedicated server", folded
+
+Every API answer has Access-Control-Allow-Origin: *, so a play page on
+another origin fetches the list and the archives. A serverless release
+says "runs in the browser" on the pages; with the setting "play_url"
+(e.g. "https://play.buildat.org"; "" by default, no link) its box on /,
+and its package page under the heading and first under Install, link
+"Play in the browser" to <play_url>/#run=<author>/<name>.
 
 The HTTP requests are limited per network (an IPv4 /24, an IPv6 /64):
 240 reads and 30 uploads a minute. The web client of an Aitta server is

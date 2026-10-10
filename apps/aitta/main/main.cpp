@@ -53,6 +53,7 @@
 #include "core/log.h"
 #include "core/json.h"
 #include "interface/os.h"
+#include "interface/process.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/server_config.h"
@@ -154,6 +155,10 @@ static json::Value default_settings()
 	// [AITTA_SERVE] This Aitta's address as its pages give it in the
 	// commands; "" for the request's own host
 	s.set("public_url", "");
+	// [AITTA_SERVERLESS] The play server's page a serverless package's
+	// "Play in the browser" opens, <play_url>/#run=<author>/<name>; ""
+	// for no link
+	s.set("play_url", "");
 	// [AITTA_REPORTS] What a report weighs: anonymous, and with the
 	// client's report key (times its record of upheld and rejected ones).
 	// simplified: a Starport ID's standing is not asked; a key is a key
@@ -373,7 +378,16 @@ struct Module: public interface::Module, public moderation::Host
 	{
 		json::Value v = json::object();
 		v.set("ok", true);
-		v.set("releases", listed_releases());
+		// [AITTA_SERVERLESS] ?serverless=1: those only, for a play page
+		json::Value list = listed_releases();
+		if(r.param("serverless") == "1"){
+			json::Value only = json::array();
+			for(unsigned i = 0; i < list.size(); i++)
+				if(list.at(i).get("serverless").is_true())
+					only.append(list.at(i));
+			list = only;
+		}
+		v.set("releases", list);
 		// [AITTA_REPORTS] And what is out of it, with why: a client notes
 		// it on the tile of one it has installed
 		json::Value out = json::array();
@@ -558,7 +572,18 @@ struct Module: public interface::Module, public moderation::Host
 		return b;
 	}
 
-	static ss_ release_box(const json::Value &rel, bool latest)
+	// play: the play page's link for a serverless release, "" for none
+	static ss_ play_link(const json::Value &rel, const ss_ &play)
+	{
+		using interface::web_brand::html;
+		if(play.empty() || !rel.get("serverless").is_true())
+			return "";
+		return "<a href=\""+html(play)+"/#run="+html(jstr(rel, "author")+"/"+
+				jstr(rel, "name"))+"\">Play in the browser</a>";
+	}
+
+	static ss_ release_box(const json::Value &rel, bool latest,
+			const ss_ &play = "")
 	{
 		using interface::web_brand::html;
 		const ss_ pkg = jstr(rel, "author")+"/"+jstr(rel, "name");
@@ -567,7 +592,8 @@ struct Module: public interface::Module, public moderation::Host
 		ss_ b = "<div class=\"box\"><b>"+(latest ? "<a href=\"/p/"+html(pkg)+
 				"\">"+html(pkg)+"</a>" : html(pkg))+"</b> "+
 				html(jstr(rel, "version"))+" <span class=\"meta\">"+
-				html(jstr(rel, "kind"))+", for "+html(jstr(rel, "audience"))+
+				html(jstr(rel, "kind"))+(rel.get("serverless").is_true() ?
+				", runs in the browser" : "")+", for "+html(jstr(rel, "audience"))+
 				", "+date((int64_t)rel.get("time")
 				.as_number())+", "+(size < 1000 ? itos(size)+" bytes" : size < 1000000 ?
 				itos(size / 1000)+" kB" :
@@ -580,6 +606,8 @@ struct Module: public interface::Module, public moderation::Host
 				html(jstr(rel, "license_media"))+"</span><br>"
 				"<a href=\"/api/aitta/archive/"+html(sha)+".zip\">.zip</a> "
 				"<a href=\"/api/aitta/archive/"+html(sha)+".sig\">.sig</a>";
+		if(!play_link(rel, play).empty())
+			b += " "+play_link(rel, play);
 		// Its discussion at its home Hearth, as the client's "Discuss"
 		const ss_ home = jstr(rel, "home_hearth");
 		if(home.compare(0, 8, "https://") == 0 ||
@@ -629,6 +657,10 @@ struct Module: public interface::Module, public moderation::Host
 		};
 		using interface::web_brand::html;
 		ss_ c;
+		ss_ play = setting("play_url").is_string() ?
+				setting("play_url").as_string() : "";
+		while(!play.empty() && play.back() == '/')
+			play.pop_back();
 		if(r.path.compare(0, 3, "/p/") == 0){
 			const ss_ want = r.path.substr(3);
 			// [AITTA_INSTALL_HELP] The newest, the rest folded
@@ -660,7 +692,9 @@ struct Module: public interface::Module, public moderation::Host
 				vers += "bin/buildat aitta install "+self+" "+want+"@"+
 						jstr(*rel, "version")+" <user dir>\n";
 			const ss_ name = jstr(*mine[0], "name");
-			c += "<h2>Install</h2>\n<details><summary>On the client</summary>"
+			const ss_ pl = play_link(*mine[0], play);
+			c += "<h2>Install</h2>\n"+(pl.empty() ? "" : "<p>"+pl+"</p>")+
+					"<details><summary>On the client</summary>"
 					"<ol><li>In the Buildat client, open <b>Apps from Aitta"
 					"</b>.</li><li>If this Aitta, <code>"+html(self)+"</code>, "
 					"is not one of the client's Aittas, add it in the "
@@ -703,13 +737,14 @@ struct Module: public interface::Module, public moderation::Host
 					"key. A moderator of this Aitta decides.</p></form>\n";
 			return send(200, html_type, interface::web_brand::page(want+
 					" - Aitta", "Aitta", "<h1>"+html(want)+"</h1><p class=\""
-					"meta\">Every listed release, the newest first.</p>\n"+c+
+					"meta\">Every listed release, the newest first.</p>\n"+
+					(pl.empty() ? "" : "<p>"+pl+"</p>\n")+c+
 					f));
 		}
 		std::set<ss_> seen;
 		for(const json::Value &rel : rels)
 			if(seen.insert(pkg(rel)).second)
-				c += release_box(rel, true);
+				c += release_box(rel, true, play);
 		ss_ body = "<h1>Aitta</h1><p>A registry of Buildat apps and "
 				"extensions: their authors sign each release with their own "
 				"key, and Aitta lists it. A release is unreviewed until this "
@@ -823,6 +858,71 @@ struct Module: public interface::Module, public moderation::Host
 		ok(r);
 	}
 
+	// [AITTA_LUA51] What of a release's client-side Lua (a client_lua
+	// directory's, or an extension's every file) the web client's Lua 5.1
+	// will not load: luac51's parse error and LuaJIT's \x, \z and \u{
+	// escapes, "file:line: why" a line each; "" when it all loads.
+	// simplified: luac51 stops at the first file that does not parse
+	ss_ lua51_problems(const ss_ &dir, bool extension)
+	{
+		sv_<ss_> files;
+		for(const ss_ &f : interface::aitta::package_files(dir))
+			if(f.size() > 4 && f.compare(f.size() - 4, 4, ".lua") == 0 &&
+					(extension || ("/"+f).find("/client_lua/") != ss_::npos))
+				files.push_back(f);
+		ss_ out;
+		for(const ss_ &f : files){
+			const ss_ t = read_file(dir+"/"+f);
+			int line = 1;
+			for(size_t i = 0; i + 1 < t.size(); i++){
+				if(t[i] == '\n')
+					line++;
+				if(t[i] != '\\')
+					continue;
+				const char c = t[++i];
+				if(c == 'z' || (c == 'u' && i + 1 < t.size() && t[i + 1] == '{') ||
+						(c == 'x' && i + 1 < t.size() && isxdigit((unsigned char)t[i + 1])))
+					out += f+":"+itos(line)+": \\"+ss_(1, c)+" is LuaJIT's escape; "
+							"Lua 5.1 reads it as the letter\n";
+				if(c == '\n')
+					line++;
+			}
+		}
+		const ss_ luac = interface::os::get_sibling_exe_path("luac51");
+		if(files.empty() || !interface::fs::path_exists(luac))
+			return out;
+		// Numbered copies: no name the package chose reaches the shell
+		const ss_ d = dir+".lua51";
+		interface::fs::create_directories(d);
+		// Short names, from inside: luac cuts a long one to "...<end>"
+		ss_ cmd = "cd '"+d+"' && '"+luac+"' -p";
+		for(size_t i = 0; i < files.size(); i++){
+			write_file(d+"/"+itos((int64_t)i)+".lua", read_file(dir+"/"+files[i]));
+			cmd += " "+itos((int64_t)i)+".lua";
+		}
+		interface::process::ExecOptions o;
+		o.output_path = d+"/out";
+		const bool parsed = luac.find('\'') == ss_::npos &&
+				d.find('\'') == ss_::npos ?
+				interface::process::shell_exec(cmd, o) == 0 : true;
+		ss_ said = parsed ? "" : read_file(o.output_path).substr(0, 4096);
+		interface::fs::remove_all(d);
+		if(parsed)
+			return out;
+		// "<luac>: <n>.lua:<line>: <why>" to "<file>:<line>: <why>"
+		const size_t at = said.find(luac+": ");
+		if(at != ss_::npos){
+			said = said.substr(at + luac.size() + 2);
+			const size_t dot = said.find(".lua");
+			const size_t n = (size_t)atoi(said.c_str());
+			if(dot != ss_::npos && n < files.size())
+				said = files[n]+said.substr(dot + 4);
+		}
+		while(!said.empty() && (said.back() == '\n' || said.back() == '\r'))
+			said.pop_back();
+		return out+said+"\n";
+	}
+
 	void http_upload_end(const network::HttpRequest &r)
 	{
 		const ss_ sha = r.param("sha256");
@@ -860,6 +960,10 @@ struct Module: public interface::Module, public moderation::Host
 		if(!jstr(m, "changelog").empty() && changelog_there)
 			changelog = read_file(dir+"/"+jstr(m, "changelog")).substr(0,
 					64 * 1024);
+		// [AITTA_SERVERLESS] A serverless package's client Lua must load on
+		// the web; another's is only warned of
+		const ss_ lua51 = m.is_object() ? lua51_problems(dir,
+				interface::aitta::kind_of(m) == "extension") : "";
 		interface::fs::remove_all(dir);
 		auto drop = [&](const ss_ &why){
 			interface::fs::remove_all(zip);
@@ -887,6 +991,9 @@ struct Module: public interface::Module, public moderation::Host
 					"here: see your statements on Aitta's page");
 		if(!load("releases", id).is_undefined())
 			return drop(id+" is here already");
+		if(m.get("serverless").as_boolean() && !lua51.empty())
+			return drop("\"serverless\": the web client's Lua 5.1 cannot "
+					"load this:\n"+lua51);
 		if(!interface::fs::rename(zip, m_archives+"/"+sha+".zip") ||
 				!write_file(m_archives+"/"+sha+".sig", u.sig.stringify()+"\n"))
 			return drop("cannot store the archive");
@@ -920,7 +1027,13 @@ struct Module: public interface::Module, public moderation::Host
 		}
 		log_i(MODULE, "Listed %s (%zu bytes) from %s", cs(id), u.size,
 				cs(r.address));
-		ok(r, id);
+		if(lua51.empty())
+			return ok(r, id);
+		json::Value v = json::object();
+		v.set("ok", true);
+		v.set("result", id);
+		v.set("warning", "The web client's Lua 5.1 cannot load this:\n"+lua51);
+		respond(r, v);
 	}
 
 	// "GPL-3.0-only", "GPL-3.0-or-later" and "GPL-3.0+" are GPL-3.0's

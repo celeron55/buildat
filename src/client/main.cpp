@@ -126,6 +126,8 @@ static int aitta_main(int argc, char *argv[])
 					"application/octet-stream");
 			printf("listed: %s\n", v.get("result").is_string() ?
 					v.get("result").as_cstring() : "?");
+			if(v.get("warning").is_string())
+				printf("warning: %s", v.get("warning").as_cstring());
 			return 0;
 		}
 		if(verb == "install" && argc == 4){

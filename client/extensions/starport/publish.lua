@@ -341,7 +341,7 @@ local function upload(url, zip_path, done)
 	local function part(at)
 		if at >= #zip then
 			return call("upload_end?sha256=" .. sha, "", function(v)
-				done(tostring(v.result))
+				done(tostring(v.result), nil, v.warning and tostring(v.warning))
 			end)
 		end
 		call("upload_part?sha256=" .. sha .. "&offset=" .. at,
@@ -486,12 +486,13 @@ page_publish = function(message)
 		end
 		result.text = "Packed " .. zip .. "; uploading to " .. url .. "..."
 		result.color = DIM
-		upload(url, zip, function(id, why)
+		upload(url, zip, function(id, why, warning)
 			st.result_ok, st.raise = id ~= nil, false
 			if id then
 				st.result = "Published " .. id .. " on " .. url .. ". It is " ..
 						"listed as unreviewed, under Apps from Aitta" ..
-						" (an update waits out the Aitta's update delay)."
+						" (an update waits out the Aitta's update delay)." ..
+						(warning and "\n" .. warning or "")
 			elseif tostring(why):find("here already", 1, true) then
 				st.result = tostring(m.version) .. " is already published: " ..
 						"raise the version"
