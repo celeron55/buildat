@@ -37,7 +37,7 @@ def write(*cmds):
         w.write(c + "\n")
     w.flush()
 UI = re.compile(r'ui\s+(\w+) at (-?\d+),(-?\d+) size (\d+)x(\d+)'
-                r'(?: text "(.*?)")?(?: image "(.*?)")?(?: (hidden))?$')
+                r'(?: text "(.*?)")?(?: cursor \d+)?(?: selection \S+)?(?: image "(.*?)")?(?: (hidden))?$')
 n = 0
 def scan():
     global seen, n
