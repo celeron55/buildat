@@ -942,9 +942,7 @@ struct Module: public interface::Module, public Interface
 		}
 		if(term.first > 0){
 			char buf[40];
-			const time_t t = term.first;
-			struct tm tm_;
-			gmtime_r(&t, &tm_);
+			const struct tm tm_ = interface::os::utc_tm(term.first);
 			strftime(buf, sizeof buf, " until %Y-%m-%d %H:%M UTC", &tm_);
 			why += buf;
 		}
