@@ -38,6 +38,8 @@ Config::Config()
 	// The launcher's token for its own client, from BUILDAT_OWNER_TOKEN;
 	// see builtin/accounts. Empty for a server nobody launched.
 	set_default("owner_token", "");
+	// <user>/first_admin's line, read by main() ([FIRST_ADMIN])
+	set_default("first_admin", "");
 	// The web client's build ([WEB_CLIENT]); empty is <share_path>/web
 	set_default("web_client_path", "");
 	// Whose X-Forwarded-For is believed for a WebSocket client's address

@@ -338,6 +338,21 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 		interface::fs::migrate_user_apps(config.get<ss_>("user_path"));
+		// [FIRST_ADMIN]: the admin's file <user>/first_admin, one line, read
+		// here, where the box does not hide the user path's top level, and
+		// removed, as it can hold a password; the accounts module applies it
+		// to a server with no admin
+		const ss_ path = config.get<ss_>("user_path")+"/first_admin";
+		std::ifstream f(path);
+		ss_ line;
+		if(std::getline(f, line)){
+			f.close();
+			if(!line.empty() && line.back() == '\r')
+				line.pop_back();
+			config.set("first_admin", line);
+			if(remove(path.c_str()) != 0)
+				log_w(MODULE, "%s read; it could not be removed", cs(path));
+		}
 	}
 
 	if(module_path.empty()){

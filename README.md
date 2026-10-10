@@ -226,6 +226,13 @@ hears under "On this network". `--compile-only` compiles and loads the
 app's modules and exits, 1 naming the module that failed: for a run whose
 clock a first compile would eat.
 
+A server with no admin logs a setup code, and the first to join with it
+becomes the admin. A script that makes a server names the admin instead
+in `<user>/first_admin`, one line, read at the next start and removed:
+`name <name> <password>` makes that account the admin, and `code <code>`
+(8 or more characters) is the setup code in place of the log's, for a
+Starport ID's join too. On a server that has an admin it is ignored.
+
 On Linux the server confines itself before it loads an app (Landlock and
 seccomp): the app writes `<user>/apps/<app>`, its own `<user>/shared/<app>`
 and its own cache, reads the install and the other apps' shared

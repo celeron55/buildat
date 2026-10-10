@@ -1132,7 +1132,43 @@ struct Module: public interface::Module, public Interface
 			m_access.open_registration = m_launched;
 			save_access();
 		}
+		apply_first_admin();
 		update_setup_code();
+	}
+
+	// [FIRST_ADMIN]: <user>/first_admin's line, for a server a script
+	// makes. "name <name> <password>": that account, made or its password
+	// set, is the admin; "code <code>": the setup code is the script's own
+	// and not the log's, which a Starport ID's join takes too.
+	// simplified: no Starport ID named outright -- its sub is per fleet
+	// and the operator has it only after a join; the code covers it
+	void apply_first_admin()
+	{
+		const ss_ line = m_server->get_config().get<ss_>("first_admin");
+		if(line.empty())
+			return;
+		if(admin_count() > 0){
+			log_w(MODULE, "first_admin ignored: the server has an admin");
+			return;
+		}
+		std::istringstream is(line);
+		ss_ kind, arg, rest;
+		is >> kind >> arg;
+		std::getline(is >> std::ws, rest);
+		if(kind == "name" && valid_name(arg) && rest.size() >= MIN_PASSWORD &&
+				rest.size() <= 100){
+			set_account(arg, new_account(rest, {"admin"}));
+			log_i(MODULE, "first_admin: %s is the admin", cs(arg));
+		} else if(kind == "code" && arg.size() >= 8 && arg.size() <= 100 &&
+				rest.empty()){
+			m_setup_code = upper(arg);
+			log_w(MODULE, "The server has no admin. The first to join with "
+					"the setup code from first_admin becomes it.");
+		} else {
+			log_e(MODULE, "first_admin: expected \"name <name> <password of "
+					"%i to 100 characters>\" or \"code <8 to 100 characters>\"",
+					(int)MIN_PASSWORD);
+		}
 	}
 
 	int admin_count()

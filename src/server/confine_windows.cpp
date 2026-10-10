@@ -26,10 +26,12 @@
 namespace server {
 
 // The keys the parent settles and the child is handed, since the child
-// cannot write the files detecting them writes ("write.test")
+// cannot write the files detecting them writes ("write.test"), nor read
+// the user path's top level (first_admin)
 static const char *PATH_KEYS[] = {"share_path", "interface_path",
 	"urho3d_path", "compiler_command", "user_path", "cache_path",
-	"rccpp_build_path", "web_client_path", "root_path", "log_path", nullptr};
+	"rccpp_build_path", "web_client_path", "root_path", "log_path",
+	"first_admin", nullptr};
 
 static std::wstring wide(const ss_ &s)
 {
