@@ -18,7 +18,27 @@ namespace fs {
 
 bool rename(const ss_ &from, const ss_ &to)
 {
+#ifdef _WIN32
+	// std::rename there refuses an existing target
+	return MoveFileExA(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+#else
 	return std::rename(from.c_str(), to.c_str()) == 0;
+#endif
+}
+
+bool write_file(const ss_ &path, const ss_ &data)
+{
+	const ss_ tmp = path+".tmp";
+	{
+		std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+		f<<data;
+		f.close();
+		if(!f.good()){
+			std::remove(tmp.c_str());
+			return false;
+		}
+	}
+	return rename(tmp, path);
 }
 
 // [PROCESS_SANDBOX]: <user>/luanti was a family's directory that every

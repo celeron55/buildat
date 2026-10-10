@@ -233,6 +233,18 @@ in `<user>/first_admin`, one line, read at the next start and removed:
 (8 or more characters) is the setup code in place of the log's, for a
 Starport ID's join too. On a server that has an admin it is ignored.
 
+A server's user directory (`-D`) is the whole of it: saves, accounts,
+the Starport listing's secret, installed Aitta apps. It holds no absolute
+paths, so a copy runs on another machine as it is (the old one stopped,
+or both announce the same listing). Stopped, `cp -a` or a zip copies it.
+Running: write an empty `<user>/apps/<app>/save_now`; the server saves
+what its games hold and removes the file, and a filesystem or VM
+snapshot taken after it loses nothing. A plain copy of a running server
+can still catch a save's SQLite database apart from its `-wal`; stop it
+for that. The secrets in it: `apps/<app>/saves/_server` (password
+hashes, TOTP secrets, the SMTP password), `starport_state.json` and
+`starport_claim.txt` (the listing), `health_token.txt`.
+
 On Linux the server confines itself before it loads an app (Landlock and
 seccomp): the app writes `<user>/apps/<app>`, its own `<user>/shared/<app>`
 and its own cache, reads the install and the other apps' shared

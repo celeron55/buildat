@@ -338,13 +338,27 @@ function core.urlencode(str)
 	end))
 end
 
+-- Whole or not at all, as Luanti's: beside as .tmp, then renamed over it
+-- ([USER_DIR_COPY]; mod storage is written on every set)
 function core.safe_file_write(path, content)
-	local f = io.open(path, "wb")
+	local tmp = path .. ".tmp"
+	local f = io.open(tmp, "wb")
 	if not f then
 		return false
 	end
-	f:write(content)
+	local ok = f:write(content)
 	f:close()
+	if not ok then
+		os.remove(tmp)
+		return false
+	end
+	if not os.rename(tmp, path) then
+		-- Windows renames over nothing
+		os.remove(path)
+		if not os.rename(tmp, path) then
+			return false
+		end
+	end
 	return true
 end
 

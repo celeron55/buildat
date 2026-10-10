@@ -464,6 +464,14 @@ int main(int argc, char *argv[])
 		uint64_t next_tick_us = get_timeofday_us();
 		uint64_t t_per_tick = 1000000 / 30; // Same as physics FPS
 		long long sim_offset_s = 0;
+		// **Save now** ([USER_DIR_COPY]): <user>/apps/<app>/save_now, looked
+		// for once a second (in the app's directory, which the box reads):
+		// core:save to every module, synchronously, and then the file
+		// removed -- gone, everything a game holds is on disk, and a
+		// snapshot of the user directory loses nothing
+		const ss_ save_now_path = config.get<ss_>("user_path")+"/apps/"+
+				server::app_of(module_path)+"/save_now";
+		uint64_t next_save_look_us = 0;
 
 		for(;;){
 			if(g_shutdown_signal != 0){
@@ -504,6 +512,16 @@ int main(int argc, char *argv[])
 				interface::Event event("core:tick",
 						new interface::TickEvent(t_per_tick / 1e6));
 				state->emit_event(std::move(event));
+				if(current_us >= next_save_look_us){
+					next_save_look_us = current_us + 1000000;
+					if(interface::fs::path_exists(save_now_path)){
+						log_i(MODULE, "save_now: saving");
+						state->emit_event_synchronously(
+								interface::Event("core:save"));
+						::remove(save_now_path.c_str());
+						log_i(MODULE, "save_now: saved");
+					}
+				}
 			}
 
 			if(state->is_shutdown_requested(&exit_status, &shutdown_reason))

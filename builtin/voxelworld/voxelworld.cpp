@@ -3763,6 +3763,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:shutdown"));
+		// [USER_DIR_COPY] An operator's save_now: what shutdown saves
+		m_server->sub_event(this, Event::t("core:save"));
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("replicate:peer_joined_scene"));
@@ -3790,6 +3792,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_VOIDN("core:unload", on_unload)
 		EVENT_VOIDN("core:shutdown", on_shutdown)
+		EVENT_VOIDN("core:save", on_shutdown)
 		EVENT_VOIDN("core:continue", on_continue)
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("replicate:peer_joined_scene", on_peer_joined_scene,

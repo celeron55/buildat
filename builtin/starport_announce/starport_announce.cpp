@@ -77,10 +77,11 @@ static ss_ read_file(const ss_ &path)
 	return os.str();
 }
 
+// The listing's secret among them: never left half written
 static void write_file(const ss_ &path, const ss_ &data)
 {
-	std::ofstream f(path, std::ios::binary | std::ios::trunc);
-	f<<data;
+	if(!interface::fs::write_file(path, data))
+		log_w(MODULE, "Could not write %s", cs(path));
 }
 
 struct Listing {
@@ -846,8 +847,7 @@ struct Module: public interface::Module, public Interface
 		if(!c.is_object() || !c.get("starports").is_array())
 			return "starport.json: an object with \"starports\"";
 		interface::fs::create_directories(m_dir);
-		write_file(config_path()+".tmp", c.stringify());
-		if(!interface::fs::rename(config_path()+".tmp", config_path()))
+		if(!interface::fs::write_file(config_path(), c.stringify()))
 			return "could not write "+config_path();
 		read_config();
 		return "";

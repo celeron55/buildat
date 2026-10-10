@@ -1168,6 +1168,8 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t("core:module_unloaded"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:shutdown"));
+		// [USER_DIR_COPY] An operator's save_now: what shutdown saves
+		m_server->sub_event(this, Event::t("core:save"));
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("worldgen:section_generated"));
@@ -1210,6 +1212,7 @@ struct Module: public interface::Module, public luanti::Interface
 				interface::ModuleUnloadedEvent)
 		EVENT_VOIDN("core:unload", on_unload)
 		EVENT_VOIDN("core:shutdown", on_shutdown)
+		EVENT_VOIDN("core:save", on_shutdown)
 		EVENT_VOIDN("core:continue", on_continue)
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("worldgen:section_generated", on_section_generated,

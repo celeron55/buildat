@@ -1324,6 +1324,8 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:shutdown"));
+		// [USER_DIR_COPY] An operator's save_now: what shutdown saves
+		m_server->sub_event(this, Event::t("core:save"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("network:client_connected"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
@@ -1347,6 +1349,7 @@ struct Module: public interface::Module
 		EVENT_VOIDN("core:continue", on_start)
 		EVENT_VOIDN("core:unload", flush_all)
 		EVENT_VOIDN("core:shutdown", flush_all)
+		EVENT_VOIDN("core:save", flush_all)
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("network:client_connected", on_client_connected,
 				network::NewClient)

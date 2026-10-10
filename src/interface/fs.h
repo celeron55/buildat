@@ -37,8 +37,14 @@ namespace interface
 
 		// A file or a directory tree, gone; false when something stayed
 		bool remove_all(const ss_ &path);
-		// A file or a directory to another name on the same filesystem
+		// A file or a directory to another name on the same filesystem,
+		// over an existing file too, Windows included
 		bool rename(const ss_ &from, const ss_ &to);
+		// Whole or not at all ([USER_DIR_COPY]): written beside as
+		// <path>.tmp and renamed over path, so a crash or a copy of the
+		// directory never sees half of it. simplified: no fsync, so a power
+		// cut can still lose the last write; it never leaves a torn one
+		bool write_file(const ss_ &path, const ss_ &data);
 		// **Apps were games** (2026-10-02): <user>/games, where what an
 		// app keeps lived, to <user>/apps, once, when there is no apps yet.
 		// Both the server and the client do it as they start, so a save or
