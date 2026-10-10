@@ -411,12 +411,11 @@ namespace web {
 
 // A browser sends its request as soon as it has connected, and a native
 // client sends a packet type definition as soon as it has connected, so
-// either is known by its first bytes. A connection that is quiet this long
-// is taken for a native client that does not speak first (one older than
-// [WEB_CLIENT]).
-// simplified: a browser's speculative preconnect that stays quiet longer is
-// taken for such a client and gets game bytes; its request later fails.
-static const int64_t SNIFF_US = 200000;
+// either is known by its first bytes and only by them: a browser's
+// speculative preconnect is quiet until it has a request to send
+// ([WEB_SNIFF_PRECONNECT]). A quiet one goes at keepalive()'s silence
+// limit, and so does a native client older than [WEB_CLIENT], which never
+// speaks first.
 static const size_t MAX_REQUEST_BYTES = 8 * 1024;
 // An app's POST body ([STARPORT])
 static const size_t MAX_API_BODY = 64 * 1024;
@@ -534,12 +533,6 @@ struct Module: public interface::Module, public network::Interface
 	size_t m_next_peer_id = 1;
 	// When the listening socket is waited on again (on_listen_event)
 	int64_t m_accept_paused_until_us = 0;
-	// When the select whose readable sockets were all read last returned
-	// (the network thread sets it): what had arrived by then is in the
-	// peers' buffers. A sniff's deadline counts to this and not to the
-	// clock, so a stalled thread does not take a request it has not read
-	// yet for a quiet native client ([SELECT_BAD_FD])
-	int64_t m_read_until_us = 0;
 	int64_t m_peers_full_logged_us = 0;
 	// The game's answer to a peer that will not read; see SendPolicy in
 	// api.h. Buffer is what a game that never says anything gets, because
@@ -1767,10 +1760,12 @@ struct Module: public interface::Module, public network::Interface
 			// 2026-10-04): a client sends network:keepalive every few
 			// seconds when it has nothing else to say, so this is a
 			// crashed client, a dropped NAT mapping, or a slot held on
-			// purpose.
+			// purpose. A connection that has not said what it is goes
+			// the same way ([WEB_SNIFF_PRECONNECT]).
 			// simplified: an address that keeps sending is not stopped by
 			// this; the per-address cap bounds those
-			if(peer.game() && now - std::max(peer.accepted_us,
+			if((peer.game() || peer.kind == Peer::Kind::Sniff) &&
+					now - std::max(peer.accepted_us,
 					peer.last_recv_us) >= PEER_SILENCE_US){
 				log_i(MODULE, "Peer %zu from %s: nothing in %.0f s; "
 						"dropping it", peer.id,
@@ -1795,7 +1790,7 @@ struct Module: public interface::Module, public network::Interface
 			const Peer &peer = pair.second;
 			// The web's peers also have clocks that flush_peers() keeps
 			if(peer.out_pending() > 0 || peer.closing || peer.held() ||
-					peer.kind == Peer::Kind::Sniff || peer.kind == Peer::Kind::Http)
+					peer.kind == Peer::Kind::Http)
 				return true;
 		}
 		return false;
@@ -1807,9 +1802,6 @@ struct Module: public interface::Module, public network::Interface
 		for(auto &pair : m_peers){
 			Peer &peer = pair.second;
 			const int64_t now = interface::os::time_us();
-			if(peer.kind == Peer::Kind::Sniff &&
-					m_read_until_us - peer.accepted_us >= web::SNIFF_US)
-				become_native(peer);
 			flush_peer(peer);
 			if(peer.closing && (peer.out_pending() == 0 ||
 					(peer.close_by_us != 0 && now >= peer.close_by_us))){
@@ -2320,9 +2312,7 @@ void NetworkThread::run(interface::Thread *thread)
 		});
 
 		sv_<int> active_sockets;
-		bool ok = handler.check(pending ? 5000 : 500000, sockets,
-				active_sockets);
-		const int64_t selected_us = interface::os::time_us();
+		handler.check(pending ? 5000 : 500000, sockets, active_sockets);
 
 		if(pending){
 			network::access(m_module->m_server,
@@ -2335,9 +2325,6 @@ void NetworkThread::run(interface::Thread *thread)
 			for(int fd: active_sockets){
 				m_module->handle_active_socket(fd);
 			}
-			// A failed select read nothing
-			if(ok)
-				m_module->m_read_until_us = selected_us;
 		});
 	}
 }

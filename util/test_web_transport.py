@@ -64,7 +64,22 @@ assert s.recv(100) == b"", "oversized request not dropped"
 s.close()
 print("oversized request dropped")
 
+# A browser's preconnect is quiet until it has a request: a connection is
+# sorted by its first bytes, however late ([WEB_SNIFF_PRECONNECT])
+import time
 s = socket.create_connection((host, int(port)), timeout=5)
+time.sleep(1)
+s.sendall(b"GET /index.html HTTP/1.1\r\nHost: x\r\n\r\n")
+data = s.recv(100)
+assert data.startswith(b"HTTP/1.1 200"), data
+s.close()
+print("quiet then GET ok")
+
+# A native client speaks first, with a packet type definition
+s = socket.create_connection((host, int(port)), timeout=5)
+name = b"test:native"
+body = bytes([201, 0]) + len(name).to_bytes(4, "little") + name
+s.sendall(bytes([0, 0]) + len(body).to_bytes(4, "little") + body)
 data = s.recv(65536)
 assert first_type(data) == 0, data[:16]
 s.close()

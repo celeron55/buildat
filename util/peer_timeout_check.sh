@@ -49,7 +49,7 @@ PY
 [ "$raw" -ge 58 ] && [ "$raw" -le 66 ] || fail "the raw peer went after ${raw} s, not 60"
 sleep 2
 n0=$(grep -c "connected" "$t/srv.log")
-python3 -c "import socket,sys,time; s=socket.create_connection(('127.0.0.1',$P)); time.sleep(3)"
+python3 -c "import socket,sys,time; s=socket.create_connection(('127.0.0.1',$P)); s.sendall(b'\0'); time.sleep(3)"
 [ "$(grep -c "connected" "$t/srv.log")" -gt "$n0" ] ||
 	fail "nothing accepted after the drop: $(grep -i "select\|fd" "$t/srv.log" | tail -3)"
 grep -q "select()\|Ignoring fds" "$t/srv.log" &&
