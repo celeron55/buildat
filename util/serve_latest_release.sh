@@ -78,11 +78,29 @@
 # saves carry a schema version (the floorplanner) refuses a save that a
 # newer version wrote.
 #
+# **Compiled modules from a build host** ([SERVE_BUILDS]): with
+# BUILDS_URL, before each compile -- a new release's, a new Aitta
+# version's -- the host is asked (GET, release=<the release's directory
+# name>, app=<game>, and for an Aitta app aitta=<AITTA> and
+# version=<its version>) for the app's compiled modules: 200 is a tar of
+# them (regular files at its top, *.so and *.so.hash), unpacked into the
+# release's cache under apps/<app>/rccpp_build, and the compile that
+# follows finds them current; 202 is "building", asked again in
+# BUILDS_POLL seconds (30) or its Retry-After; 422 is a failed build, its
+# body the log, taken as a failed compile; 404 is none offered, and it is
+# compiled here, as it is after BUILDS_MAX_WAIT seconds (7200) without an
+# answer. The waiting keeps the servers watched; with nothing running yet,
+# each port's stand-in says what is building. The tar is code the servers
+# load: BUILDS_URL is https, or http to a loopback or private address.
+# A server given --unconfined builds into the shared cache and asks
+# nothing. simplified: a server option -C (its cache elsewhere) is not
+# followed; BUILDAT_CACHE_PATH is.
+#
 # Environment: AITTA (above), POLL_SECONDS (300), UPDATE_MAX_WAIT (1800),
 # GITHUB_REPO (celeron55/buildat),
 # GITHUB_TOKEN (optional; unauthenticated, GitHub allows 60 asks an hour),
 # RELEASES_URL (GitHub's list of the repo's releases; a check serves its
-# own).
+# own), BUILDS_URL, BUILDS_POLL and BUILDS_MAX_WAIT (above).
 # Needs bash, curl and tar; python3 for the stand-in, which is skipped
 # without it.
 set -u
@@ -145,6 +163,18 @@ max_wait=${UPDATE_MAX_WAIT:-1800}
 repo=${GITHUB_REPO:-celeron55/buildat}
 releases_url=${RELEASES_URL:-https://api.github.com/repos/$repo/releases?per_page=10}
 asset_re='linux-x86_64-web-precompiled\.tar\.gz'
+builds_poll=${BUILDS_POLL:-30}
+builds_max_wait=${BUILDS_MAX_WAIT:-7200}
+if [ -n "${BUILDS_URL:-}" ]; then
+	case $BUILDS_URL in
+	https://*|http://127.*|http://localhost[:/]*|http://\[::1\]*|http://10.*|\
+	http://192.168.*|http://172.1[6-9].*|http://172.2[0-9].*|http://172.3[01].*) ;;
+	*)
+		echo "BUILDS_URL is https, or http to a loopback or private address:" \
+			"what it answers is code the servers load" >&2
+		exit 2 ;;
+	esac
+fi
 
 mkdir -p "$base/versions"
 cd "$base" || exit 1
@@ -229,6 +259,11 @@ bad_release=""
 # A release compiled and waiting for a quiet moment: its name, when it
 # was ready, and when whoever was on was warned
 pending="" pending_at=0 warned_at=0
+# [SERVE_BUILDS] A new release being built, and by index the servers whose
+# app is compiled on it; an Aitta app's new version being built, by index;
+# the build host's asks running, by their result file
+building="" built=() app_building=()
+declare -A build_jobs=()
 # A restarting server's stand-in, by index: its pid, and the log line
 # the server's own "Listening at" is to come after
 standins=() standin_from=()
@@ -280,17 +315,21 @@ standin_start(){ # i [the page's text]
 
 standin_stop(){
 	local i=$1 pid=${standins[$1]:-}
+	standin_build[$i]=""
 	[ -z "$pid" ] && return
 	kill "$pid" 2>/dev/null
 	wait "$pid" 2>/dev/null
 	standins[$i]=""
 }
+# By index: the stand-in says a build is waited for, with nothing running
+standin_build=()
 
 # Gone once the server is listening, or has exited again: its log since
 # the stand-in came
 standin_check(){
 	local i=$1
-	[ -z "${standins[$i]:-}" ] || [ -n "${withdrawn[$i]:-}" ] && return
+	[ -z "${standins[$i]:-}" ] || [ -n "${withdrawn[$i]:-}" ] ||
+		[ -n "${standin_build[$i]:-}" ] && return
 	if tail -n +"$((standin_from[$i] + 1))" \
 			"$base/server-${ids[$i]}-${ports[$i]}.log" 2>/dev/null |
 			grep -q "Listening at\|Failed to bind" ||
@@ -386,6 +425,162 @@ compile(){
 		sed -u "s/^/[$id:$port compile] /" |
 		tee -a "$base/server-$id-$port.log"
 	return "${PIPESTATUS[0]}"
+}
+
+# [SERVE_BUILDS] Server i's app's modules on release $2 (Aitta version
+# $3) from the build host, into the file $4: its last line ready, failed
+# or local (compile here). Run in the background.
+builds_ask(){ # i release version result
+	local i=$1 rel=$2 ver=$3 out=$4 first said="" code wait
+	local what="${games[$i]}${ver:+ $ver} on $rel"
+	local dest="${BUILDAT_CACHE_PATH:-$base/versions/$rel/cache}/apps/${ids[$i]}/rccpp_build"
+	local q=(--data-urlencode "release=$rel" --data-urlencode "app=${games[$i]}")
+	[ -n "$ver" ] && q+=(--data-urlencode "aitta=$AITTA" --data-urlencode "version=$ver")
+	first=$(date +%s)
+	while true; do
+		code=$(curl -sS --max-time 600 --max-filesize 67108864 -o "$out.body" \
+			-D "$out.head" -w '%{http_code}' --get "${q[@]}" "$BUILDS_URL" 2>/dev/null)
+		wait=$builds_poll
+		case $code in
+		200)
+			if builds_unpack "$out.body" "$dest"; then
+				say "asked BUILDS_URL for $what: ready"
+				echo ready > "$out.tmp"
+			else
+				say "asked BUILDS_URL for $what: failed (not a tar of modules)"
+				echo failed > "$out.tmp"
+			fi
+			break ;;
+		202)
+			[ -z "$said" ] && say "asked BUILDS_URL for $what: building"
+			said=1
+			local ra
+			ra=$(grep -i '^retry-after:' "$out.head" | tr -dc '0-9' | head -c 5)
+			[ -n "$ra" ] && [ "$ra" -ge 1 ] && wait=$ra ;;
+		422)
+			say "asked BUILDS_URL for $what: failed"
+			head -c 65536 "$out.body" | sed "s/^/[build ${ids[$i]}] /"
+			echo failed > "$out.tmp"
+			break ;;
+		404)
+			say "asked BUILDS_URL for $what: none offered; compiling here"
+			echo local > "$out.tmp"
+			break ;;
+		esac
+		if [ $(($(date +%s) + wait - first)) -gt "$builds_max_wait" ]; then
+			say "asked BUILDS_URL for $what: no answer for $builds_max_wait s;" \
+				"compiling here"
+			echo local > "$out.tmp"
+			break
+		fi
+		sleep "$wait"
+	done
+	rm -f "$out.body" "$out.head"
+	mv "$out.tmp" "$out"
+}
+
+# A build host's tar into dir: only regular files at its top named as a
+# module or its hash, or nothing is taken
+builds_unpack(){ # tar dir
+	local names types tmp
+	names=$(tar -tf "$1" 2>/dev/null) || return 1
+	types=$(tar -tvf "$1" 2>/dev/null | cut -c1 | sort -u)
+	[ -z "$names" ] && return 0
+	[ "$types" = "-" ] || return 1
+	printf '%s\n' "$names" | grep -qvE '^[A-Za-z0-9._-]+\.so(\.hash)?$' && return 1
+	mkdir -p "$2" || return 1
+	tmp=$(mktemp -d "$2/.unpack.XXXXXX") || return 1
+	if ! tar -C "$tmp" --no-same-owner -xf "$1"; then
+		rm -rf "$tmp"
+		return 1
+	fi
+	mv -f "$tmp"/* "$2"/ && rm -rf "$tmp"
+}
+
+# Whether server i's app on release $2 (Aitta version $3) may be compiled
+# now: 0 yes (no build host, or its answer is in), 1 the build failed, 2
+# still waiting -- the ask started in the background the first time
+prepare(){ # i release version
+	local i=$1 f r
+	[ -z "${BUILDS_URL:-}" ] && return 0
+	printf '%s' "${opts[$i]}" | grep -qx -- --unconfined && return 0
+	f="$base/builds/${ids[$i]}~$2~${3:-release}"
+	if [ -f "$f" ]; then
+		r=$(tail -n 1 "$f")
+		rm -f "$f"
+		unset "build_jobs[$f]"
+		[ "$r" = failed ] && return 1
+		return 0
+	fi
+	if [ -z "${build_jobs[$f]:-}" ]; then
+		mkdir -p "$base/builds"
+		builds_ask "$i" "$2" "$3" "$f" &
+		build_jobs[$f]=$!
+	fi
+	return 2
+}
+
+# The release being built onto every server: each once its modules are in
+# (or at once without a build host); every one compiled makes it pending
+build_release(){
+	local i r v=${building#buildat-}
+	for i in "${!games[@]}"; do
+		[ -n "${built[$i]:-}" ] && continue
+		prepare "$i" "$building" ""
+		r=$?
+		if [ "$r" = 2 ]; then
+			[ -z "$current" ] && [ -z "${standins[$i]:-}" ] &&
+				standin_start "$i" "Building ${games[$i]} for ${v%%-*}; this page reloads itself." &&
+				standin_build[$i]=1
+			continue
+		fi
+		if [ "$r" = 0 ] && compile "$i" "$building"; then
+			built[$i]=1
+			continue
+		fi
+		say "${games[$i]} does not compile on $building; staying on" \
+			"${current:-nothing} until a newer release"
+		bad_release=$building
+		building="" built=()
+		for i in "${!games[@]}"; do
+			[ -n "${standin_build[$i]:-}" ] && standin_stop "$i"
+		done
+		return
+	done
+	[ "${#built[@]}" = "${#games[@]}" ] || return
+	say "$building is ready; updating once nobody is on, in" \
+		"$max_wait s at the latest"
+	pending=$building
+	building="" built=()
+	[ "$pending_at" = 0 ] && pending_at=$(date +%s)
+	# Nothing running yet: at once
+	[ -z "$current" ] && update
+}
+
+# Each Aitta app's new version being built: compiled on the running
+# release once its modules are in, then waiting as a release does.
+# simplified: a server that exits meanwhile starts on the newest installed,
+# this one, compiling it at its start
+build_aitta(){
+	local i d r
+	for i in "${!app_building[@]}"; do
+		d=${app_building[$i]}
+		[ -z "$d" ] && continue
+		prepare "$i" "$current" "${d##*/}"
+		r=$?
+		[ "$r" = 2 ] && continue
+		app_building[$i]=""
+		if [ "$r" = 0 ] && compile "$i" "$current"; then
+			say "${games[$i]} ${d##*/} is ready; updating once nobody is on," \
+				"in $max_wait s at the latest"
+			app_new[$i]=$d
+			[ "$pending_at" = 0 ] && pending_at=$(date +%s)
+		else
+			say "${games[$i]} ${d##*/} does not compile on $current; removed," \
+				"staying on ${running[$i]##*/}"
+			rm -rf "$d"
+		fi
+	done
 }
 
 # A line into a file in server i's app directory, which its sandboxed app
@@ -489,7 +684,10 @@ update_when_quiet(){
 }
 
 stop_all(){
-	local i
+	local i j
+	for j in "${build_jobs[@]}"; do
+		kill "$j" 2>/dev/null
+	done
 	# All told at once, so that they save and go together
 	for i in "${!games[@]}"; do
 		[ -n "${pids[$i]:-}" ] && kill -TERM "${pids[$i]}" 2>/dev/null
@@ -560,22 +758,15 @@ follow_aitta(){
 			continue
 		fi
 		[ -z "$d" ] || [ "$d" = "${running[$i]}" ] ||
-			[ "$d" = "${app_new[$i]:-}" ] && continue
+			[ "$d" = "${app_new[$i]:-}" ] ||
+			[ "$d" = "${app_building[$i]:-}" ] && continue
 		# Only a newer one: the newest listed is older when the running one
 		# was delisted, and the start runs the newest installed anyway
 		[ "$(printf '%s\n' "${d##*/}" "${running[$i]##*/}" | sort -V |
 			tail -n 1)" = "${d##*/}" ] || continue
-		if compile "$i" "$current"; then
-			say "${games[$i]} ${d##*/} is ready; updating once nobody is on," \
-				"in $max_wait s at the latest"
-			app_new[$i]=$d
-			[ "$pending_at" = 0 ] && pending_at=$(date +%s)
-		else
-			say "${games[$i]} ${d##*/} does not compile on $current; removed," \
-				"staying on ${running[$i]##*/}"
-			rm -rf "$d"
-		fi
+		app_building[$i]=$d
 	done
+	build_aitta
 }
 
 trap 'stop_all; say "stopped"; exit 0' INT TERM
@@ -599,30 +790,18 @@ while true; do
 		elif [ "$(basename "$url" .tar.gz)" != "$current" ]; then
 			name=$(basename "$url" .tar.gz)
 			[ "$name" != "$bad_release" ] && [ "$name" != "$pending" ] &&
+				[ "$name" != "$building" ] &&
 				name=$(install "$url") || name=""
 			if [ -n "$name" ]; then
 				say "new version: $name"
-				ok=1
-				for i in "${!games[@]}"; do
-					compile "$i" "$name" && continue
-					say "${games[$i]} does not compile on $name; staying on" \
-						"${current:-nothing} until a newer release"
-					bad_release=$name
-					ok=""
-					break
-				done
-				if [ -n "$ok" ]; then
-					say "$name is ready; updating once nobody is on, in" \
-						"$max_wait s at the latest"
-					pending=$name
-					[ "$pending_at" = 0 ] && pending_at=$(date +%s)
-					# Nothing running yet: at once
-					[ -z "$current" ] && update
-				fi
+				building=$name built=()
 			fi
 		fi
 		[ -n "${AITTA:-}" ] && [ -n "$current" ] && follow_aitta
 	fi
+	# [SERVE_BUILDS] What waits on the build host, every pass
+	[ -n "$building" ] && build_release
+	[ -n "${app_building[*]:-}" ] && build_aitta
 	update_when_quiet
 	for i in "${!games[@]}"; do
 		pid=${pids[$i]:-}
