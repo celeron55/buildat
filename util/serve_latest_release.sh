@@ -20,7 +20,14 @@
 # installs the app's newest listed release there and restarts onto it as
 # for a new engine release, with the same wait and warning; without it the
 # installed version stays. Not installed and no AITTA: the script says how
-# and stops.
+# and stops. **A delisted release** ([SERVE_DELISTED]): each check also
+# reads the Aitta's list of what it delisted, and why. The running
+# release delisted as malware or CSAM is stopped, a stand-in on its port
+# saying it was withdrawn by its Aitta, until a newer listed release is
+# installed and compiled. Delisted for another reason: said once in the
+# log, and it runs on. simplified: no rollback to an older listed version;
+# for one, stop this script, remove the withdrawn version's directory under
+# installed/, and start it again -- the newest one left runs.
 #
 # Each server is a game, a port and a user directory, which holds its
 # saves and accounts. Every version uses it (-D), and it can be one a
@@ -234,7 +241,7 @@ standins=() standin_from=()
 # sets under BUILDAT_SHARE_PORT=1), so neither waits for the other.
 # simplified: one connection at a time, each given up after 2 s
 STANDIN_PY='
-import socket, sys
+import html, socket, sys
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
@@ -245,6 +252,9 @@ body = (b"<!doctype html><meta charset=utf-8><meta http-equiv=refresh "
 	b"<title>Buildat</title><body style=\"background:#202020;color:#ddd;"
 	b"font:16px sans-serif;text-align:center;padding-top:30vh\">The "
 	b"server is restarting. This page reloads by itself.</body>")
+if len(sys.argv) > 2:
+	body = body.replace(b"The server is restarting. This page reloads by itself.",
+		html.escape(sys.argv[2]).encode())
 head = (b"HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/html; "
 	b"charset=utf-8\r\nRetry-After: 3\r\nCache-Control: no-store\r\n"
 	b"Content-Length: %d\r\nConnection: close\r\n\r\n" % len(body))
@@ -259,10 +269,10 @@ while True:
 	c.close()
 '
 
-standin_start(){
+standin_start(){ # i [the page's text]
 	local i=$1
 	command -v python3 >/dev/null || return
-	python3 -c "$STANDIN_PY" "${ports[$i]}" 2>/dev/null &
+	python3 -c "$STANDIN_PY" "${ports[$i]}" ${2:+"$2"} 2>/dev/null &
 	standins[$i]=$!
 	standin_from[$i]=$(wc -l < "$base/server-${ids[$i]}-${ports[$i]}.log" 2>/dev/null || echo 0)
 	say "a stand-in answers on port ${ports[$i]} until ${games[$i]} is back"
@@ -280,7 +290,7 @@ standin_stop(){
 # the stand-in came
 standin_check(){
 	local i=$1
-	[ -z "${standins[$i]:-}" ] && return
+	[ -z "${standins[$i]:-}" ] || [ -n "${withdrawn[$i]:-}" ] && return
 	if tail -n +"$((standin_from[$i] + 1))" \
 			"$base/server-${ids[$i]}-${ports[$i]}.log" 2>/dev/null |
 			grep -q "Listening at\|Failed to bind" ||
@@ -397,6 +407,8 @@ restart(){
 		app_note "$i" shutdown_reason "$why"
 	fi
 	stop "$i"
+	standin_stop "$i"
+	withdrawn[$i]=""
 	rm -f "${users[$i]}/apps/${ids[$i]}/shutdown_reason"
 	local log="$base/server-${ids[$i]}-${ports[$i]}.log" from n
 	from=$(wc -l < "$log" 2>/dev/null || echo 0)
@@ -488,14 +500,60 @@ stop_all(){
 	done
 }
 
+# [SERVE_DELISTED] Why server i's running release is delisted on the
+# Aitta, if it is: "" when listed or when the list cannot be read
+delisted_why(){
+	local u=$AITTA
+	case $u in http://*|https://*) ;; *) u=http://$u ;; esac
+	curl -s -m 20 "${u%/}/api/aitta/list" | python3 -c '
+import json, sys
+try:
+	d = json.load(sys.stdin)
+except ValueError:
+	sys.exit()
+for r in d.get("delisted", []):
+	if r.get("author") + "/" + r.get("name") == sys.argv[1] and \
+			r.get("version") == sys.argv[2]:
+		print(r.get("why") or "no reason given")
+' "${games[$1]}" "${running[$1]##*/}" 2>/dev/null | head -n 1
+}
+
+# Server i's running release withdrawn for malware or CSAM: stopped, a
+# stand-in saying so, not started again but by a newer release
+withdraw(){ # i why
+	local i=$1
+	say "${games[$i]} ${running[$i]##*/} on port ${ports[$i]} was delisted by" \
+		"$AITTA: $2; stopped until a newer release is listed"
+	withdrawn[$i]=${running[$i]##*/}
+	app_note "$i" shutdown_reason "withdrawn by its Aitta"
+	stop "$i"
+	standin_start "$i" "This app was withdrawn by the Aitta it came from ($2)."
+}
+
+# By index: the version withdrawn, and the delist already warned of
+withdrawn=() delist_said=()
+
 # [AITTA_SERVE] Each Aitta app's newest listed release, installed and
 # compiled on the running version; one that does not compile is removed
 # again (tried again at the next check)
 follow_aitta(){
-	local i d
+	local i d why
 	for i in "${!games[@]}"; do
 		case ${games[$i]} in */*) ;; *) continue ;; esac
 		[ -z "${running[$i]:-}" ] && continue
+		if [ -z "${withdrawn[$i]:-}" ] && command -v python3 >/dev/null; then
+			why=$(delisted_why "$i")
+			case $why in
+			"") ;;
+			malware*|csam*|"reported for malware"*|"reported for csam"*)
+				withdraw "$i" "$why" ;;
+			*)
+				[ "${delist_said[$i]:-}" = "${running[$i]##*/} $why" ] ||
+					say "warning: ${games[$i]} ${running[$i]##*/} is delisted" \
+						"by $AITTA: $why; it runs on"
+				delist_said[$i]="${running[$i]##*/} $why" ;;
+			esac
+		fi
 		if ! d=$("$base/versions/$current/bin/buildat" aitta install \
 				"$AITTA" "${games[$i]}" "${users[$i]}" 2>/dev/null); then
 			say "could not read ${games[$i]}'s releases from $AITTA"
@@ -503,6 +561,10 @@ follow_aitta(){
 		fi
 		[ -z "$d" ] || [ "$d" = "${running[$i]}" ] ||
 			[ "$d" = "${app_new[$i]:-}" ] && continue
+		# Only a newer one: the newest listed is older when the running one
+		# was delisted, and the start runs the newest installed anyway
+		[ "$(printf '%s\n' "${d##*/}" "${running[$i]##*/}" | sort -V |
+			tail -n 1)" = "${d##*/}" ] || continue
 		if compile "$i" "$current"; then
 			say "${games[$i]} ${d##*/} is ready; updating once nobody is on," \
 				"in $max_wait s at the latest"
@@ -565,6 +627,7 @@ while true; do
 	for i in "${!games[@]}"; do
 		pid=${pids[$i]:-}
 		if [ -n "$current" ] && [ "${broken[$i]:-}" != "$current" ] &&
+				[ -z "${withdrawn[$i]:-}" ] &&
 				{ [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; }; then
 			if [ -n "$pid" ]; then
 				wait "$pid" 2>/dev/null

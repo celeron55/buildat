@@ -2071,11 +2071,17 @@ struct Module: public interface::Module, public moderation::Host
 			if(!rel.is_object())
 				throw Exception("no release "+id);
 			rel.set("delisted", cmd == "delist");
+			// [SERVE_DELISTED] Why, as a moderator's: "<reason>: <text>",
+			// which a server following the Aitta reads in the list
+			const ss_ text = jstr(q, "text"), reason = jstr(q, "reason");
+			if(!reason.empty() && !REASONS.count(reason))
+				throw Exception("reason: one of the report reasons");
+			rel.set("delisted_why", cmd == "relist" ? ss_() : reason.empty() ?
+					text : reason+(text.empty() ? "" : ": "+text));
 			put("releases", id, rel);
 			// In the audit log the moderators read, and told to the owner,
 			// as a moderator's delist is: the admin does not undo one
 			// unseen ([SEC_RUN4_LEFTOVERS])
-			const ss_ text = jstr(q, "text");
 			moderation::access(m_server, [&](moderation::Interface *m){
 				m->audit(this, name, id, cmd, "admin", text, false);
 				m->statement(this, subject(id), cmd == "delist" ?

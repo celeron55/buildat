@@ -144,7 +144,11 @@ not change after. A published release is checked -- the signature by a
 bound key, the hash, the manifest, its author being the key's, the
 licences against the instance's list (free ones by default, in its
 settings), the size -- and listed, unreviewed. The admin can delist and relist, in the moderators'
-audit log and told to the owner as a moderator's delist is.
+audit log and told to the owner as a moderator's delist is; a delist
+({"cmd": "delist", "release": "<author>/<name>/<version>", "reason": ...,
+"text": ...}) takes one of the report reasons, and the list's "delisted"
+says it as its "why" ("malware: <text>"), which a server following the
+Aitta reads (util/serve_latest_release.sh).
 A package's later release is listed once it is the settings'
 "update_delay" seconds old (0 by default), so a release made with a
 stolen key can be reported and delisted before clients are offered it.
