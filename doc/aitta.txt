@@ -165,6 +165,11 @@ says "runs in the browser" on the pages; with the setting "play_url"
 (e.g. "https://play.buildat.org"; "" by default, no link) its box on /,
 and its package page under the heading and first under Install, link
 "Play in the browser" to <play_url>/#run=<author>/<name>.
+With "app_hosting_provider" (a URL; "" by default, no link) every app's
+box and package page link "Host at <domain>" after it, to
+<provider>?aitta=<this Aitta's address>&package=<author>/<name>, both
+URL-encoded, nofollow: the provider fetches the package and hosts it. An
+extension has none.
 
 The HTTP requests are limited per network (an IPv4 /24, an IPv6 /64):
 240 reads and 30 uploads a minute. The web client of an Aitta server is

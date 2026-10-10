@@ -1,8 +1,9 @@
 #!/bin/bash
 # tier: full
-# cost: ~30 s (2026-10-10)
+# cost: ~45 s (2026-10-10)
 # covers: apps/aitta/main/main.cpp src/client/main.cpp
-# [AITTA_SERVERLESS] [AITTA_LUA51]: a local Aitta with play_url set.
+# [AITTA_SERVERLESS] [AITTA_LUA51] [AITTA_HOSTING_LINK]: a local Aitta with
+# play_url set.
 #   1. A "serverless": true release with a goto in its client_lua, and one
 #      with a \x escape, are refused with the file and line.
 #   2. The goto in a release that is not serverless: listed, with a
@@ -12,6 +13,11 @@
 #   4. The list page: its box says "runs in the browser" and links
 #      <play_url>/#run=tester/sl, the other's neither; its package page
 #      links it under the heading and under Install.
+#   5. An extension published too: no "Host at" on any page;
+#      app_hosting_provider = https://host.example/new set, the apps'
+#      boxes and pages link "Host at host.example" with this Aitta's
+#      address and the package, URL-encoded, nofollow, after Play in the
+#      browser; the extension's do not.
 #
 #   util/aitta_serverless_check.sh
 set -u
@@ -95,10 +101,49 @@ import sys
 s = open(sys.argv[1]).read()
 link = 'href="https://play.example/#run=tester/sl">Play in the browser</a>'
 h, i = s.index("</h1>"), s.index("<h2>Install</h2>")
-assert s.find(link, h) < s.index('<div class="box">'), "not under the heading"
-assert s.find(link, i) < s.index("<details>", i), "not first under Install"
+assert 0 <= s.find(link, h) < s.index('<div class="box">'), "not under the heading"
+assert 0 <= s.find(link, i) < s.index("<details>", i), "not first under Install"
 EOF
 curl -s "http://127.0.0.1:$P/p/tester/other" | grep -q "Play in the browser" &&
 	fail "a link on the package with a server"
 echo "ok: the pages' links"
+
+# 5.
+mkdir -p "$t/ext"
+echo 'local M = {}; return M' > "$t/ext/init.lua"
+printf '{"author": "tester", "name": "ext", "version": "1.0.0", "kind": "extension",
+	"engine_api": 1, "audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
+	"description": "an extension"}\n' > "$t/ext/meta.json"
+zip=$("$b" aitta pack "$t/ext" "$t/key" "$t/out" 2>/dev/null) || fail "pack ext"
+"$b" aitta publish "$zip" 127.0.0.1:$P | grep -q "listed: tester/ext" || fail "publish ext"
+for u in / /p/tester/sl /p/tester/ext; do
+	curl -s "http://127.0.0.1:$P$u" | grep -q "Host at" && fail "a Host at link unset ($u)"
+done
+printf 'delay 8000\nquit\n' > "$t/set.cmds"
+BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
+	BUILDAT_AITTA_REQS='{"cmd":"set_settings","settings":{"app_hosting_provider":"https://host.example/new"}}' \
+	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 \
+	-s 127.0.0.1:$P -c @"$t/set.cmds" > "$t/set.log" 2>&1
+grep -aq 'ai: {"id":1,"ok":true' "$t/set.log" || fail "the setting"
+curl -s "http://127.0.0.1:$P/" > "$t/front"
+curl -s "http://127.0.0.1:$P/p/tester/other" > "$t/page"
+curl -s "http://127.0.0.1:$P/p/tester/ext" > "$t/epage"
+python3 - "$t/front" "$t/page" "$t/epage" "$P" <<'EOF' || fail "the Host at links ($t/front, $t/page)"
+import sys
+front, page, epage = (open(f).read() for f in sys.argv[1:4])
+link = ('<a href="https://host.example/new?aitta=http%%3A%%2F%%2F127.0.0.1%%3A%s'
+	'&amp;package=tester%%2F%s" rel="nofollow noopener">Host at host.example</a>')
+boxes = {b.split("</a>")[0].split(">")[-1]: b for b in front.split('<div class="box">')[1:]}
+for name in ("sl", "other"):
+	assert link % (sys.argv[4], name) in boxes["tester/" + name], name
+assert "Host at" not in boxes["tester/ext"]
+sl = boxes["tester/sl"]
+assert sl.index("Play in the browser") < sl.index("Host at"), "not after Play"
+h, i = page.index("</h1>"), page.index("<h2>Install</h2>")
+l = link % (sys.argv[4], "other")
+assert 0 <= page.find(l, h) < page.index('<div class="box">'), "not under the heading"
+assert 0 <= page.find(l, i) < page.index("<details>", i), "not first under Install"
+assert "Host at" not in epage
+EOF
+echo "ok: Host at, on the apps only, only when set"
 echo "PASS"

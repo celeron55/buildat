@@ -159,6 +159,10 @@ static json::Value default_settings()
 	// "Play in the browser" opens, <play_url>/#run=<author>/<name>; ""
 	// for no link
 	s.set("play_url", "");
+	// [AITTA_HOSTING_LINK] A hosting provider's address: each app's
+	// "Host at <domain>" link, <provider>?aitta=<this>&package=<a>/<n>;
+	// "" for none
+	s.set("app_hosting_provider", "");
 	// [AITTA_REPORTS] What a report weighs: anonymous, and with the
 	// client's report key (times its record of upheld and rejected ones).
 	// simplified: a Starport ID's standing is not asked; a key is a key
@@ -572,18 +576,57 @@ struct Module: public interface::Module, public moderation::Host
 		return b;
 	}
 
-	// play: the play page's link for a serverless release, "" for none
-	static ss_ play_link(const json::Value &rel, const ss_ &play)
+	static ss_ url_encode(const ss_ &v)
 	{
-		using interface::web_brand::html;
-		if(play.empty() || !rel.get("serverless").is_true())
-			return "";
-		return "<a href=\""+html(play)+"/#run="+html(jstr(rel, "author")+"/"+
-				jstr(rel, "name"))+"\">Play in the browser</a>";
+		static const char *hex = "0123456789ABCDEF";
+		ss_ o;
+		for(unsigned char c : v){
+			if(isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+				o += (char)c;
+			else
+				o += ss_("%")+hex[c >> 4]+hex[c & 15];
+		}
+		return o;
 	}
 
+	// [AITTA_SERVERLESS] "Play in the browser" for a serverless release,
+	// with the setting play_url; [AITTA_HOSTING_LINK] "Host at <domain>"
+	// for an app, with app_hosting_provider; "" for neither. self: this
+	// Aitta's address, as the package page's commands give it
+	ss_ outside_links(const json::Value &rel, const ss_ &self)
+	{
+		using interface::web_brand::html;
+		const ss_ pkg = jstr(rel, "author")+"/"+jstr(rel, "name");
+		auto get = [&](const char *k){
+			ss_ v = setting(k).is_string() ? setting(k).as_string() : "";
+			while(!v.empty() && v.back() == '/')
+				v.pop_back();
+			return v;
+		};
+		sv_<ss_> out;
+		const ss_ play = get("play_url");
+		if(!play.empty() && rel.get("serverless").is_true())
+			out.push_back("<a href=\""+html(play)+"/#run="+html(pkg)+"\">"
+					"Play in the browser</a>");
+		const ss_ host = get("app_hosting_provider");
+		const size_t at = host.find("://");
+		if(at != ss_::npos && jstr(rel, "kind") != "extension"){
+			const ss_ domain = host.substr(at + 3, host.find_first_of("/:?#",
+					at + 3) - (at + 3));
+			out.push_back("<a href=\""+html(host+(host.find('?') == ss_::npos ?
+					"?" : "&")+"aitta="+url_encode(self)+"&package="+
+					url_encode(pkg))+"\" rel=\"nofollow noopener\">Host at "+
+					html(domain)+"</a>");
+		}
+		ss_ o;
+		for(const ss_ &x : out)
+			o += (o.empty() ? "" : " ")+x;
+		return o;
+	}
+
+	// links: outside_links()'s, by the files' links
 	static ss_ release_box(const json::Value &rel, bool latest,
-			const ss_ &play = "")
+			const ss_ &links = "")
 	{
 		using interface::web_brand::html;
 		const ss_ pkg = jstr(rel, "author")+"/"+jstr(rel, "name");
@@ -606,8 +649,8 @@ struct Module: public interface::Module, public moderation::Host
 				html(jstr(rel, "license_media"))+"</span><br>"
 				"<a href=\"/api/aitta/archive/"+html(sha)+".zip\">.zip</a> "
 				"<a href=\"/api/aitta/archive/"+html(sha)+".sig\">.sig</a>";
-		if(!play_link(rel, play).empty())
-			b += " "+play_link(rel, play);
+		if(!links.empty())
+			b += " "+links;
 		// Its discussion at its home Hearth, as the client's "Discuss"
 		const ss_ home = jstr(rel, "home_hearth");
 		if(home.compare(0, 8, "https://") == 0 ||
@@ -657,10 +700,11 @@ struct Module: public interface::Module, public moderation::Host
 		};
 		using interface::web_brand::html;
 		ss_ c;
-		ss_ play = setting("play_url").is_string() ?
-				setting("play_url").as_string() : "";
-		while(!play.empty() && play.back() == '/')
-			play.pop_back();
+		// simplified: behind a proxy without public_url set, the address
+		// may read as the proxy's inside one; the setting is the fix
+		ss_ self = jstr(m_settings, "public_url");
+		if(self.empty())
+			self = "http://"+r.host;
 		if(r.path.compare(0, 3, "/p/") == 0){
 			const ss_ want = r.path.substr(3);
 			// [AITTA_INSTALL_HELP] The newest, the rest folded
@@ -681,18 +725,12 @@ struct Module: public interface::Module, public moderation::Host
 				c += "</details>\n";
 			}
 			// [AITTA_SERVE] The commands for a dedicated server, filled in
-			// simplified: behind a proxy without public_url set, the
-			// address may read as the proxy's inside one; the setting is
-			// the fix
-			ss_ self = jstr(m_settings, "public_url");
-			if(self.empty())
-				self = "http://"+r.host;
 			ss_ vers;
 			for(const json::Value *rel : mine)
 				vers += "bin/buildat aitta install "+self+" "+want+"@"+
 						jstr(*rel, "version")+" <user dir>\n";
 			const ss_ name = jstr(*mine[0], "name");
-			const ss_ pl = play_link(*mine[0], play);
+			const ss_ pl = outside_links(*mine[0], self);
 			c += "<h2>Install</h2>\n"+(pl.empty() ? "" : "<p>"+pl+"</p>")+
 					"<details><summary>On the client</summary>"
 					"<ol><li>In the Buildat client, open <b>Apps from Aitta"
@@ -744,7 +782,7 @@ struct Module: public interface::Module, public moderation::Host
 		std::set<ss_> seen;
 		for(const json::Value &rel : rels)
 			if(seen.insert(pkg(rel)).second)
-				c += release_box(rel, true, play);
+				c += release_box(rel, true, outside_links(rel, self));
 		ss_ body = "<h1>Aitta</h1><p>A registry of Buildat apps and "
 				"extensions: their authors sign each release with their own "
 				"key, and Aitta lists it. A release is unreviewed until this "
