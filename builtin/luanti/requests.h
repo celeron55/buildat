@@ -69,6 +69,7 @@
 		}
 		if(flat.empty())
 			return;
+		PlayerCause cause(m_by_player);
 		interface::MutexScope ms(m_lua_mutex);
 		lua_State *L = m_lua;
 		int base = lua_gettop(L);

@@ -39,6 +39,31 @@ namespace storage
 		// format, an importer's source, Luanti's core.get_worldpath().
 		// Modules use the object store.
 		virtual ss_ path() = 0;
+		// [SAVE_LIMIT] What it takes on disk now: the database's live pages
+		// and every other file in its directory (the -wal, a Luanti mod's own
+		// files). simplified: the file keeps its high water mark, which the
+		// next writes refill before it grows; a VACUUM gives it back, needing
+		// the space twice while it runs.
+		virtual int64_t bytes() = 0;
+	};
+
+	// [SAVE_LIMIT] What the app has written, by the directories its box lets
+	// it write: <user>/apps/<id> (its saves and the rest), <user>/shared/<id>
+	// (vanilla's games) and <cache>/apps/<id>
+	struct Usage
+	{
+		int64_t saves = 0, shared = 0, cache = 0;
+		int64_t total() const { return saves + shared + cache; }
+	};
+
+	// storage:over_limit, every 10 s while the app is over the host's
+	// max_disk_mb, until it is under 90% of it again
+	struct OverLimit: public interface::Event::Private
+	{
+		Usage usage;
+		int64_t limit = 0;
+		OverLimit(const Usage &usage, int64_t limit):
+			usage(usage), limit(limit){}
 	};
 
 	struct SaveInfo
@@ -63,6 +88,15 @@ namespace storage
 		// false if it has a path separator, a leading dot, or anything else
 		// that would make it something other than one directory name
 		virtual bool valid_name(const ss_ &name) = 0;
+		// [SAVE_LIMIT] As last measured: the saves every 10 s, the rest each
+		// minute and on remeasure() (after an install)
+		virtual Usage usage() = 0;
+		virtual int64_t used_bytes() = 0;
+		// The host's max_disk_mb, 0 for none
+		virtual int64_t limit_bytes() = 0;
+		// The limit less what is used; INT64_MAX with no limit
+		virtual int64_t room_bytes() = 0;
+		virtual void remeasure() = 0;
 	};
 
 	inline bool access(interface::Server *server,

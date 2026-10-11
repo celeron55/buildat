@@ -54,7 +54,7 @@ grep -aq "wants 40 voxels of world" "$t/d2.log" &&
 	! grep -a "wants [0-9]* voxels of world" "$t/d2.log" | grep -vq "wants \(0\|40\) voxels" ||
 	fail "the range ($(grep -a "voxels of world" "$t/d2.log" | head -3))"
 echo "ok: the range capped at 40 voxels"
-[ "$(grep -ac "is at max_world_mb: nothing new is generated" "$t/d2.log")" = 1 ] ||
+[ "$(grep -ac "is at max_disk_mb: nothing new is generated" "$t/d2.log")" = 1 ] ||
 	fail "the world cap ($t/d2.log)"
 echo "ok: generation stopped at 1 MB of save"
 

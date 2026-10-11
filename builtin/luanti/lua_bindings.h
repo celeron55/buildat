@@ -258,7 +258,9 @@
 			vol.setVoxelAt(x, y, z, interface::VoxelInstance(words[i]));
 		voxelworld::access(self->m_server, self->m_scene,
 				[&](voxelworld::Instance *world){
+			world->set_cause(self->m_by_player ? "a player" : "");
 			world->set_volume(vol, true);
+			world->set_cause("");
 		});
 		return 0;
 	}

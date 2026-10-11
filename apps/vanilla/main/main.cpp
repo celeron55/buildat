@@ -21,6 +21,7 @@
 #include "replicate/api.h"
 #include "client_file/api.h"
 #include "storage/api.h"
+#include "voxelworld/api.h"
 #include "accounts/api.h"
 #include "starport_announce/api.h"
 #include <cstdlib>
@@ -134,6 +135,8 @@ struct Module: public interface::Module
 	bool m_public = false;
 	// The world running, or starting
 	ss_ m_world_name;
+	// The running world's save, for what it takes on disk ([SAVE_LIMIT])
+	storage::Save *m_world_save = nullptr;
 	// [VANILLA_PUBLIC] 5: a switch to another world, which is a restart
 	// when this reaches zero: the time left, in seconds, or below 0 for none
 	float m_restart_in = -1;
@@ -167,6 +170,7 @@ struct Module: public interface::Module
 				"network:packet_received/main:place"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:get_saves"));
+		m_server->sub_event(this, Event::t("storage:over_limit"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/launch:untrusted"));
 		m_server->sub_event(this, Event::t(
@@ -233,6 +237,7 @@ struct Module: public interface::Module
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:get_saves", on_get_saves,
 				network::Packet)
+		EVENT_TYPEN("storage:over_limit", on_over_limit, storage::OverLimit)
 		EVENT_TYPEN("network:packet_received/launch:untrusted",
 				on_launch_untrusted, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:save_info", on_save_info,
@@ -1366,6 +1371,25 @@ struct Module: public interface::Module
 	{
 		return m_public ? "VPS / Raspberry Pi" : "Desktop";
 	}
+	// [SAVE_LIMIT] What the world gives up when the app is over the host's
+	// limit, in world.mt beside the preset and not part of it
+	static sv_<GameSetting> limit_settings()
+	{
+		GameSetting a;
+		a.name = "buildat_forget_unchanged";
+		a.label = "Forget land nobody changed when over the disk limit";
+		a.type = "bool";
+		a.dflt = "true";
+		GameSetting b;
+		b.name = "buildat_forget_builds_days";
+		b.label = "Also forget builds nobody has visited in this many days "
+				"(0: never; 90 is a fair choice)";
+		b.type = "int";
+		b.dflt = "0";
+		b.min = "0";
+		b.max = "36500";
+		return {a, b};
+	}
 	sv_<GameSetting> perf_settings() const
 	{
 		const sv_<ss_> &dflt = perf_presets().at(default_preset());
@@ -1394,6 +1418,8 @@ struct Module: public interface::Module
 			s.max = ranges[i][1];
 			out.push_back(s);
 		}
+		for(const GameSetting &s : limit_settings())
+			out.push_back(s);
 		return out;
 	}
 	// The preset's values with the edits over them, and the preset named
@@ -1457,6 +1483,61 @@ struct Module: public interface::Module
 		if(!values.empty())
 			send_game_settings(packet, values[0], "", true);
 	}
+	// [SAVE_LIMIT] Empty with room for need more bytes, else why not
+	ss_ no_room(int64_t need = 0)
+	{
+		int64_t used = 0, limit = 0, room = 0;
+		storage::access(m_server, [&](storage::Interface *i){
+			used = i->used_bytes();
+			limit = i->limit_bytes();
+			room = i->room_bytes();
+		});
+		if(limit <= 0 || room > need)
+			return "";
+		char buf[100];
+		snprintf(buf, sizeof buf, "Not enough room: %.1f of %.1f MB used",
+				used / 1e6, limit / 1e6);
+		return buf;
+	}
+
+	// storage:over_limit: the downloads in the cache first, then the running
+	// world forgets land by its world.mt's settings, down to 90% of the
+	// limit less everything else the app has written. A world not running
+	// is not trimmed: deleting a world or a game is the admin's way out.
+	void on_over_limit(const storage::OverLimit &event)
+	{
+		const ss_ cache = m_server->get_config().get<ss_>("cache_path")+
+				"/luanti/contentdb";
+		if(m_contentdb_jobs.empty()){
+			for(const auto &n : interface::fs::list_directory(cache)){
+				const ss_ &f = n.name;
+				if(!n.is_directory && f.size() > 4 &&
+						f.compare(f.size() - 4, 4, ".zip") == 0)
+					interface::fs::remove_all(cache+"/"+f);
+			}
+		}
+		if(!m_scene || !m_world_save)
+			return;
+		const std::map<ss_, ss_> mt =
+				read_world_mt(m_world_save->path()+"/luanti/world.mt");
+		auto it = mt.find("buildat_forget_unchanged");
+		if(it != mt.end() && it->second == "false")
+			return;
+		it = mt.find("buildat_forget_builds_days");
+		const int days = it == mt.end() ? 0 : atoi(it->second.c_str());
+		const int64_t own = m_world_save->bytes();
+		const int64_t target = event.limit / 10 * 9 -
+				(event.usage.total() - own);
+		size_t n = 0;
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+			n = w->trim_to(std::max<int64_t>(target, 0), days > 0 ? days : -1);
+		});
+		log_i(MODULE, "trimmed: %zu sections of %s forgotten, %lld kB of "
+				"%lld kB written", n, cs(m_world_name),
+				(long long)(event.usage.total() / 1024),
+				(long long)(event.limit / 1024));
+	}
+
 	// main:set_perf_settings {name, key, value, ...}
 	void on_set_perf_settings(const network::Packet &packet)
 	{
@@ -1478,8 +1559,17 @@ struct Module: public interface::Module
 				refused += (refused.empty() ? "" : ", ")+values[i];
 		}
 		const ss_ mt_path = path+"/luanti/world.mt";
-		if(refused.empty())
+		std::map<ss_, ss_> own;
+		for(const GameSetting &s : limit_settings()){
+			if(edits.count(s.name)){
+				own[s.name] = edits[s.name];
+				edits.erase(s.name);
+			}
+		}
+		if(refused.empty()){
 			write_world_mt(mt_path, perf_resolve(read_world_mt(mt_path), edits));
+			write_world_mt(mt_path, own);
+		}
 		const bool running = m_world_name == values[0] && m_starting;
 		send_game_settings(packet, values[0], !refused.empty() ?
 				"Not saved, out of range: "+refused : running ?
@@ -1922,6 +2012,9 @@ struct Module: public interface::Module
 		ss_ name; // INSTALL: the game's directory; PICTURE: the client file
 		ss_ zip_path, into_dir;
 		ss_ result, error;
+		// INSTALL: what it may take ([SAVE_LIMIT]), and what to say past it
+		int64_t room = INT64_MAX;
+		ss_ no_room;
 		std::atomic<uint64_t> got{0}, total{0};
 		// INSTALL: 0 downloading, 1 unpacking, 2 installing -- the screen
 		// says which, since the unpack of a big game is seconds of nothing
@@ -1950,15 +2043,30 @@ struct Module: public interface::Module
 					const ss_ url = newest_release_url(rel);
 					if(url.empty())
 						throw Exception("no release to download");
-					interface::http_download(url, zip_path,
-							[&](uint64_t g, uint64_t t){
-						got = g; total = t; return true;
-					});
+					bool too_big = false;
+					try {
+						interface::http_download(url, zip_path,
+								[&](uint64_t g, uint64_t t){
+							got = g; total = t;
+							too_big = (int64_t)std::max(g, t) > room;
+							return !too_big;
+						});
+					} catch(std::exception &e){
+						interface::fs::remove_all(zip_path);
+						throw Exception(too_big ? no_room : ss_(e.what()));
+					}
 					phase = 1;
 					interface::fs::remove_all(into_dir);
 					interface::zip_extract(zip_path, into_dir);
 					phase = 2;
+					const int64_t took = (int64_t)interface::fs::
+							directory_tree_size(into_dir) +
+							(int64_t)interface::fs::file_size(zip_path);
 					interface::fs::remove_all(zip_path);
+					if(took > room){
+						interface::fs::remove_all(into_dir);
+						throw Exception(no_room);
+					}
 				}
 			} catch(std::exception &e){
 				error = e.what();
@@ -2057,7 +2165,14 @@ struct Module: public interface::Module
 		}
 		if(values.size() < 2)
 			return;
-		const ss_ author = values[0], name = values[1];
+		contentdb_install(packet.sender, values[0], values[1]);
+	}
+
+	void contentdb_install(network::PeerInfo::Id peer, const ss_ &author,
+			const ss_ &name)
+	{
+		// Who asked, as the packet's handler had it
+		const network::Packet packet(peer, "", "");
 		// A name is a directory: letters, digits, _ and - only
 		for(const ss_ *v : {&author, &name}){
 			for(char c : *v){
@@ -2073,11 +2188,20 @@ struct Module: public interface::Module
 					where(to)+" yourself if you mean to replace it.");
 			return;
 		}
+		const ss_ full = no_room();
+		if(!full.empty()){
+			menu_error(packet.sender, full+". Delete a world or a game first.");
+			return;
+		}
 		Job *job = new Job();
 		job->kind = Job::INSTALL;
 		job->peer = packet.sender;
 		job->q = author+"/"+name;
 		job->name = name;
+		storage::access(m_server, [&](storage::Interface *i){
+			job->room = i->room_bytes();
+		});
+		job->no_room = no_room(INT64_MAX);
 		const ss_ cache = m_server->get_config().get<ss_>("cache_path")+
 				"/luanti/contentdb";
 		interface::fs::create_directories(cache);
@@ -2124,6 +2248,9 @@ struct Module: public interface::Module
 				continue;
 			}
 			if(!job->error.empty()){
+				if(job->kind == Job::INSTALL)
+					log_i(MODULE, "Installing %s failed: %s", cs(job->name),
+							cs(job->error));
 				menu_error(job->peer, (job->kind == Job::LIST ?
 						"ContentDB: " : "Installing "+job->name+" failed: ")+
 						job->error);
@@ -2173,6 +2300,9 @@ struct Module: public interface::Module
 			// to a Hearth ([OVERLAY_DISCUSS])
 			std::ofstream(to+"/.buildat_source") << "contentdb:" << job->q;
 			log_i(MODULE, "Installed game %s from ContentDB", cs(job->name));
+			storage::access(m_server, [&](storage::Interface *i){
+				i->remeasure();
+			});
 			menu_message(job->peer, job->name+" installed from ContentDB");
 		}
 	}
@@ -2791,6 +2921,11 @@ struct Module: public interface::Module
 					"save can have");
 			return;
 		}
+		const ss_ full = no_room();
+		if(!full.empty()){
+			menu_error(packet.sender, full+". Delete a world or a game first.");
+			return;
+		}
 		storage::Save *save = nullptr;
 		storage::access(m_server, [&](storage::Interface *istorage){
 			save = istorage->create(save_name);
@@ -2897,6 +3032,11 @@ struct Module: public interface::Module
 				menu_error(packet.sender, "A seed is one line of text");
 				return;
 			}
+		}
+		const ss_ full = no_room();
+		if(!full.empty()){
+			menu_error(packet.sender, full+". Delete a world or a game first.");
+			return;
 		}
 		storage::Save *save = nullptr;
 		storage::access(m_server, [&](storage::Interface *istorage){
@@ -3128,6 +3268,14 @@ struct Module: public interface::Module
 			start_job(job);
 			log_i(MODULE, "contentdb: fetching once, for the log");
 		}
+		// BUILDAT_CONTENTDB_INSTALL_ONCE=author/name: an install at start,
+		// its outcome logged ([SAVE_LIMIT]'s check)
+		if(const char *once = getenv("BUILDAT_CONTENTDB_INSTALL_ONCE")){
+			const ss_ q = once;
+			const size_t slash = q.find('/');
+			if(slash != ss_::npos)
+				contentdb_install(0, q.substr(0, slash), q.substr(slash + 1));
+		}
 		// The game was games/luanti_launcher until 2026-09-20 and its saves
 		// lived under that name: moved to this one on the first start
 		// that finds the new directory absent, so nobody loses a world
@@ -3338,6 +3486,7 @@ struct Module: public interface::Module
 				}
 			}
 		});
+		m_world_save = save;
 		if(!save){
 			ss_ message = "Could not open or create the save "+world_name;
 			m_starting = false;

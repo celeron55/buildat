@@ -75,6 +75,32 @@ namespace voxelworld
 			scene(scene), section_p(section_p){}
 	};
 
+	// [SAVE_LIMIT] Sections forget_sections() took out of the save: what a
+	// game keeps beside them (the luanti module's node metadata) goes too
+	struct SectionsForgotten: public interface::Event::Private
+	{
+		SceneReference scene;
+		sv_<pv::Vector3DInt16> sections;
+
+		SectionsForgotten(SceneReference scene,
+				const sv_<pv::Vector3DInt16> &sections):
+			scene(scene), sections(sections){}
+	};
+
+	// [SAVE_LIMIT] A saved section's index row (section_stats()). altered:
+	// changed by a player after the generator's merge landed; a row from
+	// before the index is altered. day: days since 1970 it was last loaded
+	// for a player, -1 unknown. bytes: its chunks as last written.
+	struct SectionStat
+	{
+		pv::Vector3DInt16 p;
+		bool generated = true;
+		bool altered = true;
+		bool loaded = false;
+		int64_t bytes = 0;
+		int32_t day = -1;
+	};
+
 	struct NodeVolumeUpdated: public interface::Event::Private
 	{
 		SceneReference scene;
@@ -182,6 +208,28 @@ namespace voxelworld
 		// world's. A game that calls this checkpoints itself; one that does
 		// not has the world saved every save_interval_s by voxelworld.
 		virtual void save(std::function<void()> also) = 0;
+
+		// [SAVE_LIMIT] Whose doing the writes from now on are: a player's
+		// name while a game handles that player's action (a dig, a place, a
+		// command), "" after. A section a player changes is altered, and
+		// trim_to() does not take it. The luanti module sets it for a
+		// Luanti game; a C++ game sets it around its own handling.
+		// simplified: what the action sets going (a fire spreading) is the
+		// world's own once the call returns.
+		virtual void set_cause(const ss_ &player_name) = 0;
+		// Every saved section's index row, loaded ones as they are now
+		virtual sv_<SectionStat> section_stats() = 0;
+		// Their chunks and rows deleted in one batch, a loaded one skipped;
+		// a forgotten section is generated again when it is next visited.
+		// Sends voxelworld:sections_forgotten. Returns how many went.
+		virtual size_t forget_sections(const sv_<pv::Vector3DInt16> &list) = 0;
+		// Forgets unaltered sections with no altered one around them, least
+		// recently visited first, until the save is at target_bytes;
+		// altered_days >= 0 then also takes altered ones nobody has visited
+		// in that many days, oldest first. Returns how many went.
+		// simplified: the unit is a section, which is a Luanti game's
+		// mapchunk; a generator with a larger one would want its own.
+		virtual size_t trim_to(int64_t target_bytes, int altered_days = -1) = 0;
 
 		// Voxel types the save holds that this game does not register. They
 		// are kept, drawn with the definitions the save carries and tinted,

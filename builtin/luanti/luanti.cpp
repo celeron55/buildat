@@ -1088,7 +1088,22 @@ struct Module: public interface::Module, public luanti::Interface
 	// serialize-and-replicate per node placed. core.get_node reads through
 	// it, because Luanti's semantics are that a write is visible immediately
 	// and the callbacks in the same step will look.
-	struct PendingNode { int32_t x, y, z; uint32_t word; };
+	// by_player: written while a player's action was handled ([SAVE_LIMIT]),
+	// which makes its section altered and keeps it out of a trim
+	struct PendingNode { int32_t x, y, z; uint32_t word; bool by_player; };
+	bool m_by_player = false;
+	// Around what the engine calls for a player -- a dig, a place, a use, a
+	// chat command, a formspec's fields: what the game writes meanwhile is
+	// that player's. simplified: what it sets going (a fire, TNT's chain)
+	// is the world's own once the call returns.
+	struct PlayerCause {
+		bool &flag, was;
+		PlayerCause(bool &flag, bool on = true): flag(flag), was(flag)
+		{
+			flag = was || on;
+		}
+		~PlayerCause(){ flag = was; }
+	};
 	std::unordered_map<int64_t, PendingNode> m_node_writes;
 
 	// Luanti steps at dedicated_server_step (0.09 s), buildat ticks at 30 Hz;
@@ -1175,6 +1190,7 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t("worldgen:section_generated"));
 		m_server->sub_event(this, Event::t("voxelworld:section_loaded"));
 		m_server->sub_event(this, Event::t("voxelworld:section_unloaded"));
+		m_server->sub_event(this, Event::t("voxelworld:sections_forgotten"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_texmods"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
@@ -1221,6 +1237,8 @@ struct Module: public interface::Module, public luanti::Interface
 				voxelworld::SectionLoaded)
 		EVENT_TYPEN("voxelworld:section_unloaded", on_section_unloaded,
 				voxelworld::SectionUnloaded)
+		EVENT_TYPEN("voxelworld:sections_forgotten", on_sections_forgotten,
+				voxelworld::SectionsForgotten)
 		EVENT_TYPEN("network:packet_received/luanti:get_texmods",
 				on_get_texmods, network::Packet)
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
@@ -1635,6 +1653,33 @@ struct Module: public interface::Module, public luanti::Interface
 		if(!m_game_running || event.scene != m_scene)
 			return;
 		save_section_meta(event.section_p);
+	}
+
+	// [SAVE_LIMIT] A trimmed section's metadata goes with it
+	void on_sections_forgotten(const voxelworld::SectionsForgotten &event)
+	{
+		if(!m_store || event.scene != m_scene)
+			return;
+		m_store->batch([&](){
+			for(const pv::Vector3DInt16 &p : event.sections){
+				const ss_ key = section_meta_key(p);
+				m_store->remove(key);
+				m_meta_written.erase(key);
+			}
+		});
+		// Made again, they are new terrain: a mod's on_generated runs over
+		// their mapchunks again as it did the first time
+		using luanti_mapgen::chunk_index;
+		const int sx = m_section_size.getX(), sy = m_section_size.getY(),
+				sz = m_section_size.getZ();
+		for(const pv::Vector3DInt16 &p : event.sections){
+			const int x0 = p.getX() * sx, y0 = p.getY() * sy,
+					z0 = p.getZ() * sz;
+			for(int cz = chunk_index(z0); cz <= chunk_index(z0 + sz - 1); cz++)
+			for(int cy = chunk_index(y0); cy <= chunk_index(y0 + sy - 1); cy++)
+			for(int cx = chunk_index(x0); cx <= chunk_index(x0 + sx - 1); cx++)
+				m_chunks_run.erase(chunk_key(cx, cy, cz));
+		}
 	}
 
 	// Everything the Lua half holds, grouped by the section each position
@@ -2140,9 +2185,11 @@ struct Module: public interface::Module, public luanti::Interface
 			}
 			for(const auto &pair : m_node_writes){
 				const PendingNode &node = pair.second;
+				world->set_cause(node.by_player ? "a player" : "");
 				world->set_voxel(pv::Vector3DInt32(node.x, node.y, node.z),
 						interface::VoxelInstance(node.word), true);
 			}
+			world->set_cause("");
 			t_set = interface::os::time_us();
 		});
 		m_node_writes.clear();
@@ -2200,6 +2247,10 @@ struct Module: public interface::Module, public luanti::Interface
 		node.y = y;
 		node.z = z;
 		node.word = word;
+		node.by_player = m_by_player;
+		auto it = m_node_writes.find(pos_key(x, y, z));
+		if(it != m_node_writes.end() && it->second.by_player)
+			node.by_player = true;
 		m_node_writes[pos_key(x, y, z)] = node;
 		note_gen_write(pv::Region(pv::Vector3DInt32(x, y, z),
 				pv::Vector3DInt32(x, y, z)));
@@ -2808,7 +2859,7 @@ struct Module: public interface::Module, public luanti::Interface
 
 	// The chunks run_on_generated_chunk() has been over in this run. Not
 	// saved: a chunk is complete when its last section is generated, and
-	// that happens once.
+	// that happens once, or once more after a trim forgot it.
 	std::set<int64_t> m_chunks_run;
 	// The chunks a generated section is in that are still missing one,
 	// so their on_generated has not run: emerge_area() does not call a
@@ -2853,7 +2904,11 @@ struct Module: public interface::Module, public luanti::Interface
 		const int x0 = section_p.getX() * sx, y0 = section_p.getY() * sy,
 				z0 = section_p.getZ() * sz;
 		const bool asked = m_completion_sections.erase(section_key(section_p));
-		const bool may_ask = !asked && near_a_point(section_p);
+		// Forceloaded too: Luanti emerges a forceloaded block's whole
+		// mapchunk, and with nobody near the sections of it outside the
+		// forceload were left to unload before it completed
+		const bool may_ask = !asked && (near_a_point(section_p) ||
+				m_forceloaded.count(section_key(section_p)));
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			for(int cz = chunk_index(z0); cz <= chunk_index(z0 + sz - 1); cz++)
 			for(int cy = chunk_index(y0); cy <= chunk_index(y0 + sy - 1); cy++)
@@ -3807,6 +3862,7 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		if(player_name.empty())
 			return false;
+		PlayerCause cause(m_by_player);
 		return node_action("return core.__drop_wielded(\""+
 				lua_quoted(player_name)+"\", "+itos(count)+")");
 	}
@@ -3815,6 +3871,7 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		if(player_name.empty())
 			return false;
+		PlayerCause cause(m_by_player);
 		return node_action("return core.__punch_object(\""+
 				lua_quoted(player_name)+"\", "+itos(id)+")");
 	}
@@ -3835,6 +3892,7 @@ struct Module: public interface::Module, public luanti::Interface
 		static const size_t MAX_CHAT = 500;
 		ss_ line = message.size() > MAX_CHAT ?
 				message.substr(0, MAX_CHAT) : message;
+		PlayerCause cause(m_by_player);
 		node_action("core.__chat_message(\""+lua_quoted(player_name)+
 				"\", \""+lua_quoted(line)+"\") return true");
 	}
@@ -3847,6 +3905,7 @@ struct Module: public interface::Module, public luanti::Interface
 		// players.
 		ss_ digger = player_name.empty() ? ss_("nil") :
 				"core.get_player_by_name(\""+lua_quoted(player_name)+"\")";
+		PlayerCause cause(m_by_player, !player_name.empty());
 		return node_action("return core.__dig_node({x = "+itos(x)+
 				", y = "+itos(y)+", z = "+itos(z)+"}, "+digger+")");
 	}
@@ -3855,6 +3914,7 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		ss_ puncher = player_name.empty() ? ss_("nil") :
 				"core.get_player_by_name(\""+lua_quoted(player_name)+"\")";
+		PlayerCause cause(m_by_player, !player_name.empty());
 		return node_action("return core.__punch_node({x = "+itos(x)+
 				", y = "+itos(y)+", z = "+itos(z)+"}, "+puncher+")");
 	}
@@ -3865,6 +3925,7 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		if(player_name.empty())
 			return false;
+		PlayerCause cause(m_by_player);
 		return node_action("return core.__use_node(\""+
 				lua_quoted(player_name)+"\", "
 				"{x = "+itos(ux)+", y = "+itos(uy)+", z = "+itos(uz)+"}, "

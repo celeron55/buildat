@@ -2373,6 +2373,14 @@ health_page = function(back)
 	head("Disk")
 	page_text(w, tostring(h.disk_path or "?") .. ": " .. bytes(h.disk_used) ..
 			" used, " .. bytes(h.disk_free) .. " free")
+	if h.disk_saves then
+		local limit = tonumber(h.disk_limit) or 0
+		local used = h.disk_saves + h.disk_shared + h.disk_cache
+		page_text(w, bytes(used) .. (limit > 0 and " of " .. bytes(limit) or
+				" written, no limit") .. ": saves " .. bytes(h.disk_saves) ..
+				", games and shared " .. bytes(h.disk_shared) .. ", cache " ..
+				bytes(h.disk_cache), limit > 0 and used >= limit and ERROR or nil)
+	end
 
 	head("Running")
 	local run = type(h.running) == "table" and h.running or {}

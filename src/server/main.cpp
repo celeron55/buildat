@@ -132,10 +132,13 @@ int main(int argc, char *argv[])
 			take = 2;
 		} else if((ss_(argv[i]) == "--max-players" ||
 				ss_(argv[i]) == "--max-view-range" ||
+				ss_(argv[i]) == "--max-disk-mb" ||
 				ss_(argv[i]) == "--max-world-mb") && i + 1 < argc){
 			// [SERVER_CAPS]: --max-players N -> max_players, a number
 			ss_ key = ss_(argv[i]).substr(2);
 			std::replace(key.begin(), key.end(), '-', '_');
+			if(key == "max_world_mb")
+				key = "max_disk_mb";
 			const ss_ v = argv[i + 1];
 			if(v.empty() || v.size() > 12 ||
 					v.find_first_not_of("0123456789") != ss_::npos){
@@ -203,8 +206,10 @@ int main(int argc, char *argv[])
 			"                       NAME (also BUILDAT_LAN_ANNOUNCE)\n"
 			"  --max-players N      Players at once; admins join over it\n"
 			"  --max-view-range N   The world sent to a client, in voxels\n"
-			"  --max-world-mb N     A world's save size past which nothing\n"
-			"                       new is generated\n"
+			"  --max-disk-mb N      What the app may write (its saves,\n"
+			"                       games, cache); over it a world forgets\n"
+			"                       land nobody changed, and at it nothing\n"
+			"                       new is generated (--max-world-mb)\n"
 			"  --save-interval S    Seconds between writes of a running\n"
 			"                       world (5.3; 0 only at shutdown)\n"
 			"  --unconfined         Run without the sandbox (also\n"

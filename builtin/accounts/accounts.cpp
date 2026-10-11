@@ -2622,6 +2622,14 @@ struct Module: public interface::Module, public Interface
 		v.set("disk_path", app_user);
 		v.set("disk_used", (int64_t)interface::fs::directory_tree_size(app_user));
 		v.set("disk_free", interface::os::free_bytes(app_user));
+		// [SAVE_LIMIT] What the host lets the app write, and the parts
+		storage::access(m_server, [&](storage::Interface *i){
+			const storage::Usage u = i->usage();
+			v.set("disk_limit", i->limit_bytes());
+			v.set("disk_saves", u.saves);
+			v.set("disk_shared", u.shared);
+			v.set("disk_cache", u.cache);
+		});
 		v.set("box", c.get<ss_>("box"));
 		if(with_box)
 			v.set("box_check", box_check());

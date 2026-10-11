@@ -196,6 +196,9 @@ struct CSave: public Save
 		// writer overlap at all
 		exec("PRAGMA journal_mode=WAL");
 		exec("PRAGMA synchronous=NORMAL");
+		// The WAL otherwise keeps its largest size until the save closes,
+		// and that is room max_disk_mb counts and a trim cannot give back
+		exec("PRAGMA journal_size_limit=1048576");
 		exec("PRAGMA foreign_keys=ON");
 		exec(SCHEMA);
 	}
@@ -235,6 +238,26 @@ struct CSave: public Save
 	}
 
 	ss_ path(){ return m_path; }
+
+	int64_t pragma(const char *sql)
+	{
+		Stmt st(m_db, m_stmts, sql);
+		return st.step() ? atoll(st.column_text(0).c_str()) : 0;
+	}
+
+	int64_t bytes()
+	{
+		int64_t live = 0;
+		if(m_db){
+			interface::MutexScope ms(m_mutex);
+			live = (pragma("PRAGMA page_count") -
+					pragma("PRAGMA freelist_count")) * pragma("PRAGMA page_size");
+		}
+		if(m_path.empty())
+			return live;
+		return live + (int64_t)interface::fs::directory_tree_size(m_path) -
+				(int64_t)interface::fs::file_size(m_path+"/save.sqlite");
+	}
 };
 
 bool CStore::get(const ss_ &key, ss_ &value_out)
@@ -407,13 +430,110 @@ struct Module: public interface::Module, public Interface
 	void init()
 	{
 		m_server->sub_event(this, Event::t("core:start"));
+		m_server->sub_event(this, Event::t("core:tick"));
 		check_round_trip();
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
 		EVENT_VOIDN("core:start", on_start)
+		EVENT_VOIDN("core:tick", on_tick)
 	}
+
+	// [SAVE_LIMIT] The host's cap on what the app writes ([SERVER_CAPS]'s
+	// max_disk_mb, also --max-world-mb), and what it has written
+	Usage m_usage;
+	int64_t m_saves_measured_us = 0, m_rest_measured_us = 0;
+	bool m_over = false;
+
+	ss_ app_user_path()
+	{
+		return m_server->get_config().get<ss_>("user_path")+"/apps/"+
+				m_server->get_app_id();
+	}
+	// The box sets cache_path to the app's own cache; unconfined it is the
+	// shared one, and the app's part of it is where the box would put it
+	ss_ app_cache_path()
+	{
+		const ss_ c = m_server->get_config().get<ss_>("cache_path");
+		const ss_ own = "/apps/"+m_server->get_app_id();
+		if(c.size() >= own.size() &&
+				c.compare(c.size() - own.size(), own.size(), own) == 0)
+			return c;
+		return c+own;
+	}
+
+	void measure(bool all)
+	{
+		const int64_t now = interface::os::time_us();
+		// The app's user directory with each open save at its live bytes
+		int64_t saves = (int64_t)interface::fs::directory_tree_size(
+				app_user_path());
+		set_<ss_> seen; // A save opened twice is one directory
+		for(const up_<CSave> &save : m_open){
+			if(!seen.insert(save->m_path).second)
+				continue;
+			saves -= (int64_t)interface::fs::directory_tree_size(save->m_path);
+			saves += save->bytes();
+		}
+		m_usage.saves = std::max<int64_t>(saves, 0);
+		m_saves_measured_us = now;
+		if(all || now - m_rest_measured_us >= 60000000){
+			m_usage.shared = (int64_t)interface::fs::directory_tree_size(
+					m_server->get_config().get<ss_>("user_path")+"/shared/"+
+					m_server->get_app_id());
+			m_usage.cache = (int64_t)interface::fs::directory_tree_size(
+					app_cache_path());
+			m_rest_measured_us = now;
+		}
+	}
+
+	void on_tick()
+	{
+		const int64_t now = interface::os::time_us();
+		if(now - m_saves_measured_us < 10000000)
+			return;
+		measure(false);
+		const int64_t used = m_usage.total(), limit = limit_bytes();
+		log_v(MODULE, "saves: %lld kB, shared %lld kB, cache %lld kB, of %lld kB",
+				(long long)(m_usage.saves / 1024),
+				(long long)(m_usage.shared / 1024),
+				(long long)(m_usage.cache / 1024), (long long)(limit / 1024));
+		if(limit <= 0)
+			return;
+		if(used >= limit){
+			if(!m_over)
+				log_w(MODULE, "%lld kB written, over the limit of %lld kB",
+						(long long)(used / 1024), (long long)(limit / 1024));
+			m_over = true;
+		} else if(m_over && used < limit / 10 * 9){
+			log_i(MODULE, "%lld kB written, under 90%% of the limit again",
+					(long long)(used / 1024));
+			m_over = false;
+		}
+		if(m_over)
+			m_server->emit_event("storage:over_limit",
+					new OverLimit(m_usage, limit));
+	}
+
+	Usage usage()
+	{
+		if(m_saves_measured_us == 0)
+			measure(true);
+		return m_usage;
+	}
+	int64_t used_bytes(){ return usage().total(); }
+	int64_t limit_bytes()
+	{
+		return atoll(m_server->get_config().get<ss_>("max_disk_mb").c_str()) *
+				1000000;
+	}
+	int64_t room_bytes()
+	{
+		const int64_t limit = limit_bytes();
+		return limit > 0 ? limit - used_bytes() : INT64_MAX;
+	}
+	void remeasure(){ measure(true); }
 
 	void on_start()
 	{
@@ -468,6 +588,14 @@ struct Module: public interface::Module, public Interface
 		}
 		if(s->get("d", v))
 			throw Exception("storage check: a failed batch was not rolled back");
+		// [SAVE_LIMIT] Live bytes: up with a large value, down with its delete
+		const int64_t b0 = save.bytes();
+		s->set("big", ss_(200000, 'x'));
+		const int64_t b1 = save.bytes();
+		s->remove("big");
+		if(!(b1 >= b0 + 150000 && save.bytes() < b1 - 150000))
+			throw Exception("storage check: live bytes "+itos(b0)+", "+
+					itos(b1)+", "+itos(save.bytes()));
 		// Nested: one transaction, the inner's failure the outer's rollback
 		s->batch([&](){
 			s->set("e", "five");
